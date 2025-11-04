@@ -203,10 +203,7 @@ const AddCompany = () => {
             <h1 className="text-3xl font-bold tracking-tight">Company Management</h1>
             <p className="text-muted-foreground">Manage companies and their information</p>
           </div>
-          <Button onClick={openAddDialog}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add Company
-          </Button>
+          
         </div>
 
         <Card>

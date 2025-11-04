@@ -1,196 +1,141 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+// src/context/UserContext.tsx
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  ReactNode,
+} from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useCompany } from "@/context/CompanyContext";
 
-// User profile structure from your database
+export type UserRole = "admin" | "auditor" | "client";
+
 export interface UserProfile {
   id: string;
   email: string;
   name: string;
-  role: 'admin' | 'auditor' | 'client';
-  assignedLocations?: string[];
-  assignedCompanies?: string[]; // NEW
+  role: UserRole;
+  assigned_locations?: string[];
+  assigned_companies?: string[];
 }
 
-// Defines what the context will provide
 interface UserContextType {
   currentUser: UserProfile | null;
   isAuthenticated: boolean;
-  users: UserProfile[];
   loading: boolean;
-  login: (email: string, pass: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  createUser: (userData: Omit<UserProfile, 'id'>, pass: string) => Promise<void>;
-  updateUser: (profileData: UserProfile) => Promise<void>;
-  deleteUser: (userId: string) => Promise<void>;
   hasPermission: (permission: string) => boolean;
+  refreshProfile: () => Promise<void>;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
-export const UserProvider = ({ children }: { children: React.ReactNode }) => {
+export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const fetchAllUsers = useCallback(async (userRole: string | undefined) => {
-    if (userRole !== 'admin') {
-      setUsers([]);
-      return;
-    }
-    try {
-      const { data, error } = await supabase.from('user_profiles').select('id, email, name, role, assigned_locations');
-      if (error) throw error;
-
-      const mappedUsers = data.map(user => ({
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        assignedLocations: user.assigned_locations,
-      }));
-
-      setUsers(mappedUsers as UserProfile[]);
-
-    } catch (error) {
-      console.error("Error fetching all users:", error);
-    }
-  }, []);
+  // 🔴 important: we will clear this on logout
+  const { setSelectedCompanyId } = useCompany();
 
   useEffect(() => {
-    const fetchSession = async () => {
-      setLoading(true);
-      const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
+    const init = async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
 
-      if (user) {
-        const { data: profile } = await supabase
-          .from("user_profiles")
-          .select("id, email, name, role, assigned_locations")
-          .eq("id", user.id)
-          .single();
-        
-        if (profile) {
-          const mappedProfile: UserProfile = {
-            id: profile.id,
-            email: profile.email,
-            name: profile.name,
-            role: profile.role,
-            assignedLocations: profile.assigned_locations,
-          };
-          
-          setCurrentUser(mappedProfile);
-          setIsAuthenticated(true);
-          await fetchAllUsers(mappedProfile.role);
-        } else {
-          await supabase.auth.signOut();
-          setCurrentUser(null);
+        if (!session?.user) {
           setIsAuthenticated(false);
-        }
-      } else {
-        setCurrentUser(null);
-        setIsAuthenticated(false);
-      }
-      setLoading(false);
-    };
-
-    fetchSession();
-
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (event) => {
-        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
-          fetchSession();
-        }
-        if (event === 'SIGNED_OUT') {
           setCurrentUser(null);
-          setIsAuthenticated(false);
-          setUsers([]);
           setLoading(false);
+          return;
         }
+
+        const { data: profile, error } = await supabase
+          .from("user_profiles")
+          .select("id, email, name, role, assigned_locations, assigned_companies")
+          .eq("id", session.user.id)
+          .single();
+
+        if (error || !profile) {
+          setIsAuthenticated(false);
+          setCurrentUser(null);
+        } else {
+          setCurrentUser(profile as UserProfile);
+          setIsAuthenticated(true);
+        }
+      } catch (err) {
+        console.error("Error initializing auth:", err);
+        setIsAuthenticated(false);
+        setCurrentUser(null);
+      } finally {
+        setLoading(false);
       }
-    );
-
-    return () => {
-      authListener.subscription.unsubscribe();
     };
-  }, [fetchAllUsers]);
 
-  const login = async (email: string, pass: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
+    init();
+  }, []);
+
+  const login = async (email: string, password: string) => {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
     if (error) throw error;
+    if (!data.user) throw new Error("No user received from Supabase.");
+
+    const { data: profile, error: profileError } = await supabase
+      .from("user_profiles")
+      .select("id, email, name, role, assigned_locations, assigned_companies")
+      .eq("id", data.user.id)
+      .single();
+
+    if (profileError || !profile) throw profileError || new Error("Profile not found");
+
+    setCurrentUser(profile as UserProfile);
+    setIsAuthenticated(true);
+
+    // ✅ Optional: also clear previous company on fresh login
+    //    (ensures a *new* selection each time user logs in)
+    setSelectedCompanyId(null);
   };
 
   const logout = async () => {
     await supabase.auth.signOut();
-  };
+    setCurrentUser(null);
+    setIsAuthenticated(false);
 
-  const createUser = async (userData: Omit<UserProfile, 'id'>, pass: string) => {
-    // Use the admin_create_user function instead of auth.signUp
-    // This prevents auto-login of the newly created user
-    const { data, error } = await supabase.rpc('admin_create_user', {
-      p_email: userData.email,
-      p_password: pass,
-      p_name: userData.name,
-      p_role: userData.role,
-      p_assigned_locations: userData.assignedLocations || []
-    });
-
-    if (error) throw new Error(error.message);
-    if (!data) throw new Error("User not created successfully.");
-    
-    // Refresh the users list
-    await fetchAllUsers(currentUser?.role);
-  };
-
-  const updateUser = async (profileData: UserProfile) => {
-    // Use the admin_update_user function
-    const { error } = await supabase.rpc('admin_update_user', {
-      p_user_id: profileData.id,
-      p_email: profileData.email,
-      p_name: profileData.name,
-      p_role: profileData.role,
-      p_assigned_locations: profileData.assignedLocations || []
-    });
-
-    if (error) throw new Error(error.message);
-
-    // Update local state
-    setUsers(prevUsers => 
-      prevUsers.map(user => 
-        user.id === profileData.id ? profileData : user
-      )
-    );
-
-    if (currentUser?.id === profileData.id) {
-      setCurrentUser(profileData);
-    }
-  };
-
-  const deleteUser = async (userId: string) => {
-    console.log('Attempting to delete user:', userId);
-    
-    // Use the admin_delete_user function
-    const { error } = await supabase.rpc('admin_delete_user', {
-      p_user_id: userId
-    });
-
-    console.log('RPC response - error:', error);
-
-    if (error) {
-      console.error('Delete user error:', error);
-      throw new Error(error.message);
-    }
-
-    // Update local state after successful deletion
-    setUsers(prevUsers => prevUsers.filter(user => user.id !== userId));
+    // ✅ CRITICAL: force company reselection after EVERY logout
+    setSelectedCompanyId(null);
   };
 
   const hasPermission = (permission: string) => {
     if (!currentUser) return false;
+
     switch (permission) {
-      case 'manageUsers': return currentUser.role === 'admin';
-      case 'conductAudits': return ['admin', 'auditor'].includes(currentUser.role);
-      default: return false;
+      case "manageUsers":
+        return currentUser.role === "admin";
+      case "conductAudits":
+        return currentUser.role === "admin" || currentUser.role === "auditor";
+      default:
+        return true;
+    }
+  };
+
+  const refreshProfile = async () => {
+    if (!currentUser) return;
+    const { data: profile, error } = await supabase
+      .from("user_profiles")
+      .select("id, email, name, role, assigned_locations, assigned_companies")
+      .eq("id", currentUser.id)
+      .single();
+
+    if (!error && profile) {
+      setCurrentUser(profile as UserProfile);
     }
   };
 
@@ -199,14 +144,11 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
       value={{
         currentUser,
         isAuthenticated,
-        users,
         loading,
         login,
         logout,
-        createUser,
-        updateUser,
-        deleteUser,
         hasPermission,
+        refreshProfile,
       }}
     >
       {children}
@@ -215,9 +157,7 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
 };
 
 export const useUser = () => {
-  const context = useContext(UserContext);
-  if (context === undefined) {
-    throw new Error("useUser must be used within a UserProvider");
-  }
-  return context;
+  const ctx = useContext(UserContext);
+  if (!ctx) throw new Error("useUser must be used within a UserProvider");
+  return ctx;
 };

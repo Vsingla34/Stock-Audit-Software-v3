@@ -1,6 +1,11 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+// src/App.tsx
+import React from "react";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useUser } from "@/context/UserContext";
+import { useUserAccess } from "./hooks/useUserAccess";
+import { useCompany } from "@/context/CompanyContext";
 import { FullPageLoader } from "@/components/fullPageLoader/FullPageLoader";
+
 import Index from "./pages/Index";
 import Scanner from "./pages/Scanner";
 import Search from "./pages/Search";
@@ -15,8 +20,6 @@ import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 import Questionnaire from "./pages/Questionnaire";
 import AddCompany from "./pages/AddCompany";
-import { useUserAccess } from "./hooks/useUserAccess";
-import { CompanyProvider } from "@/context/CompanyContext";
 import CompanySelection from "./pages/CompanySelection";
 
 const ProtectedRoute = ({
@@ -28,6 +31,8 @@ const ProtectedRoute = ({
 }) => {
   const { isAuthenticated } = useUser();
   const { hasPermission } = useUserAccess();
+  const { selectedCompanyId } = useCompany();
+  const location = useLocation();
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
@@ -35,6 +40,13 @@ const ProtectedRoute = ({
 
   if (requiredPermission && !hasPermission(requiredPermission)) {
     return <Navigate to="/" replace />;
+  }
+
+  const isCompanySelectionRoute = location.pathname === "/company-selection";
+  const isAddCompanyRoute = location.pathname === "/add-company";
+
+  if (!selectedCompanyId && !isCompanySelectionRoute && !isAddCompanyRoute) {
+    return <Navigate to="/company-selection" replace />;
   }
 
   return <>{children}</>;
@@ -49,19 +61,32 @@ function App() {
 
   return (
     <Routes>
+      {/* LOGIN: logged-in user goes to company selection */}
       <Route
         path="/login"
-        element={isAuthenticated ? <Navigate to="/" replace /> : <Login />}
+        element={
+          isAuthenticated ? (
+            <Navigate to="/company-selection" replace />
+          ) : (
+            <Login />
+          )
+        }
       />
+
+      {/* DASHBOARD */}
       <Route
         path="/"
         element={
           <ProtectedRoute>
-            <Index /> 
+            <Index />
           </ProtectedRoute>
         }
       />
+
+      {/* COMPANY SELECTION PAGE */}
       <Route path="/company-selection" element={<CompanySelection />} />
+
+      {/* OTHER ROUTES (same as before, wrapped in ProtectedRoute) */}
       <Route
         path="/scanner"
         element={
@@ -86,19 +111,18 @@ function App() {
           </ProtectedRoute>
         }
       />
-      
       <Route
         path="/reports"
         element={
           <ProtectedRoute>
-            <Reports/>
+            <Reports />
           </ProtectedRoute>
         }
       />
       <Route
         path="/analytics"
         element={
-          <ProtectedRoute requiredPermission="manageUsers" >
+          <ProtectedRoute requiredPermission="manageUsers">
             <Analytics />
           </ProtectedRoute>
         }
@@ -112,7 +136,7 @@ function App() {
         }
       />
       <Route
-        path="/admin"
+        path="/admin-overview"
         element={
           <ProtectedRoute requiredPermission="manageUsers">
             <AdminOverview />
@@ -128,10 +152,10 @@ function App() {
         }
       />
       <Route
-        path="/profile"
+        path="/add-company"
         element={
-          <ProtectedRoute>
-            <Profile />
+          <ProtectedRoute requiredPermission="manageUsers">
+            <AddCompany />
           </ProtectedRoute>
         }
       />
@@ -139,18 +163,19 @@ function App() {
         path="/questionnaire"
         element={
           <ProtectedRoute>
-            <Questionnaire/>
+            <Questionnaire />
           </ProtectedRoute>
         }
       />
       <Route
-        path="/add-company"
-        element={ 
-          <ProtectedRoute requiredPermission="manageUsers">
-            <AddCompany />
+        path="/profile"
+        element={
+          <ProtectedRoute>
+            <Profile />
           </ProtectedRoute>
         }
       />
+
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

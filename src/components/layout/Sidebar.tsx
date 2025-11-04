@@ -55,9 +55,9 @@ export function Sidebar({
     nav.push({ name: "Locations", href: "/locations", icon: Building });
     if (userRole === "admin") {
       nav.push(
-        { name: "Admin Overview", href: "/admin", icon: Settings },
+        { name: "Admin Overview", href: "/admin-overview", icon: Settings },
         { name: "User Management", href: "/users", icon: Users },
-        { name: "Add Company", href: "/add-company", icon: Building2 }
+        { name: "Company", href: "/add-company", icon: Building2 }
       );
     }
     nav.push({ name: "My Profile", href: "/profile", icon: UserCircle });
