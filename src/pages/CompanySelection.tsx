@@ -1,5 +1,5 @@
 // src/pages/CompanySelection.tsx
-import { useState, useEffect } from "react";
+import { useState, useEffect, FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Card,
@@ -13,7 +13,14 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Building2, ArrowRight, PlusCircle, X } from "lucide-react";
+import {
+  Building2,
+  ArrowRight,
+  PlusCircle,
+  Users,
+  MapPin,
+  X,
+} from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useCompany } from "@/context/CompanyContext";
@@ -25,28 +32,44 @@ interface Company {
   is_active: boolean;
 }
 
+interface Location {
+  id: string;
+  name: string;
+  companyId?: string | null;
+}
+
 const CompanySelection = () => {
   const navigate = useNavigate();
   const { setSelectedCompanyId } = useCompany();
 
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [locations, setLocations] = useState<Location[]>([]);
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState<string>("");
-  const [assignedCompanies, setAssignedCompanies] = useState<string[]>([]);
 
-  // form state (admin only)
-  const [showForm, setShowForm] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newAddress, setNewAddress] = useState("");
-  const [newIsActive, setNewIsActive] = useState(true);
-  const [creating, setCreating] = useState(false);
+  const [showCompanyForm, setShowCompanyForm] = useState(false);
+  const [newCompanyName, setNewCompanyName] = useState("");
+  const [newCompanyAddress, setNewCompanyAddress] = useState("");
+  const [newCompanyActive, setNewCompanyActive] = useState(true);
+  const [creatingCompany, setCreatingCompany] = useState(false);
+
+  const [showUserForm, setShowUserForm] = useState(false);
+  const [userName, setUserName] = useState("");
+  const [userEmail, setUserEmail] = useState("");
+  const [userPassword, setUserPassword] = useState("");
+  const [userRoleForForm, setUserRoleForForm] = useState<
+    "admin" | "auditor" | "client"
+  >("auditor");
+  const [assignedCompanyIds, setAssignedCompanyIds] = useState<string[]>([]);
+  const [assignedLocationIds, setAssignedLocationIds] = useState<string[]>([]);
+  const [creatingUser, setCreatingUser] = useState(false);
 
   useEffect(() => {
-    fetchUserAndCompanies();
+    fetchInitialData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const fetchUserAndCompanies = async () => {
+  const fetchInitialData = async () => {
     try {
       const {
         data: { user },
@@ -57,7 +80,6 @@ const CompanySelection = () => {
         return;
       }
 
-      // Fetch user profile
       const { data: profile, error: profileError } = await supabase
         .from("user_profiles")
         .select("role, assigned_companies")
@@ -67,27 +89,40 @@ const CompanySelection = () => {
       if (profileError) throw profileError;
 
       setUserRole(profile.role);
-      setAssignedCompanies(profile.assigned_companies || []);
 
-      // Base query: active companies
-      let query = supabase
+      let companiesQuery = supabase
         .from("companies")
         .select("*")
         .eq("is_active", true)
         .order("name");
 
-      // Non-admin: restrict to assigned companies
       if (profile.role !== "admin" && profile.assigned_companies?.length > 0) {
-        query = query.in("id", profile.assigned_companies);
+        companiesQuery = companiesQuery.in("id", profile.assigned_companies);
       }
 
-      const { data: companiesData, error: companiesError } = await query;
-
+      const { data: companiesData, error: companiesError } =
+        await companiesQuery;
       if (companiesError) throw companiesError;
-
       setCompanies(companiesData || []);
+
+      const { data: locationsData, error: locationsError } = await supabase
+        .from("locations")
+        .select("id, name, company_id")
+        .eq("active", true)
+        .order("name");
+
+      if (locationsError) throw locationsError;
+
+      const mappedLocations: Location[] =
+        locationsData?.map((loc) => ({
+          id: loc.id,
+          name: loc.name,
+          companyId: loc.company_id ?? null,
+        })) || [];
+
+      setLocations(mappedLocations);
     } catch (error: any) {
-      console.error("Error fetching companies:", error);
+      console.error("Error loading company selection data:", error);
       toast.error("Failed to load companies");
     } finally {
       setLoading(false);
@@ -96,25 +131,31 @@ const CompanySelection = () => {
 
   const handleCompanySelect = (companyId: string) => {
     setSelectedCompanyId(companyId);
+    try {
+      localStorage.setItem("selectedCompanyId", companyId);
+      sessionStorage.setItem("selectedCompanyId", companyId);
+    } catch {
+      /* ignore */
+    }
     navigate("/");
   };
 
-  const handleCreateCompany = async (e: React.FormEvent) => {
+  // ---------- Company creation ----------
+  const handleCreateCompany = async (e: FormEvent) => {
     e.preventDefault();
-    if (!newName.trim()) {
+    if (!newCompanyName.trim()) {
       toast.error("Company name is required");
       return;
     }
 
     try {
-      setCreating(true);
-
+      setCreatingCompany(true);
       const { data, error } = await supabase
         .from("companies")
         .insert({
-          name: newName.trim(),
-          address: newAddress.trim() || null,
-          is_active: newIsActive,
+          name: newCompanyName.trim(),
+          address: newCompanyAddress.trim() || null,
+          is_active: newCompanyActive,
         })
         .select("*")
         .single();
@@ -122,39 +163,124 @@ const CompanySelection = () => {
       if (error) throw error;
 
       setCompanies((prev) => [...prev, data as Company]);
-      setNewName("");
-      setNewAddress("");
-      setNewIsActive(true);
-      setShowForm(false);
+      setNewCompanyName("");
+      setNewCompanyAddress("");
+      setNewCompanyActive(true);
+      setShowCompanyForm(false);
 
       toast.success("Company created successfully");
     } catch (error: any) {
       console.error("Error creating company:", error);
       toast.error(error.message || "Failed to create company");
     } finally {
-      setCreating(false);
+      setCreatingCompany(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4" />
-          <p className="text-muted-foreground">Loading companies...</p>
-        </div>
-      </div>
+  // ---------- User creation ----------
+  const toggleAssignedCompany = (id: string) => {
+    setAssignedCompanyIds((prev) =>
+      prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]
     );
-  }
+
+    setAssignedLocationIds((prev) =>
+      prev.filter((locId) => {
+        const loc = locations.find((l) => l.id === locId);
+        if (!loc?.companyId) return false;
+        return prev.includes(loc.companyId) || id === loc.companyId;
+      })
+    );
+  };
+
+  const toggleAssignedLocation = (id: string) => {
+    setAssignedLocationIds((prev) =>
+      prev.includes(id) ? prev.filter((l) => l !== id) : [...prev, id]
+    );
+  };
+
+  const resetUserForm = () => {
+    setUserName("");
+    setUserEmail("");
+    setUserPassword("");
+    setUserRoleForForm("auditor");
+    setAssignedCompanyIds([]);
+    setAssignedLocationIds([]);
+  };
+
+  const handleCreateUser = async (e: FormEvent) => {
+    e.preventDefault();
+
+    if (!userName.trim() || !userEmail.trim() || !userPassword.trim()) {
+      toast.error("Name, email and password are required");
+      return;
+    }
+
+    if (userRoleForForm !== "admin" && assignedCompanyIds.length === 0) {
+      toast.error("Please assign at least one company for non-admin users");
+      return;
+    }
+
+    try {
+      setCreatingUser(true);
+
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: userEmail.trim(),
+        password: userPassword,
+        options: {
+          data: {
+            name: userName.trim(),
+            role: userRoleForForm,
+          },
+        },
+      });
+
+      if (authError) throw authError;
+
+      if (authData.user) {
+        const { error: profileError } = await supabase
+          .from("user_profiles")
+          .insert([
+            {
+              id: authData.user.id,
+              email: userEmail.trim(),
+              name: userName.trim(),
+              role: userRoleForForm,
+              assigned_locations:
+                assignedLocationIds.length > 0 ? assignedLocationIds : null,
+              assigned_companies:
+                assignedCompanyIds.length > 0 ? assignedCompanyIds : null,
+            },
+          ]);
+
+        if (profileError) throw profileError;
+
+        toast.success("User created successfully", {
+          description: `${userName} has been added.`,
+        });
+
+        resetUserForm();
+        setShowUserForm(false);
+      }
+    } catch (error: any) {
+      console.error("Error creating user:", error);
+      toast.error("Failed to create user", {
+        description: error.message,
+      });
+    } finally {
+      setCreatingUser(false);
+    }
+  };
 
   const isAdmin = userRole === "admin";
 
-  if (companies.length === 0 && !isAdmin) {
+  if (!loading && companies.length === 0 && !isAdmin) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-4">
         <Card className="max-w-md w-full">
           <CardHeader>
-            <CardTitle className="text-center">No Companies Available</CardTitle>
+            <CardTitle className="text-center">
+              No Companies Available
+            </CardTitle>
             <CardDescription className="text-center">
               You do not have access to any companies. Please contact your
               administrator.
@@ -165,10 +291,18 @@ const CompanySelection = () => {
     );
   }
 
+  const filteredLocations: Location[] =
+    assignedCompanyIds.length === 0
+      ? []
+      : locations.filter(
+          (loc) =>
+            !!loc.companyId && assignedCompanyIds.includes(loc.companyId)
+        );
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <div className="max-w-6xl w-full space-y-6">
-        {/* Header with title + Add Company button on top-right */}
+        {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div className="space-y-1">
             <h1 className="text-3xl font-bold tracking-tight">Companies</h1>
@@ -179,24 +313,43 @@ const CompanySelection = () => {
           </div>
 
           {isAdmin && (
-            <Button onClick={() => setShowForm((prev) => !prev)}>
-              {showForm ? (
-                <>
-                  <X className="mr-2 h-4 w-4" />
-                  Close Form
-                </>
-              ) : (
-                <>
-                  <PlusCircle className="mr-2 h-4 w-4" />
-                  Add Company
-                </>
-              )}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => setShowCompanyForm((prev) => !prev)}>
+                {showCompanyForm ? (
+                  <>
+                    <X className="mr-2 h-4 w-4" />
+                    Close Company Form
+                  </>
+                ) : (
+                  <>
+                    <PlusCircle className="mr-2 h-4 w-4" />
+                    Add Company
+                  </>
+                )}
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={() => setShowUserForm((prev) => !prev)}
+              >
+                {showUserForm ? (
+                  <>
+                    <X className="mr-2 h-4 w-4" />
+                    Close User Form
+                  </>
+                ) : (
+                  <>
+                    <Users className="mr-2 h-4 w-4" />
+                    Add User
+                  </>
+                )}
+              </Button>
+            </div>
           )}
         </div>
 
-        {/* Add Company form (only when toggled) */}
-        {isAdmin && showForm && (
+        {/* Company form */}
+        {isAdmin && showCompanyForm && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
@@ -213,36 +366,217 @@ const CompanySelection = () => {
                   <Label htmlFor="company-name">Company Name</Label>
                   <Input
                     id="company-name"
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
+                    value={newCompanyName}
+                    onChange={(e) => setNewCompanyName(e.target.value)}
                     placeholder="e.g. ABC Retail Pvt Ltd"
                     required
                   />
                 </div>
-
                 <div className="space-y-1">
                   <Label htmlFor="company-address">Address</Label>
                   <Textarea
                     id="company-address"
-                    value={newAddress}
-                    onChange={(e) => setNewAddress(e.target.value)}
+                    value={newCompanyAddress}
+                    onChange={(e) => setNewCompanyAddress(e.target.value)}
                     placeholder="Registered office address (optional)"
                     rows={3}
                   />
                 </div>
-
                 <div className="flex items-center space-x-2">
                   <Checkbox
                     id="company-active"
-                    checked={newIsActive}
-                    onCheckedChange={(checked) => setNewIsActive(!!checked)}
+                    checked={newCompanyActive}
+                    onCheckedChange={(checked) =>
+                      setNewCompanyActive(!!checked)
+                    }
                   />
                   <Label htmlFor="company-active">Active</Label>
                 </div>
-
-                <Button type="submit" disabled={creating} className="w-full">
-                  {creating ? "Creating..." : "Create Company"}
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={creatingCompany}
+                >
+                  {creatingCompany ? "Creating..." : "Create Company"}
                 </Button>
+              </form>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* User form */}
+        {isAdmin && showUserForm && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                New User
+              </CardTitle>
+              <CardDescription>
+                Create a new user and assign companies/locations.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form className="grid gap-4" onSubmit={handleCreateUser}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="user-name">Name *</Label>
+                    <Input
+                      id="user-name"
+                      value={userName}
+                      onChange={(e) => setUserName(e.target.value)}
+                      placeholder="John Doe"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="user-email">Email *</Label>
+                    <Input
+                      id="user-email"
+                      type="email"
+                      value={userEmail}
+                      onChange={(e) => setUserEmail(e.target.value)}
+                      placeholder="john@example.com"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="user-password">Password *</Label>
+                    <Input
+                      id="user-password"
+                      type="password"
+                      value={userPassword}
+                      onChange={(e) => setUserPassword(e.target.value)}
+                      placeholder="••••••••"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="user-role">Role *</Label>
+                    <select
+                      id="user-role"
+                      className="border rounded-md px-3 py-2 text-sm w-full bg-background"
+                      value={userRoleForForm}
+                      onChange={(e) =>
+                        setUserRoleForForm(
+                          e.target.value as "admin" | "auditor" | "client"
+                        )
+                      }
+                    >
+                      <option value="admin">Admin</option>
+                      <option value="auditor">Auditor</option>
+                      <option value="client">Client</option>
+                    </select>
+                  </div>
+                </div>
+
+                {userRoleForForm !== "admin" && (
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-2">
+                      <Building2 className="h-4 w-4" />
+                      Assign Companies * (Required for non-admin users)
+                    </Label>
+                    <Card className="p-4 max-h-48 overflow-y-auto">
+                      {loading && companies.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          Loading companies...
+                        </p>
+                      ) : companies.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          No companies available.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {companies.map((company) => (
+                            <div
+                              key={company.id}
+                              className="flex items-center space-x-2"
+                            >
+                              <Checkbox
+                                id={`user-company-${company.id}`}
+                                checked={assignedCompanyIds.includes(
+                                  company.id
+                                )}
+                                onCheckedChange={() =>
+                                  toggleAssignedCompany(company.id)
+                                }
+                              />
+                              <label
+                                htmlFor={`user-company-${company.id}`}
+                                className="text-sm cursor-pointer flex-1"
+                              >
+                                {company.name}
+                              </label>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </Card>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-2">
+                    <MapPin className="h-4 w-4" />
+                    Assign Locations (Optional, filtered by selected companies)
+                  </Label>
+                  <Card className="p-4 max-h-48 overflow-y-auto">
+                    {assignedCompanyIds.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        Select at least one company to see its locations.
+                      </p>
+                    ) : loading && locations.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        Loading locations...
+                      </p>
+                    ) : filteredLocations.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No locations found for the selected companies.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {filteredLocations.map((location) => (
+                          <div
+                            key={location.id}
+                            className="flex items-center space-x-2"
+                          >
+                            <Checkbox
+                              id={`user-location-${location.id}`}
+                              checked={assignedLocationIds.includes(
+                                location.id
+                              )}
+                              onCheckedChange={() =>
+                                toggleAssignedLocation(location.id)
+                              }
+                            />
+                            <label
+                              htmlFor={`user-location-${location.id}`}
+                              className="text-sm cursor-pointer flex-1"
+                            >
+                              {location.name}
+                            </label>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Card>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      resetUserForm();
+                      setShowUserForm(false);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={creatingUser}>
+                    {creatingUser ? "Creating..." : "Create User"}
+                  </Button>
+                </div>
               </form>
             </CardContent>
           </Card>
@@ -263,9 +597,7 @@ const CompanySelection = () => {
                       <Building2 className="h-6 w-6 text-primary" />
                     </div>
                     <div>
-                      <CardTitle className="text-lg">
-                        {company.name}
-                      </CardTitle>
+                      <CardTitle className="text-lg">{company.name}</CardTitle>
                       <CardDescription className="mt-1">
                         {company.address || "No address provided"}
                       </CardDescription>
@@ -277,7 +609,7 @@ const CompanySelection = () => {
             </Card>
           ))}
 
-          {companies.length === 0 && (
+          {!loading && companies.length === 0 && (
             <Card className="sm:col-span-2 lg:col-span-3">
               <CardHeader>
                 <CardTitle>No companies found</CardTitle>

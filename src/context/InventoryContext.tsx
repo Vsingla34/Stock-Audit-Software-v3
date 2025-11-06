@@ -17,7 +17,7 @@ export interface InventoryItem {
   companyId?: string; // NEW
   systemQuantity: number;
   physicalQuantity?: number;
-  status?: 'pending' | 'matched' | 'discrepancy';
+  status?: "pending" | "matched" | "discrepancy";
   lastAudited?: string;
   notes?: string;
   auditorEntries?: AuditorEntry[];
@@ -31,7 +31,7 @@ export interface Location {
   companyId?: string; // NEW
 }
 
-export type QuestionType = 'text' | 'single_select' | 'multi_select' | 'yes_no';
+export type QuestionType = "text" | "single_select" | "multi_select" | "yes_no";
 
 export interface QuestionOption {
   id: string;
@@ -61,9 +61,13 @@ interface InventoryContextType {
   locations: Location[];
   questions: Question[];
   questionnaireAnswers: QuestionnaireAnswer[];
-  setItemMaster: (items: Omit<InventoryItem, 'id'>[]) => Promise<void>;
+  setItemMaster: (items: Omit<InventoryItem, "id">[]) => Promise<void>;
   setClosingStock: (items: any[]) => Promise<void>;
-  updateAuditedItem: (item: InventoryItem, auditorId?: string, auditorName?: string) => Promise<void>;
+  updateAuditedItem: (
+    item: InventoryItem,
+    auditorId?: string,
+    auditorName?: string
+  ) => Promise<void>;
   getInventorySummary: () => {
     totalItems: number;
     auditedItems: number;
@@ -79,55 +83,68 @@ interface InventoryContextType {
     discrepancies: number;
   };
   clearAllData: () => void;
-  addLocation: (location: Omit<Location, 'id'>) => Promise<void>;
+  addLocation: (location: Omit<Location, "id">) => Promise<void>;
   updateLocation: (location: Location) => Promise<void>;
   deleteLocation: (locationId: string) => Promise<void>;
   scanItem: (barcode: string, location: string) => void;
   searchItem: (query: string) => InventoryItem[];
-  addItemToAudit: (item: InventoryItem, quantity: number, auditorId?: string, auditorName?: string) => void;
-  addQuestion: (question: Omit<Question, 'id'>) => Promise<void>;
+  addItemToAudit: (
+    item: InventoryItem,
+    quantity: number,
+    auditorId?: string,
+    auditorName?: string
+  ) => void;
+  addQuestion: (question: Omit<Question, "id">) => Promise<void>;
   updateQuestion: (question: Question) => Promise<void>;
   deleteQuestion: (questionId: string) => Promise<void>;
-  saveQuestionnaireAnswer: (answer: Omit<QuestionnaireAnswer, 'answeredOn' | 'answeredBy'>) => Promise<void>;
+  saveQuestionnaireAnswer: (
+    answer: Omit<QuestionnaireAnswer, "answeredOn" | "answeredBy">
+  ) => Promise<void>;
   getLocationQuestionnaireAnswers: (locationId: string) => QuestionnaireAnswer[];
   getQuestionsForLocation: (locationId: string) => Question[];
   getQuestionById: (questionId: string) => Question | undefined;
 }
 
-const InventoryContext = createContext<InventoryContextType | undefined>(undefined);
+const InventoryContext = createContext<InventoryContextType | undefined>(
+  undefined
+);
 
-export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
   const [itemMaster, setItemMasterState] = useState<InventoryItem[]>([]);
   const [auditedItems, setAuditedItemsState] = useState<InventoryItem[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
-  const [questionnaireAnswers, setQuestionnaireAnswers] = useState<QuestionnaireAnswer[]>([]);
+  const [questionnaireAnswers, setQuestionnaireAnswers] = useState<
+    QuestionnaireAnswer[]
+  >([]);
 
   useEffect(() => {
     const loadData = async () => {
       try {
         console.log("Loading inventory data...");
-        
+
         const dbItems = await SupabaseDataService.getItemMaster();
         console.log("Loaded items:", dbItems.length);
         setItemMasterState(dbItems);
-        
+
         const audited = await SupabaseDataService.getAuditedItems();
         console.log("Loaded audited items:", audited.length);
         setAuditedItemsState(audited);
-        
+
         const locs = await SupabaseDataService.getLocations();
         console.log("Loaded locations:", locs.length);
         setLocations(locs);
-        
+
         const qs = await SupabaseDataService.getQuestions();
         console.log("Loaded questions:", qs?.length || 0);
         setQuestions(qs || []);
-        
+
         const answers = await SupabaseDataService.getQuestionnaireAnswers();
         console.log("Loaded answers:", answers?.length || 0);
         setQuestionnaireAnswers(answers || []);
-        
+
         console.log("All data loaded successfully");
       } catch (error) {
         console.error("Error loading inventory data:", error);
@@ -137,13 +154,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     loadData();
   }, []);
 
-  const setItemMaster = async (items: Omit<InventoryItem, 'id'>[]) => {
+  const setItemMaster = async (items: Omit<InventoryItem, "id">[]) => {
     // Ensure all items have auditorEntries initialized
-    const itemsWithAuditors = items.map(item => ({
+    const itemsWithAuditors = items.map((item) => ({
       ...item,
-      auditorEntries: []
+      auditorEntries: [],
     }));
-    
+
     await SupabaseDataService.setItemMaster(itemsWithAuditors);
     const dbItems = await SupabaseDataService.getItemMaster();
     setItemMasterState(dbItems);
@@ -151,17 +168,21 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const setClosingStock = async (items: any[]) => {
     if (itemMaster.length === 0) {
-      throw new Error("Item master is empty. Please upload item master before uploading closing stock.");
+      throw new Error(
+        "Item master is empty. Please upload item master before uploading closing stock."
+      );
     }
 
-    const uploadSKUs = items.map(item => item.sku);
-    const masterSKUs = new Set(itemMaster.map(item => item.sku));
-    const missingSKUs = uploadSKUs.filter(sku => !masterSKUs.has(sku));
-    
+    const uploadSKUs = items.map((item) => item.sku);
+    const masterSKUs = new Set(itemMaster.map((item) => item.sku));
+    const missingSKUs = uploadSKUs.filter((sku) => !masterSKUs.has(sku));
+
     if (missingSKUs.length > 0) {
       throw new Error(
-        `The following SKUs are not in the item master: ${[...new Set(missingSKUs)].join(', ')}. ` +
-        `Only items from the master list can be uploaded in closing stock.`
+        `The following SKUs are not in the item master: ${[
+          ...new Set(missingSKUs),
+        ].join(", ")}. ` +
+          `Only items from the master list can be uploaded in closing stock.`
       );
     }
 
@@ -169,43 +190,48 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     for (const stockItem of items) {
       const existingItemAtLocation = itemMaster.find(
-        item => item.sku === stockItem.sku && item.location === stockItem.location
+        (item) =>
+          item.sku === stockItem.sku && item.location === stockItem.location
       );
 
       if (existingItemAtLocation) {
         finalItemsToUpsert.push({
           id: existingItemAtLocation.id,
           sku: stockItem.sku,
-          name: existingItemAtLocation.name || 'Unnamed Item',
-          category: existingItemAtLocation.category || '',
+          name: existingItemAtLocation.name || "Unnamed Item",
+          category: existingItemAtLocation.category || "",
           location: stockItem.location,
           systemQuantity: stockItem.systemQuantity,
           physicalQuantity: existingItemAtLocation.physicalQuantity || 0,
-          status: existingItemAtLocation.status || 'pending',
+          status: existingItemAtLocation.status || "pending",
           lastAudited: existingItemAtLocation.lastAudited,
           notes: existingItemAtLocation.notes,
           auditorEntries: existingItemAtLocation.auditorEntries || [],
         });
       } else {
         const blueprint = itemMaster.find(
-          item => item.sku === stockItem.sku && (!item.location || item.location === '')
+          (item) =>
+            item.sku === stockItem.sku &&
+            (!item.location || item.location === "")
         );
-        
-        const anyItemWithSKU = itemMaster.find(item => item.sku === stockItem.sku);
+
+        const anyItemWithSKU = itemMaster.find(
+          (item) => item.sku === stockItem.sku
+        );
         const metadataSource = blueprint || anyItemWithSKU;
-        
+
         if (!metadataSource) {
           throw new Error(`SKU ${stockItem.sku} not found in item master`);
         }
-        
+
         finalItemsToUpsert.push({
           sku: stockItem.sku,
-          name: metadataSource.name || 'Unnamed Item',
-          category: metadataSource.category || '',
+          name: metadataSource.name || "Unnamed Item",
+          category: metadataSource.category || "",
           location: stockItem.location,
           systemQuantity: stockItem.systemQuantity,
           physicalQuantity: 0,
-          status: 'pending',
+          status: "pending",
           auditorEntries: [],
         });
       }
@@ -217,9 +243,15 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setAuditedItemsState(await SupabaseDataService.getAuditedItems());
   };
 
-  const updateAuditedItem = async (item: InventoryItem, auditorId?: string, auditorName?: string) => {
+  const updateAuditedItem = async (
+    item: InventoryItem,
+    auditorId?: string,
+    auditorName?: string
+  ) => {
     // Get existing auditor entries
-    const existingItem = itemMaster.find(i => i.id === item.id && i.location === item.location);
+    const existingItem = itemMaster.find(
+      (i) => i.id === item.id && i.location === item.location
+    );
     let auditorEntries: AuditorEntry[] = existingItem?.auditorEntries || [];
 
     // Calculate the total physical quantity from all auditors
@@ -227,15 +259,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     // If auditor info provided, update auditor entries
     if (auditorId && auditorName && item.physicalQuantity !== undefined) {
-      const existingEntryIndex = auditorEntries.findIndex(e => e.auditorId === auditorId);
-      
+      const existingEntryIndex = auditorEntries.findIndex(
+        (e) => e.auditorId === auditorId
+      );
+
       if (existingEntryIndex >= 0) {
         // Update existing auditor's entry
         auditorEntries[existingEntryIndex] = {
           auditorId,
           auditorName,
           quantityFound: item.physicalQuantity, // This is the NEW total for this auditor
-          auditedAt: new Date().toISOString()
+          auditedAt: new Date().toISOString(),
         };
       } else {
         // Add new auditor entry
@@ -243,13 +277,16 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           auditorId,
           auditorName,
           quantityFound: item.physicalQuantity, // This is the total for this new auditor
-          auditedAt: new Date().toISOString()
+          auditedAt: new Date().toISOString(),
         });
       }
 
       // CRITICAL FIX: Calculate total from ALL auditor entries
-      totalPhysicalQuantity = auditorEntries.reduce((sum, entry) => sum + entry.quantityFound, 0);
-      
+      totalPhysicalQuantity = auditorEntries.reduce(
+        (sum, entry) => sum + entry.quantityFound,
+        0
+      );
+
       console.log("=== Auditor Calculation ===");
       console.log("Auditor Entries:", auditorEntries);
       console.log("Total Physical Quantity:", totalPhysicalQuantity);
@@ -261,11 +298,15 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const itemToUpdate: InventoryItem = {
       ...item,
       physicalQuantity: totalPhysicalQuantity, // Use calculated total
-      status: totalPhysicalQuantity !== undefined && item.systemQuantity === totalPhysicalQuantity 
-        ? 'matched' 
-        : (totalPhysicalQuantity !== undefined ? 'discrepancy' : 'pending'),
+      status:
+        totalPhysicalQuantity !== undefined &&
+        item.systemQuantity === totalPhysicalQuantity
+          ? "matched"
+          : totalPhysicalQuantity !== undefined
+          ? "discrepancy"
+          : "pending",
       lastAudited: new Date().toISOString(),
-      auditorEntries: auditorEntries
+      auditorEntries: auditorEntries,
     };
 
     console.log("Item to update:", itemToUpdate);
@@ -276,31 +317,59 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setAuditedItemsState(await SupabaseDataService.getAuditedItems());
   };
 
-  const addLocation = async (location: Omit<Location, 'id'>) => {
+  // ✅ UPDATED: addLocation now attaches companyId and sends it to Supabase
+  const addLocation = async (location: Omit<Location, "id">) => {
     try {
       console.log("Adding location:", location);
-      
-      // Clean the data - remove undefined values
-      const cleanLocation: Omit<Location, 'id'> = {
+
+      // 1) Determine companyId
+      const companyIdFromPayload = location.companyId;
+      const companyIdFromSession =
+        typeof window !== "undefined"
+          ? sessionStorage.getItem("selectedCompanyId")
+          : null;
+      const companyIdFromLocal =
+        typeof window !== "undefined"
+          ? localStorage.getItem("selectedCompanyId")
+          : null;
+
+      const companyId =
+        companyIdFromPayload || companyIdFromSession || companyIdFromLocal;
+
+      if (!companyId) {
+        throw new Error(
+          "No company selected. Cannot create location without company_id."
+        );
+      }
+
+      // 2) Clean data
+      const cleanLocation: Omit<Location, "id"> = {
         name: location.name.trim(),
-        active: location.active !== undefined ? location.active : true
+        active:
+          location.active !== undefined
+            ? location.active
+            : true,
+        companyId, // ✅ attach company id so SupabaseDataService can map to company_id
       };
-      
+
       if (location.description && location.description.trim()) {
         cleanLocation.description = location.description.trim();
       }
-      
-      console.log("Calling SupabaseDataService.addLocation with:", cleanLocation);
-      
-      // Use the new addLocation method that does a proper INSERT
+
+      console.log(
+        "Calling SupabaseDataService.addLocation with:",
+        cleanLocation
+      );
+
+      // 3) Save in DB (this method must insert company_id based on cleanLocation.companyId)
       await SupabaseDataService.addLocation(cleanLocation);
-      
+
       console.log("Location saved, reloading locations...");
-      
-      // Reload locations from database
+
+      // 4) Reload locations from database
       const updatedLocations = await SupabaseDataService.getLocations();
       setLocations(updatedLocations);
-      
+
       console.log("Locations reloaded:", updatedLocations.length);
     } catch (error) {
       console.error("Error in addLocation:", error);
@@ -314,9 +383,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const deleteLocation = async (locationId: string) => {
-    const locationToDelete = locations.find(loc => loc.id === locationId);
+    const locationToDelete = locations.find((loc) => loc.id === locationId);
     if (!locationToDelete) return;
-    const itemsInLocation = itemMaster.some(item => item.location === locationToDelete.name);
+    const itemsInLocation = itemMaster.some(
+      (item) => item.location === locationToDelete.name
+    );
     if (itemsInLocation) {
       throw new Error("Cannot delete location that contains inventory items");
     }
@@ -326,53 +397,62 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const scanItem = async (barcode: string, locationName: string) => {
     const item = itemMaster.find(
-      i => (i.id === barcode || i.sku === barcode) && i.location === locationName
+      (i) =>
+        (i.id === barcode || i.sku === barcode) && i.location === locationName
     );
-    
+
     if (!item) {
-      throw new Error(`Item with barcode ${barcode} not found at location ${locationName}`);
+      throw new Error(
+        `Item with barcode ${barcode} not found at location ${locationName}`
+      );
     }
-    
-    await updateAuditedItem({ 
-      ...item, 
-      physicalQuantity: (item.physicalQuantity ?? 0) + 1, 
-      status: 'pending' 
+
+    await updateAuditedItem({
+      ...item,
+      physicalQuantity: (item.physicalQuantity ?? 0) + 1,
+      status: "pending",
     });
   };
 
   const searchItem = (query: string): InventoryItem[] => {
     if (!query || query.length < 2) return [];
     const lowerCaseQuery = query.toLowerCase();
-    return itemMaster.filter(item =>
-      item.id?.toLowerCase().includes(lowerCaseQuery) ||
-      item.sku?.toLowerCase().includes(lowerCaseQuery) ||
-      item.name?.toLowerCase().includes(lowerCaseQuery) ||
-      item.category?.toLowerCase().includes(lowerCaseQuery)
+    return itemMaster.filter(
+      (item) =>
+        item.id?.toLowerCase().includes(lowerCaseQuery) ||
+        item.sku?.toLowerCase().includes(lowerCaseQuery) ||
+        item.name?.toLowerCase().includes(lowerCaseQuery) ||
+        item.category?.toLowerCase().includes(lowerCaseQuery)
     );
   };
 
-  const addItemToAudit = async (item: InventoryItem, quantity: number, auditorId?: string, auditorName?: string) => {
+  const addItemToAudit = async (
+    item: InventoryItem,
+    quantity: number,
+    auditorId?: string,
+    auditorName?: string
+  ) => {
     if (quantity < 0) return;
-    
+
     const masterItem = itemMaster.find(
-      i => i.sku === item.sku && i.location === item.location
+      (i) => i.sku === item.sku && i.location === item.location
     );
-    
+
     if (!masterItem) {
       throw new Error(
         `Cannot add item: SKU "${item.sku}" does not exist in the item master for location "${item.location}". ` +
-        `Only items from the master list can be audited.`
+          `Only items from the master list can be audited.`
       );
     }
-    
+
     // CRITICAL: Pass the individual auditor's quantity, not the total
     // The updateAuditedItem function will calculate the total from all auditors
     await updateAuditedItem(
-      { 
+      {
         ...masterItem,
         physicalQuantity: quantity, // This is THIS auditor's count
-        status: 'pending', // Status will be recalculated based on total
-        lastAudited: new Date().toISOString() 
+        status: "pending", // Status will be recalculated based on total
+        lastAudited: new Date().toISOString(),
       },
       auditorId,
       auditorName
@@ -380,59 +460,94 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const getInventorySummary = () => {
-    const totalItems = itemMaster.filter(item => item.location !== '').length;
-    const auditedItemKeys = new Set(auditedItems.map(i => `${i.sku}-${i.location}`));
+    const totalItems = itemMaster.filter((item) => item.location !== "").length;
+    const auditedItemKeys = new Set(
+      auditedItems.map((i) => `${i.sku}-${i.location}`)
+    );
     const auditedItemsCount = auditedItemKeys.size;
     let matched = 0;
     let discrepancies = 0;
-    itemMaster.forEach(masterItem => {
-      if (masterItem.location === '') return;
-      const audited = auditedItems.find(a => a.sku === masterItem.sku && a.location === masterItem.location);
+    itemMaster.forEach((masterItem) => {
+      if (masterItem.location === "") return;
+      const audited = auditedItems.find(
+        (a) => a.sku === masterItem.sku && a.location === masterItem.location
+      );
       if (audited) {
-        if (audited.status === 'matched') matched++;
-        else if (audited.status === 'discrepancy') discrepancies++;
+        if (audited.status === "matched") matched++;
+        else if (audited.status === "discrepancy") discrepancies++;
       }
     });
-    return { totalItems, auditedItems: auditedItemsCount, pendingItems: totalItems - auditedItemsCount, matched, discrepancies };
+    return {
+      totalItems,
+      auditedItems: auditedItemsCount,
+      pendingItems: totalItems - auditedItemsCount,
+      matched,
+      discrepancies,
+    };
   };
 
   const getLocationSummary = (locationName: string) => {
-    const locationItems = itemMaster.filter(item => item.location === locationName);
-    const locationAuditedItems = auditedItems.filter(item => item.location === locationName);
+    const locationItems = itemMaster.filter(
+      (item) => item.location === locationName
+    );
+    const locationAuditedItems = auditedItems.filter(
+      (item) => item.location === locationName
+    );
     const totalItems = locationItems.length;
     const auditedItemsCount = locationAuditedItems.length;
     let matched = 0;
     let discrepancies = 0;
-    locationItems.forEach(masterItem => {
-      const audited = locationAuditedItems.find(a => a.sku === masterItem.sku && a.location === masterItem.location);
+    locationItems.forEach((masterItem) => {
+      const audited = locationAuditedItems.find(
+        (a) => a.sku === masterItem.sku && a.location === masterItem.location
+      );
       if (audited) {
-        if (audited.status === 'matched') matched++;
-        else if (audited.status === 'discrepancy') discrepancies++;
+        if (audited.status === "matched") matched++;
+        else if (audited.status === "discrepancy") discrepancies++;
       }
     });
-    return { totalItems, auditedItems: auditedItemsCount, pendingItems: totalItems - auditedItemsCount, matched, discrepancies };
+    return {
+      totalItems,
+      auditedItems: auditedItemsCount,
+      pendingItems: totalItems - auditedItemsCount,
+      matched,
+      discrepancies,
+    };
   };
 
-  const addQuestion = async (question: Omit<Question, 'id'>) => {
+  const addQuestion = async (question: Omit<Question, "id">) => {
     const newQuestion = await SupabaseDataService.addQuestion(question);
-    if (newQuestion) setQuestions(prev => [...prev, newQuestion]);
+    if (newQuestion) setQuestions((prev) => [...prev, newQuestion]);
   };
 
   const updateQuestion = async (question: Question) => {
     await SupabaseDataService.updateQuestion(question);
-    setQuestions(prev => prev.map(q => (q.id === question.id ? question : q)));
+    setQuestions((prev) =>
+      prev.map((q) => (q.id === question.id ? question : q))
+    );
   };
 
   const deleteQuestion = async (questionId: string) => {
     await SupabaseDataService.deleteQuestion(questionId);
-    setQuestions(prev => prev.filter(q => q.id !== questionId));
-    setQuestionnaireAnswers(prev => prev.filter(a => a.questionId !== questionId));
+    setQuestions((prev) => prev.filter((q) => q.id !== questionId));
+    setQuestionnaireAnswers((prev) =>
+      prev.filter((a) => a.questionId !== questionId)
+    );
   };
 
-  const saveQuestionnaireAnswer = async (answer: Omit<QuestionnaireAnswer, 'answeredOn' | 'answeredBy'>) => {
-    const newAnswer: QuestionnaireAnswer = { ...answer, answeredOn: new Date().toISOString() };
-    setQuestionnaireAnswers(prev => {
-      const existingIndex = prev.findIndex(a => a.questionId === answer.questionId && a.locationId === answer.locationId);
+  const saveQuestionnaireAnswer = async (
+    answer: Omit<QuestionnaireAnswer, "answeredOn" | "answeredBy">
+  ) => {
+    const newAnswer: QuestionnaireAnswer = {
+      ...answer,
+      answeredOn: new Date().toISOString(),
+    };
+    setQuestionnaireAnswers((prev) => {
+      const existingIndex = prev.findIndex(
+        (a) =>
+          a.questionId === answer.questionId &&
+          a.locationId === answer.locationId
+      );
       if (existingIndex !== -1) {
         const updated = [...prev];
         updated[existingIndex] = newAnswer;
@@ -443,8 +558,12 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     await SupabaseDataService.upsertQuestionnaireAnswer(answer);
   };
 
-  const getLocationQuestionnaireAnswers = (locationId: string): QuestionnaireAnswer[] => {
-    return questionnaireAnswers.filter(answer => answer.locationId === locationId);
+  const getLocationQuestionnaireAnswers = (
+    locationId: string
+  ): QuestionnaireAnswer[] => {
+    return questionnaireAnswers.filter(
+      (answer) => answer.locationId === locationId
+    );
   };
 
   const getQuestionsForLocation = (locationId: string): Question[] => {
@@ -452,7 +571,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const getQuestionById = (questionId: string): Question | undefined => {
-    return questions.find(q => q.id === questionId);
+    return questions.find((q) => q.id === questionId);
   };
 
   const clearAllData = async () => {
@@ -489,7 +608,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         saveQuestionnaireAnswer,
         getLocationQuestionnaireAnswers,
         getQuestionsForLocation,
-        getQuestionById
+        getQuestionById,
       }}
     >
       {children}

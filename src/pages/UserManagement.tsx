@@ -1,4 +1,4 @@
-// src/pages/UserManagement.tsx - REPLACE ENTIRE FILE
+// src/pages/UserManagement.tsx
 import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -12,8 +12,22 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Users, Plus, Edit, Trash, Building2, MapPin } from "lucide-react";
@@ -32,6 +46,7 @@ interface UserProfile {
 interface Location {
   id: string;
   name: string;
+  companyId?: string | null;
 }
 
 interface Company {
@@ -44,6 +59,7 @@ const UserManagement = () => {
   const [locations, setLocations] = useState<Location[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
+
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -64,7 +80,7 @@ const UserManagement = () => {
 
   const fetchData = async () => {
     try {
-      // Fetch users
+      // Users
       const { data: usersData, error: usersError } = await supabase
         .from("user_profiles")
         .select("*")
@@ -73,17 +89,23 @@ const UserManagement = () => {
       if (usersError) throw usersError;
       setUsers(usersData || []);
 
-      // Fetch all locations
+      // Locations
       const { data: locationsData, error: locationsError } = await supabase
         .from("locations")
-        .select("id, name")
+        .select("id, name, company_id")
         .eq("active", true)
         .order("name");
 
       if (locationsError) throw locationsError;
-      setLocations(locationsData || []);
+      const mappedLocations: Location[] =
+        (locationsData || []).map((loc: any) => ({
+          id: loc.id,
+          name: loc.name,
+          companyId: loc.company_id ?? null,
+        }));
+      setLocations(mappedLocations);
 
-      // Fetch all companies
+      // Companies
       const { data: companiesData, error: companiesError } = await supabase
         .from("companies")
         .select("id, name")
@@ -94,128 +116,9 @@ const UserManagement = () => {
       setCompanies(companiesData || []);
     } catch (error: any) {
       console.error("Error fetching data:", error);
-      toast.error("Failed to load data");
+      toast.error("Failed to load users");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleAddUser = async () => {
-    if (!formData.email || !formData.password || !formData.name) {
-      toast.error("Please fill in all required fields");
-      return;
-    }
-
-    if (formData.role !== "admin" && formData.assignedCompanies.length === 0) {
-      toast.error("Please assign at least one company for non-admin users");
-      return;
-    }
-
-    try {
-      // Create auth user
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: formData.email,
-        password: formData.password,
-        options: {
-          data: {
-            name: formData.name,
-            role: formData.role,
-          },
-        },
-      });
-
-      if (authError) throw authError;
-
-      if (authData.user) {
-        // Create user profile
-        const { error: profileError } = await supabase.from("user_profiles").insert([
-          {
-            id: authData.user.id,
-            email: formData.email,
-            name: formData.name,
-            role: formData.role,
-            assigned_locations: formData.assignedLocations.length > 0 ? formData.assignedLocations : null,
-            assigned_companies: formData.assignedCompanies.length > 0 ? formData.assignedCompanies : null,
-          },
-        ]);
-
-        if (profileError) throw profileError;
-
-        toast.success("User created successfully", {
-          description: `${formData.name} has been added with ${formData.assignedCompanies.length} companies assigned.`,
-        });
-
-        resetForm();
-        setIsAddDialogOpen(false);
-        fetchData();
-      }
-    } catch (error: any) {
-      console.error("Error creating user:", error);
-      toast.error("Failed to create user", {
-        description: error.message,
-      });
-    }
-  };
-
-  const handleEditUser = async () => {
-    if (!selectedUser) return;
-
-    if (!formData.name) {
-      toast.error("Name is required");
-      return;
-    }
-
-    if (formData.role !== "admin" && formData.assignedCompanies.length === 0) {
-      toast.error("Please assign at least one company for non-admin users");
-      return;
-    }
-
-    try {
-      const { error } = await supabase
-        .from("user_profiles")
-        .update({
-          name: formData.name,
-          role: formData.role,
-          assigned_locations: formData.assignedLocations.length > 0 ? formData.assignedLocations : null,
-          assigned_companies: formData.assignedCompanies.length > 0 ? formData.assignedCompanies : null,
-        })
-        .eq("id", selectedUser.id);
-
-      if (error) throw error;
-
-      toast.success("User updated successfully");
-      setIsEditDialogOpen(false);
-      setSelectedUser(null);
-      fetchData();
-    } catch (error: any) {
-      console.error("Error updating user:", error);
-      toast.error("Failed to update user", {
-        description: error.message,
-      });
-    }
-  };
-
-  const handleDeleteUser = async () => {
-    if (!selectedUser) return;
-
-    try {
-      // Delete from user_profiles
-      const { error: profileError } = await supabase
-        .from("user_profiles")
-        .delete()
-        .eq("id", selectedUser.id);
-
-      if (profileError) throw profileError;
-
-      toast.success("User deleted successfully");
-      setIsDeleteDialogOpen(false);
-      setSelectedUser(null);
-      fetchData();
-    } catch (error: any) {
-      console.error("Error deleting user:", error);
-      toast.error("Failed to delete user", {
-        description: error.message,
-      });
     }
   };
 
@@ -232,6 +135,7 @@ const UserManagement = () => {
 
   const openAddDialog = () => {
     resetForm();
+    setSelectedUser(null);
     setIsAddDialogOpen(true);
   };
 
@@ -271,6 +175,18 @@ const UserManagement = () => {
     }));
   };
 
+  // Locations filtered by selected companies (for both Add & Edit)
+  const filteredLocations: Location[] =
+    formData.role === "admin"
+      ? locations
+      : formData.assignedCompanies.length === 0
+      ? []
+      : locations.filter(
+          (loc) =>
+            !!loc.companyId &&
+            formData.assignedCompanies.includes(loc.companyId)
+        );
+
   const getCompanyNames = (companyIds: string[] | null) => {
     if (!companyIds || companyIds.length === 0) return "All Companies";
     return companies
@@ -279,26 +195,154 @@ const UserManagement = () => {
       .join(", ");
   };
 
-  if (loading) {
-    return (
-      <AppLayout>
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Loading users...</p>
-          </div>
-        </div>
-      </AppLayout>
-    );
-  }
+  const getLocationNames = (locationIds: string[] | null) => {
+    if (!locationIds || locationIds.length === 0) return "All Locations";
+    const names = locations
+      .filter((l) => locationIds.includes(l.id))
+      .map((l) => l.name);
+    return names.length ? names.join(", ") : "All Locations";
+  };
+
+  const handleAddUser = async () => {
+    if (!formData.email || !formData.password || !formData.name) {
+      toast.error("Please fill in all required fields");
+      return;
+    }
+
+    if (formData.role !== "admin" && formData.assignedCompanies.length === 0) {
+      toast.error("Please assign at least one company for non-admin users");
+      return;
+    }
+
+    try {
+      const { data: authData, error: authError } =
+        await supabase.auth.signUp({
+          email: formData.email,
+          password: formData.password,
+          options: {
+            data: {
+              name: formData.name,
+              role: formData.role,
+            },
+          },
+        });
+
+      if (authError) throw authError;
+
+      if (authData.user) {
+        const { error: profileError } = await supabase
+          .from("user_profiles")
+          .insert([
+            {
+              id: authData.user.id,
+              email: formData.email,
+              name: formData.name,
+              role: formData.role,
+              assigned_locations:
+                formData.assignedLocations.length > 0
+                  ? formData.assignedLocations
+                  : null,
+              assigned_companies:
+                formData.assignedCompanies.length > 0
+                  ? formData.assignedCompanies
+                  : null,
+            },
+          ]);
+
+        if (profileError) throw profileError;
+
+        toast.success("User created successfully");
+        setIsAddDialogOpen(false);
+        resetForm();
+        fetchData();
+      }
+    } catch (error: any) {
+      console.error("Error creating user:", error);
+      toast.error("Failed to create user", {
+        description: error.message,
+      });
+    }
+  };
+
+  const handleEditUser = async () => {
+    if (!selectedUser) return;
+
+    if (!formData.name) {
+      toast.error("Name is required");
+      return;
+    }
+
+    if (formData.role !== "admin" && formData.assignedCompanies.length === 0) {
+      toast.error("Please assign at least one company for non-admin users");
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from("user_profiles")
+        .update({
+          name: formData.name,
+          role: formData.role,
+          assigned_locations:
+            formData.assignedLocations.length > 0
+              ? formData.assignedLocations
+              : null,
+          assigned_companies:
+            formData.assignedCompanies.length > 0
+              ? formData.assignedCompanies
+              : null,
+        })
+        .eq("id", selectedUser.id);
+
+      if (error) throw error;
+
+      toast.success("User updated successfully");
+      setIsEditDialogOpen(false);
+      resetForm();
+      fetchData();
+    } catch (error: any) {
+      console.error("Error updating user:", error);
+      toast.error("Failed to update user", {
+        description: error.message,
+      });
+    }
+  };
+
+  const handleDeleteUser = async () => {
+    if (!selectedUser) return;
+
+    try {
+      const { error: profileError } = await supabase
+        .from("user_profiles")
+        .delete()
+        .eq("id", selectedUser.id);
+
+      if (profileError) throw profileError;
+
+      toast.success("User deleted successfully");
+      setIsDeleteDialogOpen(false);
+      setSelectedUser(null);
+      fetchData();
+    } catch (error: any) {
+      console.error("Error deleting user:", error);
+      toast.error("Failed to delete user", {
+        description: error.message,
+      });
+    }
+  };
 
   return (
     <AppLayout>
       <div className="space-y-6">
+        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">User Management</h1>
-            <p className="text-muted-foreground">Manage users and their company/location assignments</p>
+            <h1 className="text-2xl font-bold tracking-tight">
+              User Management
+            </h1>
+            <p className="text-muted-foreground">
+              Manage user accounts, roles, and access permissions.
+            </p>
           </div>
           <Button onClick={openAddDialog}>
             <Plus className="mr-2 h-4 w-4" />
@@ -306,11 +350,12 @@ const UserManagement = () => {
           </Button>
         </div>
 
+        {/* User table */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5" />
-              Users ({users.length})
+              <Users className="h-4 w-4" />
+              Users
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -320,86 +365,106 @@ const UserManagement = () => {
                   <TableHead>Name</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Role</TableHead>
-                  <TableHead>Assigned Companies</TableHead>
+                  <TableHead>Companies</TableHead>
+                  <TableHead>Locations</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {users.map((user) => (
-                  <TableRow key={user.id}>
-                    <TableCell className="font-medium">{user.name}</TableCell>
-                    <TableCell>{user.email}</TableCell>
-                    <TableCell>
-                      <Badge variant={user.role === "admin" ? "default" : "secondary"}>
-                        {user.role}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="max-w-xs truncate">
-                      {user.role === "admin" ? (
-                        <span className="text-muted-foreground">All Companies</span>
-                      ) : (
-                        <span className="text-sm">{getCompanyNames(user.assigned_companies)}</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right space-x-2">
-                      <Button variant="ghost" size="icon" onClick={() => openEditDialog(user)}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" onClick={() => openDeleteDialog(user)}>
-                        <Trash className="h-4 w-4 text-red-600" />
-                      </Button>
+                {!loading && users.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={6}
+                      className="text-center py-4 text-muted-foreground"
+                    >
+                      No users found.
                     </TableCell>
                   </TableRow>
-                ))}
+                ) : (
+                  users.map((user) => (
+                    <TableRow key={user.id}>
+                      <TableCell className="font-medium">
+                        {user.name}
+                      </TableCell>
+                      <TableCell>{user.email}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            user.role === "admin"
+                              ? "default"
+                              : user.role === "client"
+                              ? "secondary"
+                              : "outline"
+                          }
+                        >
+                          {user.role}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="max-w-xs">
+                        <span className="line-clamp-2 text-sm text-muted-foreground">
+                          {getCompanyNames(user.assigned_companies)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="max-w-xs">
+                        <span className="line-clamp-2 text-sm text-muted-foreground">
+                          {getLocationNames(user.assigned_locations)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right space-x-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => openEditDialog(user)}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => openDeleteDialog(user)}
+                        >
+                          <Trash className="h-4 w-4 text-red-600" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
           </CardContent>
         </Card>
 
-        {/* Add User Dialog */}
+        {/* ADD USER DIALOG */}
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Add New User</DialogTitle>
-              <DialogDescription>Create a new user account with company and location assignments.</DialogDescription>
+              <DialogDescription>
+                Create a new user account with company and location assignments.
+              </DialogDescription>
             </DialogHeader>
+
             <div className="grid gap-4 py-4">
+              {/* Name + Role */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="add-name">Name *</Label>
                   <Input
                     id="add-name"
                     value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="John Doe"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="add-email">Email *</Label>
-                  <Input
-                    id="add-email"
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    placeholder="john@example.com"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="add-password">Password *</Label>
-                  <Input
-                    id="add-password"
-                    type="password"
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    placeholder="••••••••"
+                    onChange={(e) =>
+                      setFormData({ ...formData, name: e.target.value })
+                    }
                   />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="add-role">Role *</Label>
-                  <Select value={formData.role} onValueChange={(value: any) => setFormData({ ...formData, role: value })}>
+                  <Select
+                    value={formData.role}
+                    onValueChange={(value: any) =>
+                      setFormData({ ...formData, role: value })
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -412,7 +477,33 @@ const UserManagement = () => {
                 </div>
               </div>
 
-              {/* Company Assignment */}
+              {/* Email + Password */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="add-email">Email *</Label>
+                  <Input
+                    id="add-email"
+                    type="email"
+                    value={formData.email}
+                    onChange={(e) =>
+                      setFormData({ ...formData, email: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="add-password">Password *</Label>
+                  <Input
+                    id="add-password"
+                    type="password"
+                    value={formData.password}
+                    onChange={(e) =>
+                      setFormData({ ...formData, password: e.target.value })
+                    }
+                  />
+                </div>
+              </div>
+
+              {/* Companies (non-admin users) */}
               {formData.role !== "admin" && (
                 <div className="space-y-2">
                   <Label className="flex items-center gap-2">
@@ -420,18 +511,34 @@ const UserManagement = () => {
                     Assign Companies * (Required for non-admin users)
                   </Label>
                   <Card className="p-4 max-h-48 overflow-y-auto">
-                    {companies.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">No companies available. Please create companies first.</p>
+                    {loading && companies.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        Loading companies...
+                      </p>
+                    ) : companies.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No companies available. Please create companies first.
+                      </p>
                     ) : (
                       <div className="space-y-2">
                         {companies.map((company) => (
-                          <div key={company.id} className="flex items-center space-x-2">
+                          <div
+                            key={company.id}
+                            className="flex items-center space-x-2"
+                          >
                             <Checkbox
                               id={`add-company-${company.id}`}
-                              checked={formData.assignedCompanies.includes(company.id)}
-                              onCheckedChange={() => toggleCompany(company.id)}
+                              checked={formData.assignedCompanies.includes(
+                                company.id
+                              )}
+                              onCheckedChange={() =>
+                                toggleCompany(company.id)
+                              }
                             />
-                            <label htmlFor={`add-company-${company.id}`} className="text-sm cursor-pointer flex-1">
+                            <label
+                              htmlFor={`add-company-${company.id}`}
+                              className="text-sm cursor-pointer flex-1"
+                            >
                               {company.name}
                             </label>
                           </div>
@@ -442,25 +549,46 @@ const UserManagement = () => {
                 </div>
               )}
 
-              {/* Location Assignment */}
+              {/* Locations (filtered by companies) */}
               <div className="space-y-2">
                 <Label className="flex items-center gap-2">
                   <MapPin className="h-4 w-4" />
                   Assign Locations (Optional)
                 </Label>
                 <Card className="p-4 max-h-48 overflow-y-auto">
-                  {locations.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No locations available</p>
+                  {formData.role !== "admin" &&
+                  formData.assignedCompanies.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Select at least one company to see its locations.
+                    </p>
+                  ) : loading && locations.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Loading locations...
+                    </p>
+                  ) : filteredLocations.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No locations available for the selected companies.
+                    </p>
                   ) : (
                     <div className="space-y-2">
-                      {locations.map((location) => (
-                        <div key={location.id} className="flex items-center space-x-2">
+                      {filteredLocations.map((location) => (
+                        <div
+                          key={location.id}
+                          className="flex items-center space-x-2"
+                        >
                           <Checkbox
                             id={`add-location-${location.id}`}
-                            checked={formData.assignedLocations.includes(location.id)}
-                            onCheckedChange={() => toggleLocation(location.id)}
+                            checked={formData.assignedLocations.includes(
+                              location.id
+                            )}
+                            onCheckedChange={() =>
+                              toggleLocation(location.id)
+                            }
                           />
-                          <label htmlFor={`add-location-${location.id}`} className="text-sm cursor-pointer flex-1">
+                          <label
+                            htmlFor={`add-location-${location.id}`}
+                            className="text-sm cursor-pointer flex-1"
+                          >
                             {location.name}
                           </label>
                         </div>
@@ -470,8 +598,12 @@ const UserManagement = () => {
                 </Card>
               </div>
             </div>
+
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+              <Button
+                variant="outline"
+                onClick={() => setIsAddDialogOpen(false)}
+              >
                 Cancel
               </Button>
               <Button onClick={handleAddUser}>
@@ -482,26 +614,37 @@ const UserManagement = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Edit User Dialog */}
+        {/* EDIT USER DIALOG */}
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
           <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Edit User</DialogTitle>
-              <DialogDescription>Update user information and assignments.</DialogDescription>
+              <DialogDescription>
+                Update user information and assignments.
+              </DialogDescription>
             </DialogHeader>
+
             <div className="grid gap-4 py-4">
+              {/* Name + Role */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="edit-name">Name *</Label>
                   <Input
                     id="edit-name"
                     value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    onChange={(e) =>
+                      setFormData({ ...formData, name: e.target.value })
+                    }
                   />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="edit-role">Role *</Label>
-                  <Select value={formData.role} onValueChange={(value: any) => setFormData({ ...formData, role: value })}>
+                  <Select
+                    value={formData.role}
+                    onValueChange={(value: any) =>
+                      setFormData({ ...formData, role: value })
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -514,7 +657,7 @@ const UserManagement = () => {
                 </div>
               </div>
 
-              {/* Company Assignment */}
+              {/* Companies for edit (non-admin) */}
               {formData.role !== "admin" && (
                 <div className="space-y-2">
                   <Label className="flex items-center gap-2">
@@ -522,18 +665,34 @@ const UserManagement = () => {
                     Assign Companies * (Required for non-admin users)
                   </Label>
                   <Card className="p-4 max-h-48 overflow-y-auto">
-                    {companies.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">No companies available</p>
+                    {loading && companies.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        Loading companies...
+                      </p>
+                    ) : companies.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No companies available.
+                      </p>
                     ) : (
                       <div className="space-y-2">
                         {companies.map((company) => (
-                          <div key={company.id} className="flex items-center space-x-2">
+                          <div
+                            key={company.id}
+                            className="flex items-center space-x-2"
+                          >
                             <Checkbox
                               id={`edit-company-${company.id}`}
-                              checked={formData.assignedCompanies.includes(company.id)}
-                              onCheckedChange={() => toggleCompany(company.id)}
+                              checked={formData.assignedCompanies.includes(
+                                company.id
+                              )}
+                              onCheckedChange={() =>
+                                toggleCompany(company.id)
+                              }
                             />
-                            <label htmlFor={`edit-company-${company.id}`} className="text-sm cursor-pointer flex-1">
+                            <label
+                              htmlFor={`edit-company-${company.id}`}
+                              className="text-sm cursor-pointer flex-1"
+                            >
                               {company.name}
                             </label>
                           </div>
@@ -544,25 +703,46 @@ const UserManagement = () => {
                 </div>
               )}
 
-              {/* Location Assignment */}
+              {/* Locations for edit (filtered) */}
               <div className="space-y-2">
                 <Label className="flex items-center gap-2">
                   <MapPin className="h-4 w-4" />
                   Assign Locations (Optional)
                 </Label>
                 <Card className="p-4 max-h-48 overflow-y-auto">
-                  {locations.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No locations available</p>
+                  {formData.role !== "admin" &&
+                  formData.assignedCompanies.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Select at least one company to see its locations.
+                    </p>
+                  ) : loading && locations.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Loading locations...
+                    </p>
+                  ) : filteredLocations.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No locations available for the selected companies.
+                    </p>
                   ) : (
                     <div className="space-y-2">
-                      {locations.map((location) => (
-                        <div key={location.id} className="flex items-center space-x-2">
+                      {filteredLocations.map((location) => (
+                        <div
+                          key={location.id}
+                          className="flex items-center space-x-2"
+                        >
                           <Checkbox
                             id={`edit-location-${location.id}`}
-                            checked={formData.assignedLocations.includes(location.id)}
-                            onCheckedChange={() => toggleLocation(location.id)}
+                            checked={formData.assignedLocations.includes(
+                              location.id
+                            )}
+                            onCheckedChange={() =>
+                              toggleLocation(location.id)
+                            }
                           />
-                          <label htmlFor={`edit-location-${location.id}`} className="text-sm cursor-pointer flex-1">
+                          <label
+                            htmlFor={`edit-location-${location.id}`}
+                            className="text-sm cursor-pointer flex-1"
+                          >
                             {location.name}
                           </label>
                         </div>
@@ -572,29 +752,40 @@ const UserManagement = () => {
                 </Card>
               </div>
             </div>
+
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+              <Button
+                variant="outline"
+                onClick={() => setIsEditDialogOpen(false)}
+              >
                 Cancel
               </Button>
               <Button onClick={handleEditUser}>
                 <Edit className="mr-2 h-4 w-4" />
-                Update User
+                Save Changes
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
-        {/* Delete User Dialog */}
-        <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        {/* DELETE CONFIRM DIALOG */}
+        <Dialog
+          open={isDeleteDialogOpen}
+          onOpenChange={setIsDeleteDialogOpen}
+        >
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Delete User</DialogTitle>
               <DialogDescription>
-                Are you sure you want to delete "{selectedUser?.name}"? This action cannot be undone.
+                Are you sure you want to delete this user? This action cannot be
+                undone.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+              <Button
+                variant="outline"
+                onClick={() => setIsDeleteDialogOpen(false)}
+              >
                 Cancel
               </Button>
               <Button variant="destructive" onClick={handleDeleteUser}>

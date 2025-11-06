@@ -1,62 +1,47 @@
-
+// src/components/locations/LocationRow.tsx
 import { Button } from "@/components/ui/button";
 import { TableCell, TableRow } from "@/components/ui/table";
-import { Location } from "@/context/InventoryContext";
 import { Edit, Trash2 } from "lucide-react";
-import { CheckIcon, XIcon } from "lucide-react";
-import { useUserAccess } from "@/hooks/useUserAccess";
-
-
+import type { Location } from "@/context/InventoryContext";
 
 interface LocationRowProps {
   location: Location;
   itemCount: number;
+  companyName: string | null;
   onEdit: (location: Location) => void;
   onDelete: (id: string) => void;
 }
 
-
-
-export const LocationRow = ({ location, itemCount, onEdit, onDelete }: LocationRowProps) => {
-  const {  userRole } = useUserAccess();
-
+export const LocationRow = ({
+  location,
+  itemCount,
+  companyName,
+  onEdit,
+  onDelete,
+}: LocationRowProps) => {
   return (
     <TableRow>
-      <TableCell className="font-medium">{location.name}</TableCell>
-      <TableCell>{location.description || '-'}</TableCell>
+      <TableCell>{location.name}</TableCell>
+      <TableCell>{location.description || "-"}</TableCell>
+      <TableCell>{companyName || "-"}</TableCell>
       <TableCell>
-        <div className="flex items-center gap-1">
-          {location.active ? (
-            <>
-              <CheckIcon className="h-4 w-4 text-green-500" />
-              <span className="text-green-600">Active</span>
-            </>
-          ) : (
-            <>
-              <XIcon className="h-4 w-4 text-red-500" />
-              <span className="text-red-600">Inactive</span>
-            </>
-          )}
-        </div>
+        {location.active ? (
+          <span className="text-green-600">✓ Active</span>
+        ) : (
+          <span className="text-red-600">✗ Inactive</span>
+        )}
       </TableCell>
       <TableCell>{itemCount}</TableCell>
       <TableCell className="text-right space-x-2">
-        <Button 
-          size="sm" 
-          disabled={userRole!=="admin"}
-          variant="outline" 
-          onClick={() => onEdit(location)}
-        >
+        <Button variant="ghost" size="icon" onClick={() => onEdit(location)}>
           <Edit className="h-4 w-4" />
         </Button>
-        <Button 
-          size="sm" 
-          variant="outline" 
-          className="text-red-600 hover:text-red-700"
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={() => onDelete(location.id)}
-          disabled={userRole!=="admin"}
         >
-          <Trash2 className="h-4 w-4" />
+          <Trash2 className="h-4 w-4 text-red-600" />
         </Button>
       </TableCell>
     </TableRow>

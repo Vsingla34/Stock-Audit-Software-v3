@@ -1,101 +1,102 @@
+// src/components/locations/LocationForm.tsx
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
-import { Check, X } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Location } from "@/context/InventoryContext";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import { isLocationNameDuplicate } from "./utils/locationUtils";
+import { useCompany } from "@/context/CompanyContext";
 
 interface LocationFormProps {
-  locations: Location[];
-  onSave: (location: Omit<Location, 'id'>) => void;
+  locations: any[];
+  onSave: (location: {
+    name: string;
+    description?: string;
+    active: boolean;
+    companyId: string;
+  }) => void;
   onCancel: () => void;
 }
 
-export const LocationForm = ({ locations, onSave, onCancel }: LocationFormProps) => {
-  const [newLocation, setNewLocation] = useState<Omit<Location, 'id'>>({
-    name: "",
-    description: "",
-    active: true,
-  });
+export const LocationForm = ({
+  locations,
+  onSave,
+  onCancel,
+}: LocationFormProps) => {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [active, setActive] = useState(true);
 
-  const handleSave = () => {
-    if (!newLocation.name.trim()) {
+  // selected company from context
+  const { selectedCompanyId } = useCompany();
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!name.trim()) {
       toast.error("Location name is required");
       return;
     }
 
-    // Check for duplicate names
-    if (isLocationNameDuplicate(locations, newLocation.name)) {
-      toast.error("A location with this name already exists");
+    // get company id from context / storage
+    const companyIdFromSession = sessionStorage.getItem("selectedCompanyId");
+    const companyIdFromLocal = localStorage.getItem("selectedCompanyId");
+
+    const companyId =
+      selectedCompanyId || companyIdFromSession || companyIdFromLocal;
+
+    if (!companyId) {
+      toast.error("No company selected. Please select a company first.");
       return;
     }
 
-    try {
-      onSave(newLocation);
-      toast.success("Location added successfully");
-    } catch (error) {
-      console.error('Error saving location:', error);
-      toast.error("Failed to add location");
-    }
+    onSave({
+      name: name.trim(),
+      description: description.trim(),
+      active,
+      companyId,
+    });
   };
 
   return (
-    <Card className="mb-6 border border-dashed">
-      <CardContent className="pt-6">
-        <div className="space-y-4">
-          <div>
-            <label className="text-sm font-medium mb-1 block">Location Name*</label>
-            <Input 
-              value={newLocation.name}
-              onChange={(e) => setNewLocation(prev => ({ ...prev, name: e.target.value }))}
-              placeholder="Enter location name (e.g., Warehouse A, Store 1)"
-            />
-          </div>
-          
-          <div>
-            <label className="text-sm font-medium mb-1 block">Description</label>
-            <Textarea
-              value={newLocation.description || ''}
-              onChange={(e) => setNewLocation(prev => ({ ...prev, description: e.target.value }))}
-              placeholder="Optional description (e.g., Main storage facility)"
-              rows={2}
-            />
-          </div>
-          
-          <div className="flex items-center gap-2">
-            <Switch
-              checked={newLocation.active}
-              onCheckedChange={(checked) => setNewLocation(prev => ({ ...prev, active: checked }))}
-            />
-            <label className="text-sm font-medium">Active</label>
-            <span className="text-xs text-muted-foreground ml-2">
-              (Inactive locations won't appear in dropdowns)
-            </span>
-          </div>
-          
-          <div className="flex justify-end gap-2 pt-2">
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={onCancel}
-            >
-              <X className="mr-1 h-4 w-4" />
-              Cancel
-            </Button>
-            <Button 
-              size="sm"
-              onClick={handleSave}
-            >
-              <Check className="mr-1 h-4 w-4" />
-              Save Location
-            </Button>
-          </div>
+    <form onSubmit={handleSubmit} className="space-y-3 mb-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-1">
+          <Label htmlFor="name">Name *</Label>
+          <Input
+            id="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Warehouse A"
+            required
+          />
         </div>
-      </CardContent>
-    </Card>
+        <div className="space-y-1">
+          <Label htmlFor="description">Description</Label>
+          <Input
+            id="description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Short description"
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center space-x-2">
+        <Checkbox
+          id="active"
+          checked={active}
+          onCheckedChange={(checked) => setActive(!!checked)}
+        />
+        <Label htmlFor="active">Active</Label>
+      </div>
+
+      <div className="flex justify-end gap-2">
+        <Button variant="outline" type="button" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit">Save</Button>
+      </div>
+    </form>
   );
 };
