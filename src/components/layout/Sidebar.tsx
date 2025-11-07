@@ -1,9 +1,9 @@
-import { useMemo } from "react";
+// src/components/layout/Sidebar.tsx
+import { useMemo, useState, useEffect, useCallback } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useUserAccess } from "@/hooks/useUserAccess";
 import {
   BarChart3,
-  ClipboardEdit,
   FileSpreadsheet,
   Home,
   Search,
@@ -19,6 +19,11 @@ import {
 } from "lucide-react";
 import { useUser } from "@/context/UserContext";
 import { Button } from "@/components/ui/button";
+import { useCompany } from "@/context/CompanyContext";
+import { supabase } from "@/integrations/supabase/client";
+
+// Simple in-memory cache so we don't refetch the same company on every page change
+const companyNameCache: Record<string, string> = {};
 
 export function Sidebar({
   isMobile,
@@ -30,6 +35,49 @@ export function Sidebar({
   const location = useLocation();
   const { isAuthenticated, logout, currentUser } = useUser();
   const { accessibleLocations, userRole, userRoleDisplay } = useUserAccess();
+  const { selectedCompanyId } = useCompany();
+
+  const [currentCompanyName, setCurrentCompanyName] = useState<string | null>(
+    null
+  );
+
+  // Optimized fetch: cached per companyId and memoized with useCallback
+  const fetchCompanyName = useCallback(async () => {
+    if (!selectedCompanyId) {
+      setCurrentCompanyName(null);
+      return;
+    }
+
+    // ✅ Use cache first – no network call if we already know this company
+    const cached = companyNameCache[selectedCompanyId];
+    if (cached) {
+      setCurrentCompanyName(cached);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from("companies")
+        .select("name")
+        .eq("id", selectedCompanyId)
+        .single();
+
+      if (error) throw error;
+
+      const name = data?.name || null;
+      if (name) {
+        companyNameCache[selectedCompanyId] = name;
+      }
+      setCurrentCompanyName(name);
+    } catch (err) {
+      console.error("Error fetching current company:", err);
+      setCurrentCompanyName(null);
+    }
+  }, [selectedCompanyId]);
+
+  useEffect(() => {
+    fetchCompanyName();
+  }, [fetchCompanyName]);
 
   if (location.pathname === "/login") return null;
   if (!isAuthenticated) return null;
@@ -64,14 +112,10 @@ export function Sidebar({
     return nav;
   }, [userRole]);
 
-  const handleLogout = () => {
-    logout();
-  };
+  const handleLogout = () => logout();
 
   const handleLinkClick = () => {
-    if (isMobile && setMobileOpen) {
-      setMobileOpen(false);
-    }
+    if (isMobile && setMobileOpen) setMobileOpen(false);
   };
 
   return (
@@ -90,13 +134,22 @@ export function Sidebar({
               <p className="text-xs text-muted-foreground">
                 {userRoleDisplay()}
               </p>
-              {userRole !== "admin" && accessibleLocations.length > 0 && ( // FIXED
+
+              {/* Same UI, just one extra line for company */}
+              {currentCompanyName && (
+                <p className="text-xs text-muted-foreground mt-1 truncate">
+                  Company:{" "}
+                  <span className="font-medium">{currentCompanyName}</span>
+                </p>
+              )}
+
+              {userRole !== "admin" && accessibleLocations.length > 0 && (
                 <div className="mt-1 pt-1 border-t border-accent/50">
                   <p className="text-xs text-muted-foreground mb-1">
                     Assigned locations:
                   </p>
                   <div className="max-h-16 overflow-y-auto">
-                    {accessibleLocations.map((loc) => ( // FIXED
+                    {accessibleLocations.map((loc) => (
                       <div key={loc.id} className="text-xs py-0.5 truncate">
                         {loc.name}
                       </div>
@@ -106,6 +159,7 @@ export function Sidebar({
               )}
             </div>
           </div>
+
           <nav className="flex flex-col space-y-1">
             {navigation.map((item) => {
               const isActive = location.pathname === item.href;
@@ -127,6 +181,7 @@ export function Sidebar({
             })}
           </nav>
         </div>
+
         <div className="mt-auto pt-4">
           <Button
             variant="outline"
