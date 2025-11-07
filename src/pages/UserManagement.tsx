@@ -1,4 +1,4 @@
-// src/pages/UserManagement.tsx
+// src/pages/UserManagement.tsx - COMPLETE REPLACEMENT WITH BUG FIX
 import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -97,12 +97,11 @@ const UserManagement = () => {
         .order("name");
 
       if (locationsError) throw locationsError;
-      const mappedLocations: Location[] =
-        (locationsData || []).map((loc: any) => ({
-          id: loc.id,
-          name: loc.name,
-          companyId: loc.company_id ?? null,
-        }));
+      const mappedLocations: Location[] = (locationsData || []).map((loc: any) => ({
+        id: loc.id,
+        name: loc.name,
+        companyId: loc.company_id ?? null,
+      }));
       setLocations(mappedLocations);
 
       // Companies
@@ -166,16 +165,31 @@ const UserManagement = () => {
     }));
   };
 
+  // 🔥 FIX: When company is toggled, remove locations that don't belong to selected companies
   const toggleCompany = (companyId: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      assignedCompanies: prev.assignedCompanies.includes(companyId)
+    setFormData((prev) => {
+      const newAssignedCompanies = prev.assignedCompanies.includes(companyId)
         ? prev.assignedCompanies.filter((id) => id !== companyId)
-        : [...prev.assignedCompanies, companyId],
-    }));
+        : [...prev.assignedCompanies, companyId];
+
+      // 🔥 CRITICAL FIX: Filter out locations that don't belong to the new company selection
+      const validLocationIds = locations
+        .filter((loc) => loc.companyId && newAssignedCompanies.includes(loc.companyId))
+        .map((loc) => loc.id);
+
+      const cleanedLocations = prev.assignedLocations.filter((locId) =>
+        validLocationIds.includes(locId)
+      );
+
+      return {
+        ...prev,
+        assignedCompanies: newAssignedCompanies,
+        assignedLocations: cleanedLocations, // 🔥 Only keep valid locations
+      };
+    });
   };
 
-  // Locations filtered by selected companies (for both Add & Edit)
+  // 🔥 FIX: Improved filtering logic to ensure only locations from selected companies are shown
   const filteredLocations: Location[] =
     formData.role === "admin"
       ? locations
@@ -215,17 +229,16 @@ const UserManagement = () => {
     }
 
     try {
-      const { data: authData, error: authError } =
-        await supabase.auth.signUp({
-          email: formData.email,
-          password: formData.password,
-          options: {
-            data: {
-              name: formData.name,
-              role: formData.role,
-            },
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: formData.email,
+        password: formData.password,
+        options: {
+          data: {
+            name: formData.name,
+            role: formData.role,
           },
-        });
+        },
+      });
 
       if (authError) throw authError;
 
@@ -337,14 +350,15 @@ const UserManagement = () => {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">
-              User Management
-            </h1>
+            <h1 className="text-2xl font-bold tracking-tight">User Management</h1>
             <p className="text-muted-foreground">
               Manage user accounts, roles, and access permissions.
             </p>
           </div>
-         
+          <Button onClick={openAddDialog}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add User
+          </Button>
         </div>
 
         {/* User table */}
@@ -380,9 +394,7 @@ const UserManagement = () => {
                 ) : (
                   users.map((user) => (
                     <TableRow key={user.id}>
-                      <TableCell className="font-medium">
-                        {user.name}
-                      </TableCell>
+                      <TableCell className="font-medium">{user.name}</TableCell>
                       <TableCell>{user.email}</TableCell>
                       <TableCell>
                         <Badge
@@ -528,9 +540,7 @@ const UserManagement = () => {
                               checked={formData.assignedCompanies.includes(
                                 company.id
                               )}
-                              onCheckedChange={() =>
-                                toggleCompany(company.id)
-                              }
+                              onCheckedChange={() => toggleCompany(company.id)}
                             />
                             <label
                               htmlFor={`add-company-${company.id}`}
@@ -578,9 +588,7 @@ const UserManagement = () => {
                             checked={formData.assignedLocations.includes(
                               location.id
                             )}
-                            onCheckedChange={() =>
-                              toggleLocation(location.id)
-                            }
+                            onCheckedChange={() => toggleLocation(location.id)}
                           />
                           <label
                             htmlFor={`add-location-${location.id}`}
@@ -682,9 +690,7 @@ const UserManagement = () => {
                               checked={formData.assignedCompanies.includes(
                                 company.id
                               )}
-                              onCheckedChange={() =>
-                                toggleCompany(company.id)
-                              }
+                              onCheckedChange={() => toggleCompany(company.id)}
                             />
                             <label
                               htmlFor={`edit-company-${company.id}`}
@@ -732,9 +738,7 @@ const UserManagement = () => {
                             checked={formData.assignedLocations.includes(
                               location.id
                             )}
-                            onCheckedChange={() =>
-                              toggleLocation(location.id)
-                            }
+                            onCheckedChange={() => toggleLocation(location.id)}
                           />
                           <label
                             htmlFor={`edit-location-${location.id}`}
@@ -766,10 +770,7 @@ const UserManagement = () => {
         </Dialog>
 
         {/* DELETE CONFIRM DIALOG */}
-        <Dialog
-          open={isDeleteDialogOpen}
-          onOpenChange={setIsDeleteDialogOpen}
-        >
+        <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Delete User</DialogTitle>
