@@ -29,8 +29,8 @@ class SupabaseDataService {
       lastAudited: dbItem.last_audited,
       notes: dbItem.notes,
       auditorEntries: auditorEntries,
-      // (optional) if you ever need it later:
-      // companyId: dbItem.company_id ?? undefined,
+      // ✅ MODIFICATION: Map company_id from DB to companyId in app
+      companyId: dbItem.company_id ?? undefined,
     };
   }
 
@@ -68,6 +68,8 @@ class SupabaseDataService {
       dbItem.id = item.id;
     }
 
+    // Note: company_id is NOT part of this helper,
+    // it's added in the specific service methods (e.g., setItemMaster)
     return dbItem;
   }
 
@@ -149,14 +151,14 @@ class SupabaseDataService {
     }
   }
 
-  // Saves Item Master (Blueprints) - ONLY for admin initial upload
+  // ✅ MODIFICATION: Saves Item Master (Blueprints) - ONLY for admin initial upload
   public async setItemMaster(
     items: Partial<InventoryItem>[],
-    companyId: string
+    companyId: string // <-- Accept companyId
   ): Promise<void> {
     const dbItems = items.map((item) => ({
       ...this.inventoryItemToDb(item),
-      company_id: companyId,
+      company_id: companyId, // <-- Assign the company ID here
     }));
 
     const { error } = await supabase.from("inventory_items").insert(dbItems);
@@ -167,6 +169,7 @@ class SupabaseDataService {
   }
 
   public async getItemMaster(companyId?: string): Promise<InventoryItem[]> {
+    // ✅ MODIFICATION: Build query first
     let query = supabase.from("inventory_items").select("*");
 
     if (companyId) {
@@ -181,10 +184,8 @@ class SupabaseDataService {
 
       // Fetch all items with pagination
       while (hasMore) {
-        const { data, error } = await supabase
-          .from("inventory_items")
-          .select("*")
-          .range(from, from + pageSize - 1);
+        // ✅ MODIFICATION: Use the 'query' variable
+        const { data, error } = await query.range(from, from + pageSize - 1);
 
         if (error) throw error;
 

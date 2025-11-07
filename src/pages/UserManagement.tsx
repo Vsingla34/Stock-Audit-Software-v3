@@ -344,10 +344,7 @@ const UserManagement = () => {
               Manage user accounts, roles, and access permissions.
             </p>
           </div>
-          <Button onClick={openAddDialog}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add User
-          </Button>
+         
         </div>
 
         {/* User table */}

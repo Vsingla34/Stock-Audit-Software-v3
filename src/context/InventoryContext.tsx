@@ -61,7 +61,11 @@ interface InventoryContextType {
   locations: Location[];
   questions: Question[];
   questionnaireAnswers: QuestionnaireAnswer[];
-  setItemMaster: (items: Omit<InventoryItem, "id">[]) => Promise<void>;
+  // ✅ MODIFICATION: Updated signature to accept companyId
+  setItemMaster: (
+    items: Omit<InventoryItem, "id">[],
+    companyId: string | null
+  ) => Promise<void>;
   setClosingStock: (items: any[]) => Promise<void>;
   updateAuditedItem: (
     item: InventoryItem,
@@ -154,14 +158,25 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     loadData();
   }, []);
 
-  const setItemMaster = async (items: Omit<InventoryItem, "id">[]) => {
+  // ✅ MODIFICATION: Updated function to accept and pass companyId
+  const setItemMaster = async (
+    items: Omit<InventoryItem, "id">[],
+    companyId: string | null // <-- Accept companyId
+  ) => {
     // Ensure all items have auditorEntries initialized
     const itemsWithAuditors = items.map((item) => ({
       ...item,
       auditorEntries: [],
     }));
 
-    await SupabaseDataService.setItemMaster(itemsWithAuditors);
+    // Add validation
+    if (!companyId) {
+      throw new Error("No company selected. Cannot upload item master.");
+    }
+
+    // Pass companyId to the data service
+    await SupabaseDataService.setItemMaster(itemsWithAuditors, companyId);
+
     const dbItems = await SupabaseDataService.getItemMaster();
     setItemMasterState(dbItems);
   };
