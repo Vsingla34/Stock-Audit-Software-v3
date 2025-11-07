@@ -61,12 +61,13 @@ interface InventoryContextType {
   locations: Location[];
   questions: Question[];
   questionnaireAnswers: QuestionnaireAnswer[];
-  // ✅ MODIFICATION: Updated signature to accept companyId
+  // accepts companyId
   setItemMaster: (
     items: Omit<InventoryItem, "id">[],
     companyId: string | null
   ) => Promise<void>;
-  setClosingStock: (items: any[]) => Promise<void>;
+  // ✅ UPDATED: now accepts companyId as well
+  setClosingStock: (items: any[], companyId: string | null) => Promise<void>;
   updateAuditedItem: (
     item: InventoryItem,
     auditorId?: string,
@@ -158,30 +159,37 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     loadData();
   }, []);
 
-  // ✅ MODIFICATION: Updated function to accept and pass companyId
+  // accepts and passes companyId
   const setItemMaster = async (
     items: Omit<InventoryItem, "id">[],
-    companyId: string | null // <-- Accept companyId
+    companyId: string | null
   ) => {
-    // Ensure all items have auditorEntries initialized
     const itemsWithAuditors = items.map((item) => ({
       ...item,
       auditorEntries: [],
     }));
 
-    // Add validation
     if (!companyId) {
       throw new Error("No company selected. Cannot upload item master.");
     }
 
-    // Pass companyId to the data service
     await SupabaseDataService.setItemMaster(itemsWithAuditors, companyId);
 
     const dbItems = await SupabaseDataService.getItemMaster();
     setItemMasterState(dbItems);
   };
 
-  const setClosingStock = async (items: any[]) => {
+  // ✅ UPDATED: now takes companyId and passes it to SupabaseDataService
+  const setClosingStock = async (
+    items: any[],
+    companyId: string | null
+  ): Promise<void> => {
+    if (!companyId) {
+      throw new Error(
+        "No company selected. Cannot upload closing stock without company."
+      );
+    }
+
     if (itemMaster.length === 0) {
       throw new Error(
         "Item master is empty. Please upload item master before uploading closing stock."
@@ -222,6 +230,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
           lastAudited: existingItemAtLocation.lastAudited,
           notes: existingItemAtLocation.notes,
           auditorEntries: existingItemAtLocation.auditorEntries || [],
+          // keep existing company if present, otherwise use current companyId
+          companyId: existingItemAtLocation.companyId ?? companyId,
         });
       } else {
         const blueprint = itemMaster.find(
@@ -248,11 +258,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
           physicalQuantity: 0,
           status: "pending",
           auditorEntries: [],
+          companyId: metadataSource.companyId ?? companyId,
         });
       }
     }
 
-    await SupabaseDataService.setClosingStock(finalItemsToUpsert);
+    await SupabaseDataService.setClosingStock(finalItemsToUpsert, companyId);
+
     const dbItems = await SupabaseDataService.getItemMaster();
     setItemMasterState(dbItems);
     setAuditedItemsState(await SupabaseDataService.getAuditedItems());
@@ -263,56 +275,45 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     auditorId?: string,
     auditorName?: string
   ) => {
-    // Get existing auditor entries
     const existingItem = itemMaster.find(
       (i) => i.id === item.id && i.location === item.location
     );
     let auditorEntries: AuditorEntry[] = existingItem?.auditorEntries || [];
 
-    // Calculate the total physical quantity from all auditors
     let totalPhysicalQuantity = 0;
 
-    // If auditor info provided, update auditor entries
     if (auditorId && auditorName && item.physicalQuantity !== undefined) {
       const existingEntryIndex = auditorEntries.findIndex(
         (e) => e.auditorId === auditorId
       );
 
       if (existingEntryIndex >= 0) {
-        // Update existing auditor's entry
         auditorEntries[existingEntryIndex] = {
           auditorId,
           auditorName,
-          quantityFound: item.physicalQuantity, // This is the NEW total for this auditor
+          quantityFound: item.physicalQuantity,
           auditedAt: new Date().toISOString(),
         };
       } else {
-        // Add new auditor entry
         auditorEntries.push({
           auditorId,
           auditorName,
-          quantityFound: item.physicalQuantity, // This is the total for this new auditor
+          quantityFound: item.physicalQuantity,
           auditedAt: new Date().toISOString(),
-        });
+        })
       }
 
-      // CRITICAL FIX: Calculate total from ALL auditor entries
       totalPhysicalQuantity = auditorEntries.reduce(
         (sum, entry) => sum + entry.quantityFound,
         0
       );
-
-      console.log("=== Auditor Calculation ===");
-      console.log("Auditor Entries:", auditorEntries);
-      console.log("Total Physical Quantity:", totalPhysicalQuantity);
     } else {
-      // If no auditor info, use the provided physical quantity
       totalPhysicalQuantity = item.physicalQuantity || 0;
     }
 
     const itemToUpdate: InventoryItem = {
       ...item,
-      physicalQuantity: totalPhysicalQuantity, // Use calculated total
+      physicalQuantity: totalPhysicalQuantity,
       status:
         totalPhysicalQuantity !== undefined &&
         item.systemQuantity === totalPhysicalQuantity
@@ -324,20 +325,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       auditorEntries: auditorEntries,
     };
 
-    console.log("Item to update:", itemToUpdate);
-
     await SupabaseDataService.setAuditedItems([itemToUpdate]);
     const dbItems = await SupabaseDataService.getItemMaster();
     setItemMasterState(dbItems);
     setAuditedItemsState(await SupabaseDataService.getAuditedItems());
   };
 
-  // ✅ UPDATED: addLocation now attaches companyId and sends it to Supabase
+  // addLocation includes companyId
   const addLocation = async (location: Omit<Location, "id">) => {
     try {
       console.log("Adding location:", location);
 
-      // 1) Determine companyId
       const companyIdFromPayload = location.companyId;
       const companyIdFromSession =
         typeof window !== "undefined"
@@ -357,14 +355,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         );
       }
 
-      // 2) Clean data
       const cleanLocation: Omit<Location, "id"> = {
         name: location.name.trim(),
         active:
-          location.active !== undefined
-            ? location.active
-            : true,
-        companyId, // ✅ attach company id so SupabaseDataService can map to company_id
+          location.active !== undefined ? location.active : true,
+        companyId,
       };
 
       if (location.description && location.description.trim()) {
@@ -376,12 +371,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         cleanLocation
       );
 
-      // 3) Save in DB (this method must insert company_id based on cleanLocation.companyId)
       await SupabaseDataService.addLocation(cleanLocation);
 
       console.log("Location saved, reloading locations...");
 
-      // 4) Reload locations from database
       const updatedLocations = await SupabaseDataService.getLocations();
       setLocations(updatedLocations);
 
@@ -460,13 +453,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       );
     }
 
-    // CRITICAL: Pass the individual auditor's quantity, not the total
-    // The updateAuditedItem function will calculate the total from all auditors
     await updateAuditedItem(
       {
         ...masterItem,
-        physicalQuantity: quantity, // This is THIS auditor's count
-        status: "pending", // Status will be recalculated based on total
+        physicalQuantity: quantity,
+        status: "pending",
         lastAudited: new Date().toISOString(),
       },
       auditorId,

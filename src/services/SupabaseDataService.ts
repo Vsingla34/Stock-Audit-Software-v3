@@ -3,7 +3,6 @@ import { InventoryItem, Location } from "@/context/InventoryContext";
 
 class SupabaseDataService {
   private dbToInventoryItem(dbItem: any): InventoryItem {
-    // Safely parse auditor_entries
     let auditorEntries = [];
     try {
       if (dbItem.auditor_entries) {
@@ -29,7 +28,6 @@ class SupabaseDataService {
       lastAudited: dbItem.last_audited,
       notes: dbItem.notes,
       auditorEntries: auditorEntries,
-      // ✅ MODIFICATION: Map company_id from DB to companyId in app
       companyId: dbItem.company_id ?? undefined,
     };
   }
@@ -47,7 +45,6 @@ class SupabaseDataService {
       notes: item.notes || null,
     };
 
-    // Handle auditor_entries - always ensure it's a valid JSON string or don't include it
     if (
       item.auditorEntries &&
       Array.isArray(item.auditorEntries) &&
@@ -59,21 +56,17 @@ class SupabaseDataService {
         dbItem.auditor_entries = "[]";
       }
     } else {
-      // For new items or items without auditors, explicitly set to empty array
       dbItem.auditor_entries = "[]";
     }
 
-    // Only include ID if it exists (for updates)
     if (item.id) {
       dbItem.id = item.id;
     }
 
-    // Note: company_id is NOT part of this helper,
-    // it's added in the specific service methods (e.g., setItemMaster)
+    // company_id is added by specific methods (setItemMaster / setClosingStock)
     return dbItem;
   }
 
-  // NEW: Check if item master exists
   public async hasItemMaster(): Promise<boolean> {
     const { data, error } = await supabase
       .from("inventory_items")
@@ -84,7 +77,6 @@ class SupabaseDataService {
     return (data && data.length > 0) || false;
   }
 
-  // NEW: Get count of items in master
   public async getItemMasterCount(): Promise<number> {
     const { count, error } = await supabase
       .from("inventory_items")
@@ -94,7 +86,6 @@ class SupabaseDataService {
     return count || 0;
   }
 
-  // Optimized: Validate SKUs exist in master (handles large datasets efficiently)
   public async validateSKUsExist(
     skus: string[]
   ): Promise<{ valid: boolean; missingSKUs: string[] }> {
@@ -105,14 +96,12 @@ class SupabaseDataService {
     try {
       const startTime = Date.now();
 
-      // For very large SKU lists, validate in chunks to avoid URL length limits
-      const chunkSize = 500; // Validate 500 SKUs at a time
+      const chunkSize = 500;
       const existingSKUsSet = new Set<string>();
 
       for (let i = 0; i < skus.length; i += chunkSize) {
         const skuChunk = skus.slice(i, i + chunkSize);
 
-        // For each chunk, fetch all matching items with pagination
         let from = 0;
         const pageSize = 1000;
         let hasMore = true;
@@ -151,14 +140,14 @@ class SupabaseDataService {
     }
   }
 
-  // ✅ MODIFICATION: Saves Item Master (Blueprints) - ONLY for admin initial upload
+  // Item master insert
   public async setItemMaster(
     items: Partial<InventoryItem>[],
-    companyId: string // <-- Accept companyId
+    companyId: string
   ): Promise<void> {
     const dbItems = items.map((item) => ({
       ...this.inventoryItemToDb(item),
-      company_id: companyId, // <-- Assign the company ID here
+      company_id: companyId,
     }));
 
     const { error } = await supabase.from("inventory_items").insert(dbItems);
@@ -169,7 +158,6 @@ class SupabaseDataService {
   }
 
   public async getItemMaster(companyId?: string): Promise<InventoryItem[]> {
-    // ✅ MODIFICATION: Build query first
     let query = supabase.from("inventory_items").select("*");
 
     if (companyId) {
@@ -182,9 +170,7 @@ class SupabaseDataService {
       const pageSize = 1000;
       let hasMore = true;
 
-      // Fetch all items with pagination
       while (hasMore) {
-        // ✅ MODIFICATION: Use the 'query' variable
         const { data, error } = await query.range(from, from + pageSize - 1);
 
         if (error) throw error;
@@ -206,13 +192,15 @@ class SupabaseDataService {
     }
   }
 
-  // UPDATED: Saves Closing Stock with validation
-  public async setClosingStock(items: Partial<InventoryItem>[]): Promise<void> {
+  // ✅ UPDATED: Closing stock also writes company_id
+  public async setClosingStock(
+    items: Partial<InventoryItem>[],
+    companyId: string
+  ): Promise<void> {
     if (items.length === 0) {
       throw new Error("Cannot upload empty closing stock");
     }
 
-    // VALIDATION: Check if item master exists
     const hasMaster = await this.hasItemMaster();
     if (!hasMaster) {
       throw new Error(
@@ -220,7 +208,6 @@ class SupabaseDataService {
       );
     }
 
-    // VALIDATION: Check all SKUs exist in master
     const skus = items.map((item) => item.sku).filter(Boolean) as string[];
     const validation = await this.validateSKUsExist(skus);
 
@@ -232,7 +219,10 @@ class SupabaseDataService {
       );
     }
 
-    const dbItems = items.map((item) => this.inventoryItemToDb(item));
+    const dbItems = items.map((item) => ({
+      ...this.inventoryItemToDb(item),
+      company_id: item.companyId ?? companyId,
+    }));
 
     const { error } = await supabase
       .from("inventory_items")
@@ -262,7 +252,6 @@ class SupabaseDataService {
       const pageSize = 1000;
       let hasMore = true;
 
-      // Fetch all audited items with pagination
       while (hasMore) {
         const { data, error } = await supabase
           .from("inventory_items")
@@ -287,7 +276,7 @@ class SupabaseDataService {
     }
   }
 
-  // 🔹 UPDATED: map companyId -> company_id on insert
+  // locations with company_id mapping
   public async addLocation(
     location: Omit<Location, "id">
   ): Promise<Location> {
@@ -322,7 +311,6 @@ class SupabaseDataService {
     }
   }
 
-  // 🔹 UPDATED: map companyId -> company_id on update
   public async updateLocation(location: Location): Promise<void> {
     try {
       const { id, ...updateData } = location;
@@ -350,7 +338,6 @@ class SupabaseDataService {
     }
   }
 
-  // 🔹 UPDATED: map company_id -> companyId on read
   public async getLocations(): Promise<Location[]> {
     try {
       let allLocations: any[] = [];
@@ -404,7 +391,6 @@ class SupabaseDataService {
       const pageSize = 1000;
       let hasMore = true;
 
-      // Fetch all questions with pagination
       while (hasMore) {
         const { data, error } = await supabase
           .from("questions")

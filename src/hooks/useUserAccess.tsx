@@ -1,4 +1,3 @@
-
 import { useUser } from "@/context/UserContext";
 import { useInventory } from "@/context/InventoryContext";
 
@@ -16,9 +15,9 @@ export const useUserAccess = () => {
     }
     
     // For auditors and clients, filter by assigned locations
-    if (currentUser.assignedLocations?.length) {
-      return locations.filter(location => 
-        currentUser.assignedLocations?.includes(location.id)
+    if (currentUser.assigned_locations?.length) {
+      return locations.filter((location) =>
+        currentUser.assigned_locations?.includes(location.id)
       );
     }
     
@@ -33,7 +32,7 @@ export const useUserAccess = () => {
     if (currentUser.role === "admin") return true;
     
     // Otherwise check if location is in assigned locations
-    return currentUser.assignedLocations?.includes(locationId) || false;
+    return currentUser.assigned_locations?.includes(locationId) || false;
   };
   
   // Check if user can perform physical audits
@@ -84,10 +83,14 @@ export const useUserAccess = () => {
     if (!currentUser) return "";
     
     switch (currentUser.role) {
-      case "admin": return "Administrator";
-      case "auditor": return "Inventory Auditor";
-      case "client": return "Client User";
-      default: return currentUser.role;
+      case "admin":
+        return "Administrator";
+      case "auditor":
+        return "Inventory Auditor";
+      case "client":
+        return "Client User";
+      default:
+        return currentUser.role;
     }
   };
 
