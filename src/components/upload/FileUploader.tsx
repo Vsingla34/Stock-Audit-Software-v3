@@ -1,3 +1,4 @@
+// src/components/upload/FileUploader.tsx
 import { useState } from "react";
 import { useInventory } from "@/context/InventoryContext";
 import { toast } from "sonner";
@@ -14,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useCompany } from "@/context/CompanyContext";
+import SupabaseDataService from "@/services/supabaseDataService";
 
 export interface FileUploaderProps {
   userRole: "admin" | "auditor" | "client";
@@ -21,6 +23,24 @@ export interface FileUploaderProps {
   canUploadItemMaster?: boolean;
   canUploadClosingStock?: boolean;
 }
+
+/**
+ * ✅ Generate a REAL UUID v4 string so Postgres uuid columns accept it.
+ */
+const generateBatchKey = (): string => {
+  // Modern browsers / Node 18+
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+
+  // Fallback UUID v4 polyfill
+  const template = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx";
+  return template.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
 
 export const FileUploader = ({
   userRole,
@@ -37,21 +57,18 @@ export const FileUploader = ({
     useInventory();
   const { selectedCompanyId } = useCompany();
 
-  // Locations the current user can use for uploads
   const accessibleLocations = locations.filter(
     (location) =>
       userRole === "admin" ||
       (assignedLocations && assignedLocations.includes(location.id))
   );
 
-  // Does any item master exist?
   const hasItemMaster = itemMaster.length > 0;
 
   const handleItemMasterUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
 
-      // File type validation
       if (!file.name.toLowerCase().endsWith(".csv")) {
         toast.error("Invalid file format", {
           description: "Please upload a CSV file",
@@ -60,7 +77,6 @@ export const FileUploader = ({
         return;
       }
 
-      // File size validation (10MB limit)
       if (file.size > 10 * 1024 * 1024) {
         toast.error("File too large", {
           description: "Please upload a file smaller than 10MB",
@@ -80,7 +96,6 @@ export const FileUploader = ({
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
 
-      // VALIDATION: Check if item master exists before allowing closing stock upload
       if (!hasItemMaster) {
         toast.error("Item Master Required", {
           description:
@@ -90,7 +105,6 @@ export const FileUploader = ({
         return;
       }
 
-      // File type validation
       if (!file.name.toLowerCase().endsWith(".csv")) {
         toast.error("Invalid file format", {
           description: "Please upload a CSV file",
@@ -99,7 +113,6 @@ export const FileUploader = ({
         return;
       }
 
-      // File size validation (10MB limit)
       if (file.size > 10 * 1024 * 1024) {
         toast.error("File too large", {
           description: "Please upload a file smaller than 10MB",
@@ -134,7 +147,6 @@ export const FileUploader = ({
           throw new Error("Item Master file is empty or invalid.");
         }
 
-        // Basic validation for required columns
         const firstRow = rows[0];
         const requiredColumns = ["sku", "name"];
         const missingColumns = requiredColumns.filter(
@@ -145,8 +157,7 @@ export const FileUploader = ({
           throw new Error(
             `Missing required columns in Item Master: ${missingColumns.join(
               ", "
-            )}. ` +
-              `Required columns are: SKU, Name, Category (optional)`
+            )}. Required columns are: SKU, Name, Category (optional)`
           );
         }
 
@@ -156,11 +167,25 @@ export const FileUploader = ({
           throw new Error("No valid items found in Item Master file");
         }
 
-        // ✅ attach companyId
-        await setItemMaster(processedItems, selectedCompanyId);
+        const batchKey = generateBatchKey();
+        const itemsWithKey = processedItems.map((item) => ({
+          ...item,
+          uploadBatchKey: batchKey,
+        }));
+
+        await setItemMaster(itemsWithKey, selectedCompanyId);
+
+        await SupabaseDataService.logUploadBatch({
+          batchKey,
+          companyId: selectedCompanyId,
+          locationId: null,
+          locationName: null,
+          uploadType: "item_master",
+          totalItems: itemsWithKey.length,
+        });
 
         toast.success("Item Master Uploaded Successfully!", {
-          description: `Loaded ${processedItems.length} products. You can now upload Closing Stock.`,
+          description: `Loaded ${itemsWithKey.length} products. You can now upload Closing Stock.`,
         });
 
         setItemMasterFile(null);
@@ -174,14 +199,12 @@ export const FileUploader = ({
           );
         }
 
-        // VALIDATION: Final check before processing
         if (!hasItemMaster) {
           throw new Error(
             "Item Master must be uploaded first. Please contact your administrator to upload the Item Master."
           );
         }
 
-        // Location validation for auditors
         if (
           userRole === "auditor" &&
           (!selectedLocation || selectedLocation === "default")
@@ -198,7 +221,6 @@ export const FileUploader = ({
           throw new Error("Closing Stock file is empty or invalid.");
         }
 
-        // Basic validation for required columns
         const firstRow = rows[0];
         const requiredColumns = ["sku", "systemquantity"];
         const missingColumns = requiredColumns.filter((col) => {
@@ -212,12 +234,10 @@ export const FileUploader = ({
           throw new Error(
             `Missing required columns in Closing Stock: ${missingColumns.join(
               ", "
-            )}. ` +
-              `Required columns are: SKU, SystemQuantity, Location (for admin)`
+            )}. Required columns are: SKU, SystemQuantity, Location (for admin)`
           );
         }
 
-        // Process the closing stock data
         const processedItems = processClosingStockData(
           rows,
           userRole,
@@ -229,7 +249,6 @@ export const FileUploader = ({
           throw new Error("No valid items found in Closing Stock file");
         }
 
-        // VALIDATION: Check if all SKUs exist in item master
         const uploadSKUs = processedItems.map((item) => item.sku);
         const masterSKUs = new Set(itemMaster.map((item) => item.sku));
         const invalidSKUs = uploadSKUs.filter((sku) => !masterSKUs.has(sku));
@@ -239,19 +258,46 @@ export const FileUploader = ({
           throw new Error(
             `The following SKUs are not in the Item Master and cannot be uploaded: ${uniqueInvalidSKUs
               .slice(0, 10)
-              .join(", ")}` +
-              (uniqueInvalidSKUs.length > 10
+              .join(", ")}${
+              uniqueInvalidSKUs.length > 10
                 ? ` and ${uniqueInvalidSKUs.length - 10} more...`
-                : "") +
-              `. Only items from the Item Master can be included in Closing Stock.`
+                : ""
+            }. Only items from the Item Master can be included in Closing Stock.`
           );
         }
 
-        // ✅ Attempt to upload with companyId
-        await setClosingStock(processedItems, selectedCompanyId);
+        const batchKey = generateBatchKey();
+        const itemsWithKey = processedItems.map((item) => ({
+          ...item,
+          uploadBatchKey: batchKey,
+        }));
+
+        await setClosingStock(itemsWithKey, selectedCompanyId);
+
+        let locationIdForHistory: string | null = null;
+        let locationNameForHistory: string | null = null;
+
+        if (
+          userRole === "auditor" &&
+          selectedLocation &&
+          selectedLocation !== "default"
+        ) {
+          locationIdForHistory = selectedLocation;
+          const locObj = locations.find((l) => l.id === selectedLocation);
+          locationNameForHistory = locObj?.name ?? null;
+        }
+
+        await SupabaseDataService.logUploadBatch({
+          batchKey,
+          companyId: selectedCompanyId,
+          locationId: locationIdForHistory,
+          locationName: locationNameForHistory,
+          uploadType: "closing_stock",
+          totalItems: itemsWithKey.length,
+        });
 
         toast.success("Closing Stock Uploaded Successfully!", {
-          description: `Successfully saved ${processedItems.length} items to the database.`,
+          description: `Successfully saved ${itemsWithKey.length} items to the database.`,
         });
 
         setClosingStockFile(null);
@@ -276,7 +322,8 @@ export const FileUploader = ({
     }
   };
 
-  const isImportDisabled = isImporting || (!itemMasterFile && !closingStockFile);
+  const isImportDisabled =
+    isImporting || (!itemMasterFile && !closingStockFile);
 
   if (!canUploadItemMaster && !canUploadClosingStock) {
     return <NoPermissionCard />;
@@ -284,7 +331,6 @@ export const FileUploader = ({
 
   return (
     <div className="space-y-6">
-      {/* Warning Alert for Closing Stock Upload when no Item Master */}
       {!hasItemMaster && canUploadClosingStock && !canUploadItemMaster && (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
@@ -296,7 +342,6 @@ export const FileUploader = ({
         </Alert>
       )}
 
-      {/* Info Alert showing Item Master status */}
       {hasItemMaster && (
         <Alert>
           <AlertCircle className="h-4 w-4" />

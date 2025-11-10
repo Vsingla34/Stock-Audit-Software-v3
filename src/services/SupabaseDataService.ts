@@ -1,3 +1,4 @@
+// src/services/supabaseDataService.ts
 import { supabase } from "@/integrations/supabase/client";
 import { InventoryItem, Location } from "@/context/InventoryContext";
 
@@ -29,6 +30,7 @@ class SupabaseDataService {
       notes: dbItem.notes,
       auditorEntries: auditorEntries,
       companyId: dbItem.company_id ?? undefined,
+      uploadBatchKey: dbItem.upload_batch_key ?? undefined, // 👈 important
     };
   }
 
@@ -44,6 +46,11 @@ class SupabaseDataService {
       last_audited: item.lastAudited,
       notes: item.notes || null,
     };
+
+    // 🔑 carry batch key to DB
+    if (item.uploadBatchKey) {
+      dbItem.upload_batch_key = item.uploadBatchKey;
+    }
 
     if (
       item.auditorEntries &&
@@ -66,6 +73,68 @@ class SupabaseDataService {
     // company_id is added by specific methods (setItemMaster / setClosingStock)
     return dbItem;
   }
+
+  // ---------- Upload history helpers ----------
+
+  public async logUploadBatch(params: {
+    batchKey: string;
+    companyId: string;
+    locationId?: string | null;
+    locationName?: string | null;
+    uploadType: "item_master" | "closing_stock";
+    totalItems: number;
+  }): Promise<void> {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    const { error } = await supabase.from("inventory_upload_history").insert({
+      batch_key: params.batchKey,
+      company_id: params.companyId,
+      location_id: params.locationId ?? null,
+      location_name: params.locationName ?? null,
+      upload_type: params.uploadType,
+      total_items: params.totalItems,
+      uploaded_by: user?.id ?? null,
+    });
+
+    if (error) throw error;
+  }
+
+  public async getUploadHistory(companyId: string) {
+    const { data, error } = await supabase
+      .from("inventory_upload_history")
+      .select("*")
+      .eq("company_id", companyId)
+      .order("uploaded_at", { ascending: false });
+
+    if (error) throw error;
+    return data;
+  }
+
+  // returns how many inventory_items rows were deleted for this batch
+  public async deleteUploadBatch(batchKey: string): Promise<number> {
+    // 1) delete items for this batch and get count
+    const { data, error, count } = await supabase
+      .from("inventory_items")
+      .delete()
+      .eq("upload_batch_key", batchKey)
+      .select("id", { count: "exact" });
+
+    if (error) throw error;
+
+    // 2) delete the history row itself
+    const { error: historyError } = await supabase
+      .from("inventory_upload_history")
+      .delete()
+      .eq("batch_key", batchKey);
+
+    if (historyError) throw historyError;
+
+    return count ?? (data ? data.length : 0);
+  }
+
+  // ---------- Item master / closing stock ----------
 
   public async hasItemMaster(): Promise<boolean> {
     const { data, error } = await supabase
@@ -192,7 +261,7 @@ class SupabaseDataService {
     }
   }
 
-  // ✅ UPDATED: Closing stock also writes company_id
+  // Closing stock upsert (also writes company_id & upload_batch_key)
   public async setClosingStock(
     items: Partial<InventoryItem>[],
     companyId: string
@@ -235,6 +304,8 @@ class SupabaseDataService {
     }
   }
 
+  // ---------- Audit items ----------
+
   public async setAuditedItems(items: InventoryItem[]): Promise<void> {
     if (items.length > 0) {
       const dbItems = items.map((item) => this.inventoryItemToDb(item));
@@ -276,7 +347,8 @@ class SupabaseDataService {
     }
   }
 
-  // locations with company_id mapping
+  // ---------- Locations ----------
+
   public async addLocation(
     location: Omit<Location, "id">
   ): Promise<Location> {
@@ -383,6 +455,8 @@ class SupabaseDataService {
       .eq("id", locationId);
     if (error) throw error;
   }
+
+  // ---------- Questionnaire ----------
 
   public async getQuestions(): Promise<any[]> {
     try {
@@ -498,6 +572,8 @@ class SupabaseDataService {
 
     if (error) throw error;
   }
+
+  // ---------- Global clear ----------
 
   public async clearInventoryData(): Promise<void> {
     try {

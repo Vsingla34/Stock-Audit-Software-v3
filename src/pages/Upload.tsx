@@ -1,7 +1,9 @@
+// src/pages/Upload.tsx (or wherever this file lives)
 import { AppLayout } from "@/components/layout/AppLayout";
 import { FileUploader } from "@/components/upload/FileUploader";
 import { ExampleData } from "@/components/upload/ExampleData";
 import { ClearDataButton } from "@/components/upload/ClearDataButton";
+import { UploadHistory } from "@/components/upload/UploadHistory"; // 👈 NEW
 import {
   Card,
   CardContent,
@@ -79,7 +81,6 @@ const Upload = () => {
               <CardContent>
                 <FileUploader
                   userRole={currentUser.role}
-                  // ✅ use snake_case field from user profile
                   assignedLocations={currentUser.assigned_locations || []}
                   canUploadItemMaster={canUploadItemMaster()}
                   canUploadClosingStock={canUploadClosingStock()}
@@ -116,7 +117,11 @@ const Upload = () => {
           </TabsContent>
 
           {canUploadItemMaster() && (
-            <TabsContent value="clear">
+            <TabsContent value="clear" className="space-y-4">
+              {/* 🔹 New history box with per-upload delete */}
+              <UploadHistory />
+
+              {/* Existing nuclear "clear all" card stays the same */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-red-600">

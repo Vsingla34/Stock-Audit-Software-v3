@@ -22,6 +22,7 @@ export interface InventoryItem {
   lastAudited?: string;
   notes?: string;
   auditorEntries?: AuditorEntry[];
+  uploadBatchKey?: string;
 }
 
 export interface Location {
@@ -66,7 +67,11 @@ interface InventoryContextType {
     items: Omit<InventoryItem, "id">[],
     companyId: string | null
   ) => Promise<void>;
-  setClosingStock: (items: any[], companyId: string | null) => Promise<void>;
+  // 🔹 typed items as Partial<InventoryItem>[] so uploadBatchKey is preserved
+  setClosingStock: (
+    items: Partial<InventoryItem>[],
+    companyId: string | null
+  ) => Promise<void>;
   updateAuditedItem: (
     item: InventoryItem,
     auditorId?: string,
@@ -194,8 +199,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   // 🔹 Upload Closing Stock – company-scoped
+  //    IMPORTANT: preserve uploadBatchKey coming from FileUploader
   const setClosingStock = async (
-    items: any[],
+    items: Partial<InventoryItem>[],
     companyId: string | null
   ): Promise<void> => {
     if (!companyId) {
@@ -210,7 +216,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       );
     }
 
-    const uploadSKUs = items.map((item) => item.sku);
+    const uploadSKUs = items.map((item) => item.sku as string);
     const masterSKUs = new Set(itemMaster.map((item) => item.sku));
     const missingSKUs = uploadSKUs.filter((sku) => !masterSKUs.has(sku));
 
@@ -232,21 +238,25 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       );
 
       if (existingItemAtLocation) {
+        // 🔹 existing row for this (sku, location) – update it, keep new uploadBatchKey
         finalItemsToUpsert.push({
           id: existingItemAtLocation.id,
           sku: stockItem.sku,
           name: existingItemAtLocation.name || "Unnamed Item",
           category: existingItemAtLocation.category || "",
-          location: stockItem.location,
-          systemQuantity: stockItem.systemQuantity,
+          location: stockItem.location as string,
+          systemQuantity: stockItem.systemQuantity as number,
           physicalQuantity: existingItemAtLocation.physicalQuantity || 0,
           status: existingItemAtLocation.status || "pending",
           lastAudited: existingItemAtLocation.lastAudited,
           notes: existingItemAtLocation.notes,
           auditorEntries: existingItemAtLocation.auditorEntries || [],
           companyId: existingItemAtLocation.companyId ?? companyId,
+          // ✅ preserve batch key from the upload
+          uploadBatchKey: stockItem.uploadBatchKey,
         });
       } else {
+        // 🔹 no row yet for this location – copy metadata from blueprint / any item with same SKU
         const blueprint = itemMaster.find(
           (item) =>
             item.sku === stockItem.sku &&
@@ -266,12 +276,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
           sku: stockItem.sku,
           name: metadataSource.name || "Unnamed Item",
           category: metadataSource.category || "",
-          location: stockItem.location,
-          systemQuantity: stockItem.systemQuantity,
+          location: stockItem.location as string,
+          systemQuantity: stockItem.systemQuantity as number,
           physicalQuantity: 0,
           status: "pending",
           auditorEntries: [],
           companyId: metadataSource.companyId ?? companyId,
+          // ✅ preserve batch key from the upload
+          uploadBatchKey: stockItem.uploadBatchKey,
         });
       }
     }
@@ -379,8 +391,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
       const cleanLocation: Omit<Location, "id"> = {
         name: location.name.trim(),
-        active:
-          location.active !== undefined ? location.active : true,
+        active: location.active !== undefined ? location.active : true,
         companyId,
       };
 
