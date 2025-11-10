@@ -1,9 +1,11 @@
-import { useInventory, InventoryItem } from "@/context/InventoryContext";
+import { useMemo } from "react";
+import { useInventory } from "@/context/InventoryContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Check, X } from "lucide-react";
 import { format } from "date-fns";
 import { useUser } from "@/context/UserContext";
 import { useUserAccess } from "@/hooks/useUserAccess";
+import { useCompany } from "@/context/CompanyContext";
 
 interface RecentActivityProps {
   selectedLocation?: string;
@@ -13,37 +15,66 @@ export const RecentActivity = ({ selectedLocation }: RecentActivityProps) => {
   const { auditedItems, locations } = useInventory();
   const { currentUser } = useUser();
   const { accessibleLocations } = useUserAccess();
+  const { selectedCompanyId } = useCompany();
 
   // Get user's accessible location names
   const userAccessibleLocations = accessibleLocations();
-  const accessibleLocationNames = userAccessibleLocations.map(loc => loc.name);
+  const accessibleLocationNames = userAccessibleLocations.map((loc) => loc.name);
 
-  // Filter audited items based on user role and selected location
-  const filteredItems = auditedItems.filter(item => {
-    // If admin and a specific location is selected, show only that location
+  // Map of locationName -> location (for fast lookup)
+  const locationByName = useMemo(() => {
+    const map = new Map<string, (typeof locations)[number]>();
+    locations.forEach((loc) => {
+      map.set(loc.name, loc);
+    });
+    return map;
+  }, [locations]);
+
+  // Filter audited items based on:
+  // 1. Current company
+  // 2. User role + accessible locations
+  // 3. Selected location filter
+  const filteredItems = auditedItems.filter((item) => {
+    const itemLocation = locationByName.get(item.location);
+
+    // If we can't resolve the location, ignore this item
+    if (!itemLocation) return false;
+
+    // ✅ Company filter – only show items whose location belongs to current company
+    if (selectedCompanyId && itemLocation.companyId !== selectedCompanyId) {
+      return false;
+    }
+
+    // Admin logic
     if (currentUser?.role === "admin") {
       if (selectedLocation && selectedLocation !== "all") {
-        const locationObj = locations.find(loc => loc.id === selectedLocation);
+        const locationObj = locations.find((loc) => loc.id === selectedLocation);
         return item.location === locationObj?.name;
       }
-      // If no location selected or "all" selected, show all items
+      // If no specific location selected (or "all"), show all items of current company
       return true;
-    } else {
-      // For non-admin users, only show items from accessible locations
-      if (selectedLocation && selectedLocation !== "all") {
-        const locationObj = locations.find(loc => loc.id === selectedLocation);
-        return item.location === locationObj?.name && accessibleLocationNames.includes(item.location);
-      }
-      // Show all items from accessible locations
-      return accessibleLocationNames.includes(item.location);
     }
+
+    // Non-admin logic
+    if (selectedLocation && selectedLocation !== "all") {
+      const locationObj = locations.find((loc) => loc.id === selectedLocation);
+      return (
+        item.location === locationObj?.name &&
+        accessibleLocationNames.includes(item.location)
+      );
+    }
+
+    // Show items from accessible locations only, within current company
+    return accessibleLocationNames.includes(item.location);
   });
 
   // Get the most recent 5 audited items from filtered results
   const recentItems = [...filteredItems]
     .sort((a, b) => {
       if (!a.lastAudited || !b.lastAudited) return 0;
-      return new Date(b.lastAudited).getTime() - new Date(a.lastAudited).getTime();
+      return (
+        new Date(b.lastAudited).getTime() - new Date(a.lastAudited).getTime()
+      );
     })
     .slice(0, 5);
 
@@ -56,7 +87,8 @@ export const RecentActivity = ({ selectedLocation }: RecentActivityProps) => {
         <CardContent>
           <div className="text-center text-muted-foreground py-8">
             No recent audit activity
-            {selectedLocation && selectedLocation !== "all" && " for this location"}.
+            {selectedLocation && selectedLocation !== "all" && " for this location"}
+            .
           </div>
         </CardContent>
       </Card>
@@ -78,7 +110,7 @@ export const RecentActivity = ({ selectedLocation }: RecentActivityProps) => {
       <CardContent>
         <div className="space-y-4">
           {recentItems.map((item, index) => (
-            <div 
+            <div
               key={`${item.id}-${item.lastAudited}-${index}`}
               className="flex items-start gap-3 pb-3 border-b last:border-0 last:pb-0"
             >
@@ -93,24 +125,27 @@ export const RecentActivity = ({ selectedLocation }: RecentActivityProps) => {
                   </div>
                 )}
               </div>
-              
+
               <div className="flex-1 min-w-0">
                 <p className="font-medium truncate">{item.name}</p>
                 <p className="text-sm text-muted-foreground">
                   {item.sku} - {item.location}
                 </p>
               </div>
-              
+
               <div className="text-right flex-shrink-0">
-                <p className={`font-medium ${
-                  item.status === "matched" 
-                    ? "text-green-600" 
-                    : "text-red-600"
-                }`}>
+                <p
+                  className={`font-medium ${
+                    item.status === "matched"
+                      ? "text-green-600"
+                      : "text-red-600"
+                  }`}
+                >
                   {item.physicalQuantity} / {item.systemQuantity}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {item.lastAudited && format(new Date(item.lastAudited), "dd MMM, HH:mm")}
+                  {item.lastAudited &&
+                    format(new Date(item.lastAudited), "dd MMM, HH:mm")}
                 </p>
               </div>
             </div>

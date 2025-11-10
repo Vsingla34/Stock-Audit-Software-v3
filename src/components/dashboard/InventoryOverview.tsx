@@ -4,7 +4,7 @@ import { BarChart, FileText, CheckCheck, AlertCircle } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { useUserAccess } from "@/hooks/useUserAccess";
-import { useUser } from "@/context/UserContext"; 
+import { useUser } from "@/context/UserContext";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Select,
@@ -13,54 +13,135 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useCompany } from "@/context/CompanyContext";
+
+type Summary = {
+  totalItems: number;
+  auditedItems: number;
+  matched: number;
+  discrepancies: number;
+  pendingItems: number;
+};
+
+const ZERO_SUMMARY: Summary = {
+  totalItems: 0,
+  auditedItems: 0,
+  matched: 0,
+  discrepancies: 0,
+  pendingItems: 0,
+};
+
+function normalizeSummary(raw: Partial<Summary>): Summary {
+  const totalItems = raw.totalItems ?? 0;
+  const auditedItems = raw.auditedItems ?? 0;
+  const matched = raw.matched ?? 0;
+  const discrepancies = raw.discrepancies ?? 0;
+  const pendingItems = Math.max(totalItems - auditedItems, 0);
+  return { totalItems, auditedItems, matched, discrepancies, pendingItems };
+}
 
 export const InventoryOverview = () => {
   const { getInventorySummary, locations, getLocationSummary } = useInventory();
-  const { currentUser } = useUser(); 
+  const { currentUser } = useUser();
   const { accessibleLocations, userRole } = useUserAccess();
-  
+  const { selectedCompanyId } = useCompany();
+
   const [selectedLocation, setSelectedLocation] = useState<string>("");
   const [hasInitialized, setHasInitialized] = useState(false);
-  
+
+  // All locations user has access to (hook returns a function)
   const userLocations = useMemo(() => accessibleLocations(), [accessibleLocations]);
 
-  // Initialize location for non-admin users
+  // Filter user locations by current company
+  const companyUserLocations = useMemo(() => {
+    if (!selectedCompanyId) return userLocations;
+    return userLocations.filter((loc) => loc.companyId === selectedCompanyId);
+  }, [userLocations, selectedCompanyId]);
+
+  // Initialize selected location
   useEffect(() => {
     if (!hasInitialized && currentUser) {
-      if (currentUser.role !== "admin" && userLocations.length > 0) {
-        // Auto-select first location for non-admin users
-        setSelectedLocation(userLocations[0].id);
+      if (currentUser.role !== "admin" && companyUserLocations.length > 0) {
+        // Non-admin: default to first location of current company
+        setSelectedLocation(companyUserLocations[0].id);
       } else if (currentUser.role === "admin") {
-        // Admin sees all locations by default
+        // Admin: "all locations" for current company
         setSelectedLocation("");
       }
       setHasInitialized(true);
     }
-  }, [currentUser, userLocations, hasInitialized]);
+  }, [currentUser, companyUserLocations, hasInitialized]);
 
-  // Memoized summary calculation
-  const summary = useMemo(() => {
-    if (currentUser?.role === "admin" && !selectedLocation) {
-      return getInventorySummary();
-    } else if (selectedLocation) {
-      const locationObj = locations.find(loc => loc.id === selectedLocation);
-      if (locationObj) {
-        return getLocationSummary(locationObj.name);
+  // Compute summary with company filter
+  const summary: Summary = useMemo(() => {
+    if (!currentUser) return ZERO_SUMMARY;
+
+    // If a specific location is selected
+    if (selectedLocation) {
+      const locationObj = locations.find(
+        (loc) =>
+          loc.id === selectedLocation &&
+          (!selectedCompanyId || loc.companyId === selectedCompanyId)
+      );
+      if (!locationObj) return ZERO_SUMMARY;
+      return normalizeSummary(getLocationSummary(locationObj.name));
+    }
+
+    // Admin + "all locations" for current company
+    if (currentUser.role === "admin") {
+      // If no company selected, fall back to global summary
+      if (!selectedCompanyId) {
+        return normalizeSummary(getInventorySummary());
       }
+
+      const companyLocations = locations.filter(
+        (loc) => loc.companyId === selectedCompanyId
+      );
+
+      if (companyLocations.length === 0) {
+        return ZERO_SUMMARY;
+      }
+
+      const aggregated = companyLocations.reduce<Summary>(
+        (acc, loc) => {
+          const s = normalizeSummary(getLocationSummary(loc.name));
+          acc.totalItems += s.totalItems;
+          acc.auditedItems += s.auditedItems;
+          acc.matched += s.matched;
+          acc.discrepancies += s.discrepancies;
+          return acc;
+        },
+        { ...ZERO_SUMMARY }
+      );
+
+      // Recalculate pending to guarantee consistency & no negatives
+      aggregated.pendingItems = Math.max(
+        aggregated.totalItems - aggregated.auditedItems,
+        0
+      );
+      return aggregated;
     }
-    
-    // Fallback for non-admin without location selected
-    if (currentUser?.role !== "admin" && userLocations.length > 0) {
-      const firstLocation = userLocations[0];
-      return getLocationSummary(firstLocation.name);
+
+    // Non-admin, no specific location selected: default to first accessible location of this company
+    if (companyUserLocations.length > 0) {
+      const firstLocation = companyUserLocations[0];
+      return normalizeSummary(getLocationSummary(firstLocation.name));
     }
-    
-    return { totalItems: 0, auditedItems: 0, matched: 0, discrepancies: 0, pendingItems: 0 };
-  }, [selectedLocation, locations, currentUser?.role, userLocations, getInventorySummary, getLocationSummary]);
+
+    return ZERO_SUMMARY;
+  }, [
+    currentUser,
+    selectedLocation,
+    locations,
+    selectedCompanyId,
+    companyUserLocations,
+    getInventorySummary,
+    getLocationSummary,
+  ]);
 
   const completionPercentage = useMemo(() => {
-    return summary.totalItems > 0 
-      ? Math.round((summary.auditedItems / summary.totalItems) * 100) 
+    return summary.totalItems > 0
+      ? Math.round((summary.auditedItems / summary.totalItems) * 100)
       : 0;
   }, [summary.auditedItems, summary.totalItems]);
 
@@ -72,14 +153,16 @@ export const InventoryOverview = () => {
     if (currentUser?.role === "admin" && !selectedLocation) {
       return "All Locations";
     }
-    const location = userLocations.find(loc => loc.id === selectedLocation);
+    const location = companyUserLocations.find((loc) => loc.id === selectedLocation);
     return location?.name || "Select Location";
-  }, [currentUser?.role, userLocations, selectedLocation]);
+  }, [currentUser?.role, companyUserLocations, selectedLocation]);
 
-  if (userRole !== "admin" && userLocations.length === 0) {
+  if (userRole !== "admin" && companyUserLocations.length === 0) {
     return (
       <div className="flex items-center justify-center min-h-[200px]">
-        <h1 className="text-black/50 font-semibold text-[1.2rem]">Currently You Don't have access</h1>
+        <h1 className="text-black/50 font-semibold text-[1.2rem]">
+          Currently You Don't have access
+        </h1>
       </div>
     );
   }
@@ -89,17 +172,19 @@ export const InventoryOverview = () => {
       <Select
         value={selectedLocation}
         onValueChange={handleLocationChange}
-        disabled={currentUser?.role !== "admin" && userLocations.length <= 1}
+        disabled={
+          currentUser?.role !== "admin" && companyUserLocations.length <= 1
+        }
       >
         <SelectTrigger>
           <SelectValue placeholder={selectedLocationName} />
         </SelectTrigger>
-        
+
         <SelectContent>
           {currentUser?.role === "admin" && (
             <SelectItem value="">All Locations</SelectItem>
           )}
-          {userLocations.map((location) => (
+          {companyUserLocations.map((location) => (
             <SelectItem key={location.id} value={location.id}>
               {location.name}
             </SelectItem>
@@ -114,7 +199,7 @@ export const InventoryOverview = () => {
           description="Total items in inventory"
           icon={<FileText className="h-4 w-4 text-muted-foreground" />}
         />
-        
+
         <StatCard
           title="Audit Progress"
           value={`${completionPercentage}%`}
