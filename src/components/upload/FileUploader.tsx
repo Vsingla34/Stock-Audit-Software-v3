@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useCompany } from "@/context/CompanyContext";
-import SupabaseDataService from "@/services/supabaseDataService";
+import SupabaseDataService from "@/services/SupabaseDataService";
 
 export interface FileUploaderProps {
   userRole: "admin" | "auditor" | "client";
