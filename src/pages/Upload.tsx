@@ -1,9 +1,11 @@
-// src/pages/Upload.tsx (or wherever this file lives)
+// src/pages/Upload.tsx
 import { AppLayout } from "@/components/layout/AppLayout";
 import { FileUploader } from "@/components/upload/FileUploader";
 import { ExampleData } from "@/components/upload/ExampleData";
 import { ClearDataButton } from "@/components/upload/ClearDataButton";
-import { UploadHistory } from "@/components/upload/UploadHistory"; // 👈 NEW
+import { UploadHistory } from "@/components/upload/UploadHistory";
+import { LocationUploadCard } from "@/components/upload/LocationUploadCard"; // ⬅️ your location-upload component
+
 import {
   Card,
   CardContent,
@@ -36,14 +38,16 @@ const Upload = () => {
     return null; // Don't render anything while redirecting
   }
 
+  const isAdminCanUploadItemMaster = canUploadItemMaster();
+
   return (
     <AppLayout>
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Upload Data</h1>
           <p className="text-muted-foreground">
-            {canUploadItemMaster()
-              ? "Import your Item Master and Closing Stock data"
+            {isAdminCanUploadItemMaster
+              ? "Import your Item Master, Closing Stock data, and optionally Locations"
               : "Import your Closing Stock data for your assigned locations"}
           </p>
         </div>
@@ -63,17 +67,19 @@ const Upload = () => {
           <TabsList className="grid w-full grid-cols-3 mb-4">
             <TabsTrigger value="upload">Upload Files</TabsTrigger>
             <TabsTrigger value="examples">Example Templates</TabsTrigger>
-            {canUploadItemMaster() && (
+            {isAdminCanUploadItemMaster && (
               <TabsTrigger value="clear">Clear Data</TabsTrigger>
             )}
           </TabsList>
 
+          {/* ========= Upload Tab ========= */}
           <TabsContent value="upload" className="space-y-4">
+            {/* Item Master + Closing Stock */}
             <Card>
               <CardHeader>
                 <CardTitle>Import Inventory Data</CardTitle>
                 <CardDescription>
-                  {canUploadItemMaster()
+                  {isAdminCanUploadItemMaster
                     ? "Upload your Item Master (without quantity) and Closing Stock (with quantity) files"
                     : "Upload your Closing Stock (with quantity) files for your assigned locations"}
                 </CardDescription>
@@ -82,11 +88,29 @@ const Upload = () => {
                 <FileUploader
                   userRole={currentUser.role}
                   assignedLocations={currentUser.assigned_locations || []}
-                  canUploadItemMaster={canUploadItemMaster()}
+                  canUploadItemMaster={isAdminCanUploadItemMaster}
                   canUploadClosingStock={canUploadClosingStock()}
                 />
               </CardContent>
             </Card>
+
+            {/* Location upload via file (admin only, optional) */}
+            {isAdminCanUploadItemMaster && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Upload Locations (Optional)</CardTitle>
+                  <CardDescription>
+                    Upload a CSV / Excel file with columns like{" "}
+                    <span className="font-medium">name, status, description</span>{" "}
+                    to create or update locations. You can still add locations
+                    manually from the Locations page.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <LocationUploadCard />
+                </CardContent>
+              </Card>
+            )}
 
             <Card className="p-6 border-blue-200 bg-blue-50">
               <h3 className="text-md font-semibold text-blue-800 mb-2">
@@ -112,16 +136,18 @@ const Upload = () => {
             </Card>
           </TabsContent>
 
+          {/* ========= Example Templates ========= */}
           <TabsContent value="examples">
             <ExampleData />
           </TabsContent>
 
-          {canUploadItemMaster() && (
+          {/* ========= Clear Data (history + global clear) ========= */}
+          {isAdminCanUploadItemMaster && (
             <TabsContent value="clear" className="space-y-4">
-              {/* 🔹 New history box with per-upload delete */}
+              {/* Per-upload / per-location delete */}
               <UploadHistory />
 
-              {/* Existing nuclear "clear all" card stays the same */}
+              {/* Global wipe */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-red-600">
