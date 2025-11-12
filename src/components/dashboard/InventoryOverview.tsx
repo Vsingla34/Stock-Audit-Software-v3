@@ -31,6 +31,9 @@ const ZERO_SUMMARY: Summary = {
   pendingItems: 0,
 };
 
+// Sentinel for “All Locations” in the Select control
+const ALL_LOCATIONS_VALUE = "__ALL__";
+
 function normalizeSummary(raw: Partial<Summary>): Summary {
   const totalItems = raw.totalItems ?? 0;
   const auditedItems = raw.auditedItems ?? 0;
@@ -46,7 +49,7 @@ export const InventoryOverview = () => {
   const { accessibleLocations, userRole } = useUserAccess();
   const { selectedCompanyId } = useCompany();
 
-  const [selectedLocation, setSelectedLocation] = useState<string>("");
+  const [selectedLocation, setSelectedLocation] = useState<string>(""); // store "" for All
   const [hasInitialized, setHasInitialized] = useState(false);
 
   // All locations user has access to (hook returns a function)
@@ -62,21 +65,40 @@ export const InventoryOverview = () => {
   useEffect(() => {
     if (!hasInitialized && currentUser) {
       if (currentUser.role !== "admin" && companyUserLocations.length > 0) {
-        // Non-admin: default to first location of current company
         setSelectedLocation(companyUserLocations[0].id);
       } else if (currentUser.role === "admin") {
-        // Admin: "all locations" for current company
-        setSelectedLocation("");
+        setSelectedLocation(""); // All
       }
       setHasInitialized(true);
     }
   }, [currentUser, companyUserLocations, hasInitialized]);
 
+  // If current selection becomes invalid due to company switch, reset
+  useEffect(() => {
+    if (!currentUser) return;
+    if (currentUser.role === "admin") {
+      // admin can always fall back to All
+      if (
+        selectedLocation &&
+        !companyUserLocations.some((l) => l.id === selectedLocation)
+      ) {
+        setSelectedLocation("");
+      }
+    } else {
+      // non-admin must have a concrete location
+      if (
+        !selectedLocation ||
+        !companyUserLocations.some((l) => l.id === selectedLocation)
+      ) {
+        setSelectedLocation(companyUserLocations[0]?.id ?? "");
+      }
+    }
+  }, [currentUser, companyUserLocations, selectedLocation]);
+
   // Compute summary with company filter
   const summary: Summary = useMemo(() => {
     if (!currentUser) return ZERO_SUMMARY;
 
-    // If a specific location is selected
     if (selectedLocation) {
       const locationObj = locations.find(
         (loc) =>
@@ -89,7 +111,6 @@ export const InventoryOverview = () => {
 
     // Admin + "all locations" for current company
     if (currentUser.role === "admin") {
-      // If no company selected, fall back to global summary
       if (!selectedCompanyId) {
         return normalizeSummary(getInventorySummary());
       }
@@ -97,10 +118,7 @@ export const InventoryOverview = () => {
       const companyLocations = locations.filter(
         (loc) => loc.companyId === selectedCompanyId
       );
-
-      if (companyLocations.length === 0) {
-        return ZERO_SUMMARY;
-      }
+      if (companyLocations.length === 0) return ZERO_SUMMARY;
 
       const aggregated = companyLocations.reduce<Summary>(
         (acc, loc) => {
@@ -114,7 +132,6 @@ export const InventoryOverview = () => {
         { ...ZERO_SUMMARY }
       );
 
-      // Recalculate pending to guarantee consistency & no negatives
       aggregated.pendingItems = Math.max(
         aggregated.totalItems - aggregated.auditedItems,
         0
@@ -122,7 +139,6 @@ export const InventoryOverview = () => {
       return aggregated;
     }
 
-    // Non-admin, no specific location selected: default to first accessible location of this company
     if (companyUserLocations.length > 0) {
       const firstLocation = companyUserLocations[0];
       return normalizeSummary(getLocationSummary(firstLocation.name));
@@ -145,8 +161,9 @@ export const InventoryOverview = () => {
       : 0;
   }, [summary.auditedItems, summary.totalItems]);
 
+  // Map UI value to state: ALL_LOCATIONS_VALUE -> ""
   const handleLocationChange = useCallback((value: string) => {
-    setSelectedLocation(value);
+    setSelectedLocation(value === ALL_LOCATIONS_VALUE ? "" : value);
   }, []);
 
   const selectedLocationName = useMemo(() => {
@@ -170,11 +187,10 @@ export const InventoryOverview = () => {
   return (
     <>
       <Select
-        value={selectedLocation}
+        // Use sentinel for the control value so “All Locations” is selectable again
+        value={selectedLocation || ALL_LOCATIONS_VALUE}
         onValueChange={handleLocationChange}
-        disabled={
-          currentUser?.role !== "admin" && companyUserLocations.length <= 1
-        }
+        disabled={currentUser?.role !== "admin" && companyUserLocations.length <= 1}
       >
         <SelectTrigger>
           <SelectValue placeholder={selectedLocationName} />
@@ -182,7 +198,7 @@ export const InventoryOverview = () => {
 
         <SelectContent>
           {currentUser?.role === "admin" && (
-            <SelectItem value="">All Locations</SelectItem>
+            <SelectItem value={ALL_LOCATIONS_VALUE}>All Locations</SelectItem>
           )}
           {companyUserLocations.map((location) => (
             <SelectItem key={location.id} value={location.id}>
