@@ -1,6 +1,14 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
+// src/context/InventoryContext.tsx
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+} from "react";
 import SupabaseDataService from "@/services/SupabaseDataService";
 import { useCompany } from "@/context/CompanyContext";
+import { useUser } from "@/context/UserContext";
+
 
 export interface AuditorEntry {
   auditorId: string;
@@ -46,6 +54,7 @@ export interface Question {
   type: QuestionType;
   required: boolean;
   options?: QuestionOption[];
+  companyId?: string;
 }
 
 export interface QuestionnaireAnswer {
@@ -67,7 +76,6 @@ interface InventoryContextType {
     items: Omit<InventoryItem, "id">[],
     companyId: string | null
   ) => Promise<void>;
-  // 🔹 typed items as Partial<InventoryItem>[] so uploadBatchKey is preserved
   setClosingStock: (
     items: Partial<InventoryItem>[],
     companyId: string | null
@@ -107,7 +115,7 @@ interface InventoryContextType {
   updateQuestion: (question: Question) => Promise<void>;
   deleteQuestion: (questionId: string) => Promise<void>;
   saveQuestionnaireAnswer: (
-    answer: Omit<QuestionnaireAnswer, "answeredOn" | "answeredBy">
+    answer: Omit<QuestionnaireAnswer, "answeredOn">
   ) => Promise<void>;
   getLocationQuestionnaireAnswers: (locationId: string) => QuestionnaireAnswer[];
   getQuestionsForLocation: (locationId: string) => Question[];
@@ -125,34 +133,34 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
   const [auditedItems, setAuditedItemsState] = useState<InventoryItem[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
+  const { currentUser } = useUser();   
   const [questionnaireAnswers, setQuestionnaireAnswers] = useState<
     QuestionnaireAnswer[]
   >([]);
 
-  // 🔹 currently-selected company (null = all companies / admin view)
   const { selectedCompanyId } = useCompany();
 
-  // 🔹 Load / reload data whenever the selected company changes
+  // Load everything when company changes
   useEffect(() => {
     const loadData = async () => {
       try {
         console.log("Loading inventory data for company:", selectedCompanyId);
 
-        // Items for selected company (or all if none selected)
+        // Item master (company scoped)
         const dbItems = await SupabaseDataService.getItemMaster(
           selectedCompanyId || undefined
         );
         console.log("Loaded items:", dbItems.length);
         setItemMasterState(dbItems);
 
-        // Audited items for selected company
+        // Audited items (company scoped)
         const audited = await SupabaseDataService.getAuditedItems(
           selectedCompanyId || undefined
         );
         console.log("Loaded audited items:", audited.length);
         setAuditedItemsState(audited);
 
-        // Locations: get all from DB, then filter by company in memory
+        // Locations (then filter by company)
         const locs = await SupabaseDataService.getLocations();
         const filteredLocs = selectedCompanyId
           ? locs.filter((l) => l.companyId === selectedCompanyId)
@@ -160,10 +168,28 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         console.log("Loaded locations:", filteredLocs.length);
         setLocations(filteredLocs);
 
-        const qs = await SupabaseDataService.getQuestions();
-        console.log("Loaded questions:", qs?.length || 0);
-        setQuestions(qs || []);
+        // Questions (already filtered by company at DB level)
+        const qs = await SupabaseDataService.getQuestions(
+          selectedCompanyId || undefined
+        );
+        console.log(
+          "Loaded questions for company:",
+          selectedCompanyId,
+          qs?.length || 0
+        );
 
+        setQuestions(
+          (qs || []).map((q: any) => ({
+            id: q.id,
+            text: q.text,
+            type: q.type,
+            required: q.required,
+            options: q.options || [],
+            companyId: q.company_id ?? selectedCompanyId,
+          }))
+        );
+
+        // Questionnaire answers (all; they’re tied to locationId anyway)
         const answers = await SupabaseDataService.getQuestionnaireAnswers();
         console.log("Loaded answers:", answers?.length || 0);
         setQuestionnaireAnswers(answers || []);
@@ -177,7 +203,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     loadData();
   }, [selectedCompanyId]);
 
-  // 🔹 Upload Item Master – company-scoped
+  // Upload item master (company scoped)
   const setItemMaster = async (
     items: Omit<InventoryItem, "id">[],
     companyId: string | null
@@ -193,13 +219,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
     await SupabaseDataService.setItemMaster(itemsWithAuditors, companyId);
 
-    // Reload just this company's items
     const dbItems = await SupabaseDataService.getItemMaster(companyId);
     setItemMasterState(dbItems);
   };
 
-  // 🔹 Upload Closing Stock – company-scoped
-  //    IMPORTANT: preserve uploadBatchKey coming from FileUploader
+  // Upload closing stock (company scoped, preserve uploadBatchKey)
   const setClosingStock = async (
     items: Partial<InventoryItem>[],
     companyId: string | null
@@ -224,8 +248,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       throw new Error(
         `The following SKUs are not in the item master: ${[
           ...new Set(missingSKUs),
-        ].join(", ")}. ` +
-          `Only items from the master list can be uploaded in closing stock.`
+        ].join(", ")}. Only items from the master list can be uploaded in closing stock.`
       );
     }
 
@@ -238,7 +261,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       );
 
       if (existingItemAtLocation) {
-        // 🔹 existing row for this (sku, location) – update it, keep new uploadBatchKey
         finalItemsToUpsert.push({
           id: existingItemAtLocation.id,
           sku: stockItem.sku,
@@ -252,11 +274,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
           notes: existingItemAtLocation.notes,
           auditorEntries: existingItemAtLocation.auditorEntries || [],
           companyId: existingItemAtLocation.companyId ?? companyId,
-          // ✅ preserve batch key from the upload
           uploadBatchKey: stockItem.uploadBatchKey,
         });
       } else {
-        // 🔹 no row yet for this location – copy metadata from blueprint / any item with same SKU
         const blueprint = itemMaster.find(
           (item) =>
             item.sku === stockItem.sku &&
@@ -282,7 +302,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
           status: "pending",
           auditorEntries: [],
           companyId: metadataSource.companyId ?? companyId,
-          // ✅ preserve batch key from the upload
           uploadBatchKey: stockItem.uploadBatchKey,
         });
       }
@@ -290,7 +309,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
     await SupabaseDataService.setClosingStock(finalItemsToUpsert, companyId);
 
-    // Reload state for this company
     const dbItems = await SupabaseDataService.getItemMaster(companyId);
     setItemMasterState(dbItems);
     setAuditedItemsState(
@@ -350,7 +368,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
           ? "discrepancy"
           : "pending",
       lastAudited: new Date().toISOString(),
-      auditorEntries: auditorEntries,
+      auditorEntries,
     };
 
     await SupabaseDataService.setAuditedItems([itemToUpdate]);
@@ -492,8 +510,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
     if (!masterItem) {
       throw new Error(
-        `Cannot add item: SKU "${item.sku}" does not exist in the item master for location "${item.location}". ` +
-          `Only items from the master list can be audited.`
+        `Cannot add item: SKU "${item.sku}" does not exist in the item master for location "${item.location}". Only items from the master list can be audited.`
       );
     }
 
@@ -566,8 +583,30 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const addQuestion = async (question: Omit<Question, "id">) => {
-    const newQuestion = await SupabaseDataService.addQuestion(question);
-    if (newQuestion) setQuestions((prev) => [...prev, newQuestion]);
+    if (!selectedCompanyId) {
+      throw new Error(
+        "No company selected. Cannot create question without company_id."
+      );
+    }
+
+    const newQuestion = await SupabaseDataService.addQuestion({
+      ...question,
+      companyId: selectedCompanyId,
+    });
+
+    if (newQuestion) {
+      setQuestions((prev) => [
+        ...prev,
+        {
+          id: newQuestion.id,
+          text: newQuestion.text,
+          type: newQuestion.type,
+          required: newQuestion.required,
+          options: newQuestion.options || [],
+          companyId: newQuestion.company_id ?? selectedCompanyId,
+        },
+      ]);
+    }
   };
 
   const updateQuestion = async (question: Question) => {
@@ -585,28 +624,42 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     );
   };
 
-  const saveQuestionnaireAnswer = async (
-    answer: Omit<QuestionnaireAnswer, "answeredOn" | "answeredBy">
-  ) => {
-    const newAnswer: QuestionnaireAnswer = {
-      ...answer,
-      answeredOn: new Date().toISOString(),
-    };
-    setQuestionnaireAnswers((prev) => {
-      const existingIndex = prev.findIndex(
-        (a) =>
-          a.questionId === answer.questionId &&
-          a.locationId === answer.locationId
-      );
-      if (existingIndex !== -1) {
-        const updated = [...prev];
-        updated[existingIndex] = newAnswer;
-        return updated;
-      }
-      return [...prev, newAnswer];
-    });
-    await SupabaseDataService.upsertQuestionnaireAnswer(answer);
+ 
+ const saveQuestionnaireAnswer = async (
+  answer: Omit<QuestionnaireAnswer, "answeredOn" | "answeredBy">
+) => {
+  // Prefer name, then email as fallback
+  const answeredBy =
+    (currentUser as any)?.name ||
+    (currentUser as any)?.fullName ||
+    (currentUser as any)?.displayName ||
+    currentUser?.email ||
+    undefined;
+
+  const newAnswer: QuestionnaireAnswer = {
+    ...answer,
+    answeredOn: new Date().toISOString(),
+    answeredBy,                           // 👈 store name here
   };
+
+  setQuestionnaireAnswers((prev) => {
+    const existingIndex = prev.findIndex(
+      (a) =>
+        a.questionId === answer.questionId &&
+        a.locationId === answer.locationId
+    );
+    if (existingIndex !== -1) {
+      const updated = [...prev];
+      updated[existingIndex] = newAnswer;
+      return updated;
+    }
+    return [...prev, newAnswer];
+  });
+
+  // 👇 send the full object (with answeredBy) to Supabase
+  await SupabaseDataService.upsertQuestionnaireAnswer(newAnswer);
+};
+
 
   const getLocationQuestionnaireAnswers = (
     locationId: string
@@ -616,8 +669,18 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     );
   };
 
-  const getQuestionsForLocation = (_locationId: string): Question[] => {
-    return questions;
+  // Company-wise question list for a location
+  const getQuestionsForLocation = (locationId: string): Question[] => {
+    const loc = locations.find((l) => l.id === locationId);
+    const companyId = loc?.companyId ?? selectedCompanyId;
+
+    if (!companyId) {
+      return questions;
+    }
+
+    return questions.filter(
+      (q) => !q.companyId || q.companyId === companyId
+    );
   };
 
   const getQuestionById = (questionId: string): Question | undefined => {

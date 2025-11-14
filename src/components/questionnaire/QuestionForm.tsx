@@ -3,6 +3,8 @@ import { Question, QuestionOption, QuestionType, useInventory } from "@/context/
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { useUser } from "@/context/UserContext";
+
 import {
   Select,
   SelectContent,
@@ -28,6 +30,8 @@ export const QuestionForm = ({ question, onSave, onCancel }: QuestionFormProps) 
   const [text, setText] = useState(question?.text || "");
   const [type, setType] = useState<QuestionType>(question?.type || "text");
   const [required, setRequired] = useState(question?.required ?? true);
+  const { currentUser } = useUser();
+
   const [options, setOptions] = useState<QuestionOption[]>(
     question?.options || [{ id: `opt-${Date.now()}-1`, text: "" }]
   );

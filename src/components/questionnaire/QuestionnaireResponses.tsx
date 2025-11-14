@@ -1,4 +1,4 @@
-import { useInventory } from "@/context/InventoryContext";
+import { useInventory, QuestionnaireAnswer } from "@/context/InventoryContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -12,12 +12,70 @@ interface QuestionnaireResponsesProps {
   locationName: string;
 }
 
-export const QuestionnaireResponses = ({ locationId, locationName }: QuestionnaireResponsesProps) => {
+export const QuestionnaireResponses = ({
+  locationId,
+  locationName,
+}: QuestionnaireResponsesProps) => {
   const { questions, questionnaireAnswers, getQuestionById } = useInventory();
+
+  // Central helper: convert stored answer → human-readable text
+  const formatAnswerForDisplay = (answerObj: QuestionnaireAnswer): string => {
+    const question = getQuestionById(answerObj.questionId);
+    let raw: any = answerObj.answer;
+
+    // If answer is a JSON-stringified array, parse it
+    if (typeof raw === "string") {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          raw = parsed;
+        }
+      } catch {
+        // keep as string
+      }
+    }
+
+    if (!question) {
+      return Array.isArray(raw) ? raw.join(", ") : String(raw ?? "");
+    }
+
+    // Yes / No
+    if (question.type === "yes_no") {
+      const v = Array.isArray(raw) ? raw[0] : raw;
+      const s = String(v ?? "").toLowerCase();
+      if (["yes", "true", "1"].includes(s)) return "Yes";
+      if (["no", "false", "0"].includes(s)) return "No";
+      return String(v ?? "");
+    }
+
+    // Single select → one option id → label
+    if (question.type === "single_select") {
+      const optionId = Array.isArray(raw) ? raw[0] : raw;
+      const opt = question.options?.find((o) => o.id === optionId);
+      return opt?.text ?? String(optionId ?? "");
+    }
+
+    // Multi select → array of option ids → labels
+    if (question.type === "multi_select") {
+      const ids = Array.isArray(raw) ? raw : [raw];
+      const labels = ids
+        .map((id) => {
+          const opt = question.options?.find((o) => o.id === id);
+          return opt?.text ?? String(id ?? "");
+        })
+        .filter(Boolean);
+      return labels.join(", ");
+    }
+
+    // Text question
+    return Array.isArray(raw) ? raw.join(", ") : String(raw ?? "");
+  };
 
   const generatePDF = () => {
     try {
-      const locationAnswers = questionnaireAnswers.filter(answer => answer.locationId === locationId);
+      const locationAnswers = questionnaireAnswers.filter(
+        (answer) => answer.locationId === locationId
+      );
 
       if (locationAnswers.length === 0) {
         toast.error("No responses available for this location");
@@ -26,7 +84,7 @@ export const QuestionnaireResponses = ({ locationId, locationName }: Questionnai
 
       const doc = new jsPDF();
 
-      // Add title
+      // Title
       doc.setFontSize(18);
       doc.text(`Audit Questionnaire Responses: ${locationName}`, 14, 22);
 
@@ -35,61 +93,47 @@ export const QuestionnaireResponses = ({ locationId, locationName }: Questionnai
 
       let yPos = 40;
 
-      // Add responses
+      // Responses
       locationAnswers.forEach((answer, index) => {
         const question = getQuestionById(answer.questionId);
-
         if (!question) return;
-
-        doc.setFontSize(12);
-        doc.setFont(undefined, 'bold');
 
         if (yPos > 250) {
           doc.addPage();
           yPos = 20;
         }
 
+        doc.setFontSize(12);
+        doc.setFont(undefined, "bold");
         doc.text(`${index + 1}. ${question.text}`, 14, yPos);
         yPos += 8;
 
-        doc.setFont(undefined, 'normal');
-        let answerText = '';
+        doc.setFont(undefined, "normal");
 
-        if (Array.isArray(answer.answer)) {
-          const selectedOptions = question.options?.filter(opt =>
-            answer.answer.includes(opt.id)
-          ) || [];
-
-          answerText = selectedOptions.map(opt => opt.text).join(", ");
-        } else {
-          // ✅ FIX: Updated check to use snake_case.
-          if (question.type === "single_select") {
-            const option = question.options?.find(opt => opt.id === answer.answer);
-            answerText = option?.text || (answer.answer as string);
-          // ✅ FIX: Updated check to use snake_case.
-          } else if (question.type === "yes_no") {
-            answerText = answer.answer === "yes" ? "Yes" : "No";
-          } else {
-            answerText = answer.answer as string;
-          }
-        }
-
-        const lines = doc.splitTextToSize(answerText, 180);
+        const answerText = formatAnswerForDisplay(answer);
+        const lines = doc.splitTextToSize(answerText || "-", 180);
         doc.text(lines, 14, yPos);
         yPos += 6 * lines.length + 10;
 
         doc.setFontSize(10);
         doc.setTextColor(100);
+
+        const answeredOn = new Date(answer.answeredOn).toLocaleString();
         if (answer.answeredBy) {
-          doc.text(`Answered by: ${answer.answeredBy} on ${new Date(answer.answeredOn).toLocaleString()}`, 14, yPos);
+          doc.text(
+            `Answered by: ${answer.answeredBy} on ${answeredOn}`,
+            14,
+            yPos
+          );
         } else {
-          doc.text(`Answered on ${new Date(answer.answeredOn).toLocaleString()}`, 14, yPos);
+          doc.text(`Answered on ${answeredOn}`, 14, yPos);
         }
+
         yPos += 15;
         doc.setTextColor(0);
       });
 
-      // Add signature section
+      // Sign-off page
       doc.addPage();
       doc.setFontSize(12);
       doc.text("Approval Sign-off", 14, 20);
@@ -105,7 +149,11 @@ export const QuestionnaireResponses = ({ locationId, locationName }: Questionnai
       doc.text("Role: _______________________", 14, 110);
       doc.text("Date: _______________________", 14, 120);
 
-      doc.save(`questionnaire-responses-${locationName.replace(/\s+/g, '-').toLowerCase()}.pdf`);
+      doc.save(
+        `questionnaire-responses-${locationName
+          .replace(/\s+/g, "-")
+          .toLowerCase()}.pdf`
+      );
 
       toast.success("PDF generated successfully");
     } catch (error) {
@@ -114,7 +162,9 @@ export const QuestionnaireResponses = ({ locationId, locationName }: Questionnai
     }
   };
 
-  const filteredAnswers = questionnaireAnswers.filter(answer => answer.locationId === locationId);
+  const filteredAnswers = questionnaireAnswers.filter(
+    (answer) => answer.locationId === locationId
+  );
 
   return (
     <Card>
@@ -136,51 +186,33 @@ export const QuestionnaireResponses = ({ locationId, locationName }: Questionnai
 
             <div className="space-y-6">
               {questions.map((question) => {
-                const answer = filteredAnswers.find(a => a.questionId === question.id);
-
+                const answer = filteredAnswers.find(
+                  (a) => a.questionId === question.id
+                );
                 if (!answer) return null;
 
                 return (
-                  <div key={question.id} className="border rounded-md p-4 space-y-2 bg-slate-50">
+                  <div
+                    key={question.id}
+                    className="border rounded-md p-4 space-y-2 bg-slate-50"
+                  >
                     <div className="font-medium">{question.text}</div>
                     <div className="text-sm text-muted-foreground mb-2">
-                      {/* ✅ FIX: Updated checks to use snake_case. */}
-                      {question.type === "text" ? "Text response" :
-                        question.type === "single_select" ? "Single choice" :
-                        question.type === "multi_select" ? "Multiple choice" : "Yes/No question"}
+                      {question.type === "text"
+                        ? "Text response"
+                        : question.type === "single_select"
+                        ? "Single choice"
+                        : question.type === "multi_select"
+                        ? "Multiple choice"
+                        : "Yes/No question"}
                     </div>
 
                     <div className="bg-white p-3 rounded border">
-                      {question.type === "text" && (
-                        <p>{answer.answer as string}</p>
-                      )}
-
-                      {/* ✅ FIX: Updated check to use snake_case. */}
-                      {question.type === "single_select" && (
-                        <p>{question.options?.find(opt => opt.id === answer.answer)?.text || answer.answer}</p>
-                      )}
-
-                      {/* ✅ FIX: Updated check to use snake_case. */}
-                      {question.type === "multi_select" && (
-                        <ul className="list-disc list-inside">
-                          {Array.isArray(answer.answer) && question.options?.filter(
-                            opt => answer.answer.includes(opt.id)
-                          ).map(opt => (
-                            <li key={opt.id}>{opt.text}</li>
-                          ))}
-                        </ul>
-                      )}
-
-                      {/* ✅ FIX: Updated check to use snake_case. */}
-                      {question.type === "yes_no" && (
-                        <p>{answer.answer === "yes" ? "Yes" : "No"}</p>
-                      )}
+                      <p>{formatAnswerForDisplay(answer) || "-"}</p>
                     </div>
 
                     <div className="text-xs text-muted-foreground">
-                      {answer.answeredBy && (
-                        <>Answered by {answer.answeredBy} on </>
-                      )}
+                      {answer.answeredBy && <>Answered by {answer.answeredBy} on </>}
                       {new Date(answer.answeredOn).toLocaleString()}
                     </div>
                   </div>
@@ -201,3 +233,4 @@ export const QuestionnaireResponses = ({ locationId, locationName }: Questionnai
     </Card>
   );
 };
+

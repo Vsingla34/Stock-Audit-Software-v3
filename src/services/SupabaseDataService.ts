@@ -1,6 +1,10 @@
 // src/services/supabaseDataService.ts
 import { supabase } from "@/integrations/supabase/client";
-import { InventoryItem, Location } from "@/context/InventoryContext";
+import {
+  InventoryItem,
+  Location,
+  QuestionnaireAnswer,
+} from "@/context/InventoryContext";
 
 class SupabaseDataService {
   private dbToInventoryItem(dbItem: any): InventoryItem {
@@ -13,7 +17,7 @@ class SupabaseDataService {
           auditorEntries = dbItem.auditor_entries;
         }
       }
-    } catch (error) {
+    } catch {
       auditorEntries = [];
     }
 
@@ -28,9 +32,9 @@ class SupabaseDataService {
       status: dbItem.status as "pending" | "matched" | "discrepancy",
       lastAudited: dbItem.last_audited,
       notes: dbItem.notes,
-      auditorEntries: auditorEntries,
+      auditorEntries,
       companyId: dbItem.company_id ?? undefined,
-      uploadBatchKey: dbItem.upload_batch_key ?? undefined, // 👈 important
+      uploadBatchKey: dbItem.upload_batch_key ?? undefined,
     };
   }
 
@@ -47,7 +51,6 @@ class SupabaseDataService {
       notes: item.notes || null,
     };
 
-    // 🔑 carry batch key to DB
     if (item.uploadBatchKey) {
       dbItem.upload_batch_key = item.uploadBatchKey;
     }
@@ -59,7 +62,7 @@ class SupabaseDataService {
     ) {
       try {
         dbItem.auditor_entries = JSON.stringify(item.auditorEntries);
-      } catch (error) {
+      } catch {
         dbItem.auditor_entries = "[]";
       }
     } else {
@@ -70,7 +73,6 @@ class SupabaseDataService {
       dbItem.id = item.id;
     }
 
-    // company_id is added by specific methods (setItemMaster / setClosingStock)
     return dbItem;
   }
 
@@ -112,9 +114,7 @@ class SupabaseDataService {
     return data;
   }
 
-  // returns how many inventory_items rows were deleted for this batch
   public async deleteUploadBatch(batchKey: string): Promise<number> {
-    // 1) delete items for this batch and get count
     const { data, error, count } = await supabase
       .from("inventory_items")
       .delete()
@@ -123,7 +123,6 @@ class SupabaseDataService {
 
     if (error) throw error;
 
-    // 2) delete the history row itself
     const { error: historyError } = await supabase
       .from("inventory_upload_history")
       .delete()
@@ -209,7 +208,6 @@ class SupabaseDataService {
     }
   }
 
-  // Item master insert
   public async setItemMaster(
     items: Partial<InventoryItem>[],
     companyId: string
@@ -227,10 +225,10 @@ class SupabaseDataService {
   }
 
   public async getItemMaster(companyId?: string): Promise<InventoryItem[]> {
-    let query = supabase.from("inventory_items").select("*");
+    let baseQuery = supabase.from("inventory_items").select("*");
 
     if (companyId) {
-      query = query.eq("company_id", companyId);
+      baseQuery = baseQuery.eq("company_id", companyId);
     }
 
     try {
@@ -240,7 +238,10 @@ class SupabaseDataService {
       let hasMore = true;
 
       while (hasMore) {
-        const { data, error } = await query.range(from, from + pageSize - 1);
+        const { data, error } = await baseQuery.range(
+          from,
+          from + pageSize - 1
+        );
 
         if (error) throw error;
 
@@ -261,7 +262,6 @@ class SupabaseDataService {
     }
   }
 
-  // Closing stock upsert (also writes company_id & upload_batch_key)
   public async setClosingStock(
     items: Partial<InventoryItem>[],
     companyId: string
@@ -316,19 +316,30 @@ class SupabaseDataService {
     }
   }
 
-  public async getAuditedItems(): Promise<InventoryItem[]> {
+  // now supports optional company filter
+  public async getAuditedItems(
+    companyId?: string
+  ): Promise<InventoryItem[]> {
     try {
       let allItems: any[] = [];
       let from = 0;
       const pageSize = 1000;
       let hasMore = true;
 
+      let baseQuery = supabase
+        .from("inventory_items")
+        .select("*")
+        .in("status", ["matched", "discrepancy"]);
+
+      if (companyId) {
+        baseQuery = baseQuery.eq("company_id", companyId);
+      }
+
       while (hasMore) {
-        const { data, error } = await supabase
-          .from("inventory_items")
-          .select("*")
-          .in("status", ["matched", "discrepancy"])
-          .range(from, from + pageSize - 1);
+        const { data, error } = await baseQuery.range(
+          from,
+          from + pageSize - 1
+        );
 
         if (error) throw error;
 
@@ -458,7 +469,7 @@ class SupabaseDataService {
 
   // ---------- Questionnaire ----------
 
-  public async getQuestions(): Promise<any[]> {
+  public async getQuestions(companyId?: string): Promise<any[]> {
     try {
       let allQuestions: any[] = [];
       let from = 0;
@@ -466,11 +477,16 @@ class SupabaseDataService {
       let hasMore = true;
 
       while (hasMore) {
-        const { data, error } = await supabase
+        let query = supabase
           .from("questions")
           .select("*")
-          .order("created_at")
-          .range(from, from + pageSize - 1);
+          .order("created_at");
+
+        if (companyId) {
+          query = query.eq("company_id", companyId);
+        }
+
+        const { data, error } = await query.range(from, from + pageSize - 1);
 
         if (error) throw error;
 
@@ -490,11 +506,19 @@ class SupabaseDataService {
   }
 
   public async addQuestion(questionData: any): Promise<any> {
+    const payload: any = { ...questionData };
+
+    if (payload.companyId !== undefined) {
+      payload.company_id = payload.companyId;
+      delete payload.companyId;
+    }
+
     const { data, error } = await supabase
       .from("questions")
-      .insert(questionData)
+      .insert(payload)
       .select()
       .single();
+
     if (error) throw error;
     return data;
   }
@@ -516,7 +540,7 @@ class SupabaseDataService {
     if (error) throw error;
   }
 
-  public async getQuestionnaireAnswers(): Promise<any[]> {
+  public async getQuestionnaireAnswers(): Promise<QuestionnaireAnswer[]> {
     try {
       let allAnswers: any[] = [];
       let from = 0;
@@ -544,7 +568,7 @@ class SupabaseDataService {
         questionId: ans.question_id,
         locationId: ans.location_id,
         answer: ans.answer,
-        answeredBy: ans.answered_by,
+        answeredBy: ans.answered_by ?? undefined,
         answeredOn: ans.answered_on,
       }));
     } catch (error) {
@@ -552,26 +576,38 @@ class SupabaseDataService {
     }
   }
 
-  public async upsertQuestionnaireAnswer(answer: any): Promise<void> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) throw new Error("User not authenticated");
+ public async upsertQuestionnaireAnswer(
+  answer: QuestionnaireAnswer
+): Promise<void> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("User not authenticated");
 
-    const answerToUpsert = {
-      question_id: answer.questionId,
-      location_id: answer.locationId,
-      answer: answer.answer,
-      answered_by: user.id,
-      answered_on: new Date().toISOString(),
-    };
+  const meta = user.user_metadata || {};
+  const answeredBy =
+    answer.answeredBy ||
+    (meta.name as string) ||
+    (meta.full_name as string) ||
+    (meta.display_name as string) ||
+    user.email ||
+    user.id;
 
-    const { error } = await supabase
-      .from("questionnaire_answers")
-      .upsert(answerToUpsert, { onConflict: "question_id,location_id" });
+  const answerToUpsert = {
+    question_id: answer.questionId,
+    location_id: answer.locationId,
+    answer: answer.answer,
+    answered_by: answeredBy,
+    answered_on: answer.answeredOn || new Date().toISOString(),
+  };
 
-    if (error) throw error;
-  }
+  const { error } = await supabase
+    .from("questionnaire_answers")
+    .upsert(answerToUpsert); // no onConflict to avoid 42P10
+
+  if (error) throw error;
+}
+
 
   // ---------- Global clear ----------
 
