@@ -540,7 +540,10 @@ class SupabaseDataService {
     if (error) throw error;
   }
 
-  public async getQuestionnaireAnswers(): Promise<QuestionnaireAnswer[]> {
+  // ✅ MODIFIED: Now accepts companyId to filter
+  public async getQuestionnaireAnswers(
+    companyId?: string
+  ): Promise<QuestionnaireAnswer[]> {
     try {
       let allAnswers: any[] = [];
       let from = 0;
@@ -548,10 +551,17 @@ class SupabaseDataService {
       let hasMore = true;
 
       while (hasMore) {
-        const { data, error } = await supabase
+        // ✅ MODIFIED: Base query built here
+        let query = supabase
           .from("questionnaire_answers")
-          .select("*")
-          .range(from, from + pageSize - 1);
+          .select("*");
+
+        // ✅ MODIFIED: Apply filter if companyId is provided
+        if (companyId) {
+          query = query.eq("company_id", companyId);
+        }
+
+        const { data, error } = await query.range(from, from + pageSize - 1);
 
         if (error) throw error;
 
@@ -570,6 +580,7 @@ class SupabaseDataService {
         answer: ans.answer,
         answeredBy: ans.answered_by ?? undefined,
         answeredOn: ans.answered_on,
+        companyId: ans.company_id ?? undefined, // ✅ ADDED
       }));
     } catch (error) {
       throw error;
@@ -599,6 +610,7 @@ class SupabaseDataService {
     answer: answer.answer,
     answered_by: answeredBy,
     answered_on: answer.answeredOn || new Date().toISOString(),
+    company_id: answer.companyId ?? null, // ✅ ADDED
   };
 
   const { error } = await supabase

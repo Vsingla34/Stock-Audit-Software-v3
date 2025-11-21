@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useUserAccess } from "@/hooks/useUserAccess";
@@ -19,12 +18,8 @@ const Questionnaire = () => {
   
   const userLocations = accessibleLocations();
   
-  // Set initial location if user has restricted access
-  useEffect(() => {
-    if (userRole !== "admin" && userLocations.length > 0) {
-      setSelectedLocation(userLocations[0].id);
-    }
-  }, [userRole, userLocations]);
+  // ✅ FIX: Removed the useEffect that was auto-selecting the first location
+  // This will now allow the user to manually select from all their locations
   
   const locationName = selectedLocation && selectedLocation !== "default" 
     ? locations.find(loc => loc.id === selectedLocation)?.name
@@ -65,6 +60,7 @@ const Questionnaire = () => {
                       locations={userLocations}
                       selectedLocation={selectedLocation}
                       onLocationChange={setSelectedLocation}
+                      placeholder="Select a location to audit" // Added placeholder
                     />
                   )}
                 </div>
@@ -88,6 +84,7 @@ const Questionnaire = () => {
                   locations={userRole === "admin" ? locations : userLocations}
                   selectedLocation={responseLocation}
                   onLocationChange={setResponseLocation}
+                  placeholder="Select a location to view" // Added placeholder
                 />
               </div>
               

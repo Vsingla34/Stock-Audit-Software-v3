@@ -5,7 +5,14 @@ import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle, Download, FileText } from "lucide-react";
 import jsPDF from "jspdf";
-import "jspdf-autotable";
+import autoTable from "jspdf-autotable"; // Use named import
+
+// Add module declaration for autotable
+declare module "jspdf" {
+  interface jsPDF {
+    autoTable: (options: any) => jsPDF;
+  }
+}
 
 interface QuestionnaireResponsesProps {
   locationId: string;
@@ -71,6 +78,9 @@ export const QuestionnaireResponses = ({
     return Array.isArray(raw) ? raw.join(", ") : String(raw ?? "");
   };
 
+  /**
+   * ✅ NEW: This function now generates a PDF with a table
+   */
   const generatePDF = () => {
     try {
       const locationAnswers = questionnaireAnswers.filter(
@@ -91,49 +101,56 @@ export const QuestionnaireResponses = ({
       doc.setFontSize(12);
       doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 30);
 
-      let yPos = 40;
+      // --- START: Table Generation ---
 
-      // Responses
-      locationAnswers.forEach((answer, index) => {
+      // Define table columns
+      const head = [['Question', 'Answer', 'Answered By']];
+
+      // Define table body by mapping over the answers
+      const body = locationAnswers.map(answer => {
         const question = getQuestionById(answer.questionId);
-        if (!question) return;
-
-        if (yPos > 250) {
-          doc.addPage();
-          yPos = 20;
-        }
-
-        doc.setFontSize(12);
-        doc.setFont(undefined, "bold");
-        doc.text(`${index + 1}. ${question.text}`, 14, yPos);
-        yPos += 8;
-
-        doc.setFont(undefined, "normal");
-
-        const answerText = formatAnswerForDisplay(answer);
-        const lines = doc.splitTextToSize(answerText || "-", 180);
-        doc.text(lines, 14, yPos);
-        yPos += 6 * lines.length + 10;
-
-        doc.setFontSize(10);
-        doc.setTextColor(100);
-
+        
+        // Split long text to fit in cells
+        const questionText = question
+          ? doc.splitTextToSize(question.text, 80) // 80mm width for question
+          : "Unknown Question";
+        
+        const answerText = doc.splitTextToSize(formatAnswerForDisplay(answer) || "-", 70); // 70mm width for answer
+        
         const answeredOn = new Date(answer.answeredOn).toLocaleString();
-        if (answer.answeredBy) {
-          doc.text(
-            `Answered by: ${answer.answeredBy} on ${answeredOn}`,
-            14,
-            yPos
-          );
-        } else {
-          doc.text(`Answered on ${answeredOn}`, 14, yPos);
-        }
-
-        yPos += 15;
-        doc.setTextColor(0);
+        const answeredBy = answer.answeredBy
+          ? `${answer.answeredBy} on ${answeredOn}`
+          : `Answered on ${answeredOn}`;
+          
+        return [questionText, answerText, answeredBy];
       });
 
-      // Sign-off page
+      // Add the table to the document
+      autoTable(doc, {
+        head: head,
+        body: body,
+        startY: 40, // Start after the title
+        theme: "grid",
+        styles: {
+          cellPadding: 2,
+          fontSize: 10,
+          valign: 'middle', // Vertically center content
+        },
+        headStyles: {
+          fillColor: [41, 128, 185], // A professional blue
+          textColor: 255,
+          fontStyle: 'bold',
+        },
+        columnStyles: {
+          0: { cellWidth: 80 },   // Question column
+          1: { cellWidth: 70 },   // Answer column
+          2: { cellWidth: 'auto' }, // Answered By column
+        },
+      });
+
+      // --- END: Table Generation ---
+
+      // Sign-off page (this logic remains the same)
       doc.addPage();
       doc.setFontSize(12);
       doc.text("Approval Sign-off", 14, 20);
@@ -233,4 +250,3 @@ export const QuestionnaireResponses = ({
     </Card>
   );
 };
-

@@ -63,6 +63,7 @@ export interface QuestionnaireAnswer {
   answer: string | string[];
   answeredBy?: string;
   answeredOn: string;
+  companyId?: string; // ✅ ADDED
 }
 
 interface InventoryContextType {
@@ -189,8 +190,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
           }))
         );
 
-        // Questionnaire answers (all; they’re tied to locationId anyway)
-        const answers = await SupabaseDataService.getQuestionnaireAnswers();
+        // ✅ MODIFIED: Questionnaire answers now filter by company
+        const answers = await SupabaseDataService.getQuestionnaireAnswers(
+          selectedCompanyId || undefined
+        );
         console.log("Loaded answers:", answers?.length || 0);
         setQuestionnaireAnswers(answers || []);
 
@@ -636,10 +639,15 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     currentUser?.email ||
     undefined;
 
+  // ✅ MODIFIED: Find the location to get its companyId
+  const location = locations.find(loc => loc.id === answer.locationId);
+  const companyId = location?.companyId;
+
   const newAnswer: QuestionnaireAnswer = {
     ...answer,
     answeredOn: new Date().toISOString(),
     answeredBy,                           // 👈 store name here
+    companyId: companyId,                 // ✅ ADDED
   };
 
   setQuestionnaireAnswers((prev) => {
@@ -656,7 +664,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     return [...prev, newAnswer];
   });
 
-  // 👇 send the full object (with answeredBy) to Supabase
+  // 👇 send the full object (with answeredBy and companyId) to Supabase
   await SupabaseDataService.upsertQuestionnaireAnswer(newAnswer);
 };
 
