@@ -1,4 +1,4 @@
-// src/services/supabaseDataService.ts
+// src/services/SupabaseDataService.ts
 import { supabase } from "@/integrations/supabase/client";
 import {
   InventoryItem,
@@ -621,19 +621,36 @@ class SupabaseDataService {
 }
 
 
-  // ---------- Global clear ----------
+  // ---------- Global clear (SCOPED BY COMPANY) ----------
 
-  public async clearInventoryData(): Promise<void> {
+  public async clearInventoryData(companyId: string): Promise<void> {
     try {
-      await supabase
+      // 1. Clear Inventory Items for Company
+      const { error: itemsError } = await supabase
         .from("inventory_items")
         .delete()
-        .neq("id", "00000000-0000-0000-0000-000000000000");
-      await supabase
+        .eq("company_id", companyId);
+        
+      if (itemsError) throw itemsError;
+
+      // 2. Clear Questionnaire Answers for Company
+      const { error: answersError } = await supabase
         .from("questionnaire_answers")
         .delete()
-        .neq("id", "00000000-0000-0000-0000-000000000000");
+        .eq("company_id", companyId);
+        
+      if (answersError) throw answersError;
+
+      // 3. Clear Upload History for Company (Fixes the visual list in Upload.tsx)
+      const { error: historyError } = await supabase
+        .from("inventory_upload_history")
+        .delete()
+        .eq("company_id", companyId);
+        
+      if (historyError) throw historyError;
+
     } catch (error) {
+      console.error("Error clearing company data:", error);
       throw error;
     }
   }

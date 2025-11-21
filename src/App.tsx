@@ -1,4 +1,4 @@
-// src/App.tsx
+
 import React from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useUser } from "@/context/UserContext";
@@ -22,7 +22,7 @@ import Questionnaire from "./pages/Questionnaire";
 import AddCompany from "./pages/AddCompany";
 import CompanySelection from "./pages/CompanySelection";
 
-type Role = "admin" | "client" | "auditor" | string;
+type Role = "super_admin" | "admin" | "client" | "auditor" | string;
 
 const ProtectedRoute = ({
   children,
@@ -135,11 +135,11 @@ function App() {
         }
       />
 
-      {/* ✅ Only admin and client can view Analytics */}
+      {/* ✅ Only super_admin, admin and client can view Analytics */}
       <Route
         path="/analytics"
         element={
-          <ProtectedRoute allowedRoles={["admin", "client"]}>
+          <ProtectedRoute allowedRoles={["super_admin", "admin", "client"]}>
             <Analytics />
           </ProtectedRoute>
         }
@@ -156,7 +156,7 @@ function App() {
       <Route
         path="/admin-overview"
         element={
-          <ProtectedRoute allowedRoles={["admin"]} requiredPermission="manageUsers">
+          <ProtectedRoute allowedRoles={["super_admin", "admin"]} requiredPermission="manageUsers">
             <AdminOverview />
           </ProtectedRoute>
         }
@@ -164,15 +164,17 @@ function App() {
       <Route
         path="/users"
         element={
-          <ProtectedRoute allowedRoles={["admin"]} requiredPermission="manageUsers">
+          <ProtectedRoute allowedRoles={["super_admin", "admin"]} requiredPermission="manageUsers">
             <UserManagement />
           </ProtectedRoute>
         }
       />
+      
+      {/* ✅ ONLY SUPER ADMIN can Add Companies */}
       <Route
         path="/add-company"
         element={
-          <ProtectedRoute allowedRoles={["admin"]} requiredPermission="manageUsers">
+          <ProtectedRoute allowedRoles={["super_admin"]} requiredPermission="manageCompanies">
             <AddCompany />
           </ProtectedRoute>
         }

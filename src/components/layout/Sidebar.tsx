@@ -1,3 +1,4 @@
+
 // src/components/layout/Sidebar.tsx
 import { useMemo, useState, useEffect, useCallback } from "react";
 import { Link, useLocation } from "react-router-dom";
@@ -84,7 +85,7 @@ export function Sidebar({
 
   const navigation = useMemo(() => {
     const nav = [{ name: "Dashboard", href: "/", icon: Home }];
-    if (["admin", "auditor"].includes(userRole)) {
+    if (["super_admin", "admin", "auditor"].includes(userRole)) {
       nav.push({ name: "Scanner", href: "/scanner", icon: ScanBarcode });
     }
     nav.push(
@@ -97,17 +98,23 @@ export function Sidebar({
       href: "/questionnaire",
       icon: ListChecks,
     });
-    if (["admin", "auditor"].includes(userRole)) {
+    if (["super_admin", "admin", "auditor"].includes(userRole)) {
       nav.push({ name: "Upload Data", href: "/upload", icon: Upload });
     }
     nav.push({ name: "Locations", href: "/locations", icon: Building });
-    if (userRole === "admin") {
+    
+    if (userRole === "super_admin" || userRole === "admin") {
       nav.push(
         { name: "Admin Overview", href: "/admin-overview", icon: Settings },
-        { name: "User Management", href: "/users", icon: Users },
-        { name: "Company", href: "/add-company", icon: Building2 }
+        { name: "User Management", href: "/users", icon: Users }
       );
     }
+    
+    // ✅ Only Super Admin can create companies
+    if (userRole === "super_admin") {
+      nav.push({ name: "Company", href: "/add-company", icon: Building2 });
+    }
+    
     nav.push({ name: "My Profile", href: "/profile", icon: UserCircle });
     return nav;
   }, [userRole]);
@@ -143,7 +150,7 @@ export function Sidebar({
                 </p>
               )}
 
-              {userRole !== "admin" && accessibleLocations.length > 0 && (
+              {userRole !== "super_admin" && accessibleLocations.length > 0 && (
                 <div className="mt-1 pt-1 border-t border-accent/50">
                   <p className="text-xs text-muted-foreground mb-1">
                     Assigned locations:

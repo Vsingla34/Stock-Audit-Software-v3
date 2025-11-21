@@ -1,4 +1,4 @@
-// src/pages/UserManagement.tsx - COMPLETE REPLACEMENT WITH BUG FIX
+
 import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,8 @@ import { Badge } from "@/components/ui/badge";
 import { Users, Plus, Edit, Trash, Building2, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { useUser } from "@/context/UserContext";
+import { createClient } from "@supabase/supabase-js";
 
 interface UserProfile {
   id: string;
@@ -55,6 +57,9 @@ interface Company {
 }
 
 const UserManagement = () => {
+  const { currentUser } = useUser();
+  const isSuperAdmin = currentUser?.role === "super_admin";
+
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -69,7 +74,7 @@ const UserManagement = () => {
     email: "",
     password: "",
     name: "",
-    role: "auditor" as "admin" | "auditor" | "client",
+    role: "auditor" as "super_admin" | "admin" | "auditor" | "client",
     assignedLocations: [] as string[],
     assignedCompanies: [] as string[],
   });
@@ -80,16 +85,17 @@ const UserManagement = () => {
 
   const fetchData = async () => {
     try {
-      // Users
-      const { data: usersData, error: usersError } = await supabase
+      // Fetch Users
+      let usersQuery = supabase
         .from("user_profiles")
         .select("*")
         .order("created_at", { ascending: false });
 
+      const { data: usersData, error: usersError } = await usersQuery;
       if (usersError) throw usersError;
       setUsers(usersData || []);
 
-      // Locations
+      // Fetch Locations
       const { data: locationsData, error: locationsError } = await supabase
         .from("locations")
         .select("id, name, company_id")
@@ -97,14 +103,14 @@ const UserManagement = () => {
         .order("name");
 
       if (locationsError) throw locationsError;
-      const mappedLocations: Location[] = (locationsData || []).map((loc: any) => ({
+      
+      const allLocations: Location[] = (locationsData || []).map((loc: any) => ({
         id: loc.id,
         name: loc.name,
         companyId: loc.company_id ?? null,
       }));
-      setLocations(mappedLocations);
 
-      // Companies
+      // Fetch Companies
       const { data: companiesData, error: companiesError } = await supabase
         .from("companies")
         .select("id, name")
@@ -112,7 +118,18 @@ const UserManagement = () => {
         .order("name");
 
       if (companiesError) throw companiesError;
-      setCompanies(companiesData || []);
+      
+      // Filter accessible data based on role
+      if (isSuperAdmin) {
+        setLocations(allLocations);
+        setCompanies(companiesData || []);
+      } else {
+        // Admin can only see/assign companies they belong to
+        const myCompanyIds = currentUser?.assigned_companies || [];
+        setCompanies((companiesData || []).filter(c => myCompanyIds.includes(c.id)));
+        setLocations(allLocations.filter(l => l.companyId && myCompanyIds.includes(l.companyId)));
+      }
+
     } catch (error: any) {
       console.error("Error fetching data:", error);
       toast.error("Failed to load users");
@@ -139,12 +156,17 @@ const UserManagement = () => {
   };
 
   const openEditDialog = (user: UserProfile) => {
+    if (!isSuperAdmin && (user.role === "super_admin" || user.role === "admin")) {
+       toast.error("You do not have permission to edit this user.");
+       return;
+    }
+
     setSelectedUser(user);
     setFormData({
       email: user.email,
-      password: "",
+      password: "", 
       name: user.name,
-      role: user.role as "admin" | "auditor" | "client",
+      role: user.role as any,
       assignedLocations: user.assigned_locations || [],
       assignedCompanies: user.assigned_companies || [],
     });
@@ -152,10 +174,22 @@ const UserManagement = () => {
   };
 
   const openDeleteDialog = (user: UserProfile) => {
+    if (!isSuperAdmin && (user.role === "super_admin" || user.role === "admin")) {
+       toast.error("You do not have permission to delete this user.");
+       return;
+    }
     setSelectedUser(user);
     setIsDeleteDialogOpen(true);
   };
 
+  // Helper to find all locations for a given list of company IDs
+  const getAllLocationsForCompanies = (companyIds: string[]) => {
+    return locations
+      .filter(loc => loc.companyId && companyIds.includes(loc.companyId))
+      .map(loc => loc.id);
+  };
+
+  // Toggle location manually
   const toggleLocation = (locationId: string) => {
     setFormData((prev) => ({
       ...prev,
@@ -165,35 +199,48 @@ const UserManagement = () => {
     }));
   };
 
-  // 🔥 FIX: When company is toggled, remove locations that don't belong to selected companies
+  // Toggle Company with Auto-Select logic for Admins
   const toggleCompany = (companyId: string) => {
     setFormData((prev) => {
       const newAssignedCompanies = prev.assignedCompanies.includes(companyId)
         ? prev.assignedCompanies.filter((id) => id !== companyId)
         : [...prev.assignedCompanies, companyId];
 
-      // 🔥 CRITICAL FIX: Filter out locations that don't belong to the new company selection
-      const validLocationIds = locations
-        .filter((loc) => loc.companyId && newAssignedCompanies.includes(loc.companyId))
-        .map((loc) => loc.id);
+      let newAssignedLocations = prev.assignedLocations;
 
-      const cleanedLocations = prev.assignedLocations.filter((locId) =>
-        validLocationIds.includes(locId)
-      );
+      if (prev.role === 'admin') {
+        newAssignedLocations = getAllLocationsForCompanies(newAssignedCompanies);
+      } else {
+        const validLocationIds = locations
+          .filter((loc) => loc.companyId && newAssignedCompanies.includes(loc.companyId))
+          .map((loc) => loc.id);
+        
+        newAssignedLocations = prev.assignedLocations.filter((locId) =>
+          validLocationIds.includes(locId)
+        );
+      }
 
       return {
         ...prev,
         assignedCompanies: newAssignedCompanies,
-        assignedLocations: cleanedLocations, // 🔥 Only keep valid locations
+        assignedLocations: newAssignedLocations,
       };
     });
   };
 
-  // 🔥 FIX: Improved filtering logic to ensure only locations from selected companies are shown
-  const filteredLocations: Location[] =
-    formData.role === "admin"
-      ? locations
-      : formData.assignedCompanies.length === 0
+  // Handle Role Change
+  const handleRoleChange = (value: "super_admin" | "admin" | "auditor" | "client") => {
+    setFormData(prev => {
+      let newLocations = prev.assignedLocations;
+      if (value === 'admin') {
+        newLocations = getAllLocationsForCompanies(prev.assignedCompanies);
+      }
+      return { ...prev, role: value, assignedLocations: newLocations };
+    });
+  };
+
+  const filteredLocationsForForm: Location[] =
+    formData.assignedCompanies.length === 0
       ? []
       : locations.filter(
           (loc) =>
@@ -202,20 +249,26 @@ const UserManagement = () => {
         );
 
   const getCompanyNames = (companyIds: string[] | null) => {
-    if (!companyIds || companyIds.length === 0) return "All Companies";
-    return companies
-      .filter((c) => companyIds.includes(c.id))
-      .map((c) => c.name)
-      .join(", ");
+    if (!companyIds || companyIds.length === 0) return "-";
+    return companyIds.map(id => {
+        const c = companies.find(comp => comp.id === id);
+        return c ? c.name : null; 
+    }).filter(Boolean).join(", ");
   };
 
   const getLocationNames = (locationIds: string[] | null) => {
-    if (!locationIds || locationIds.length === 0) return "All Locations";
+    if (!locationIds || locationIds.length === 0) return "-";
     const names = locations
       .filter((l) => locationIds.includes(l.id))
       .map((l) => l.name);
-    return names.length ? names.join(", ") : "All Locations";
+    return names.length ? names.join(", ") : "-";
   };
+
+  const filteredUsers = users.filter(user => {
+    if (user.role === 'super_admin') return false;
+    if (!isSuperAdmin && user.role === 'admin') return false;
+    return true;
+  });
 
   const handleAddUser = async () => {
     if (!formData.email || !formData.password || !formData.name) {
@@ -223,13 +276,27 @@ const UserManagement = () => {
       return;
     }
 
-    if (formData.role !== "admin" && formData.assignedCompanies.length === 0) {
-      toast.error("Please assign at least one company for non-admin users");
+    if (formData.role !== "super_admin" && formData.assignedCompanies.length === 0) {
+      toast.error("Please assign at least one company");
       return;
     }
 
     try {
-      const { data: authData, error: authError } = await supabase.auth.signUp({
+      // ✅ FIX: Create a temporary client that does NOT persist session.
+      // This prevents the new user login from overriding the current Super Admin session.
+      const tempSupabase = createClient(
+        import.meta.env.VITE_SUPABASE_URL,
+        import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        {
+          auth: {
+            persistSession: false, // Crucial: Don't save this session to localStorage
+            autoRefreshToken: false,
+            detectSessionInUrl: false,
+          },
+        }
+      );
+
+      const { data: authData, error: authError } = await tempSupabase.auth.signUp({
         email: formData.email,
         password: formData.password,
         options: {
@@ -243,6 +310,8 @@ const UserManagement = () => {
       if (authError) throw authError;
 
       if (authData.user) {
+        // ✅ Use the main `supabase` client (Admin session) to insert profile
+        // This works because the Super Admin has permission to insert into user_profiles
         const { error: profileError } = await supabase
           .from("user_profiles")
           .insert([
@@ -285,8 +354,8 @@ const UserManagement = () => {
       return;
     }
 
-    if (formData.role !== "admin" && formData.assignedCompanies.length === 0) {
-      toast.error("Please assign at least one company for non-admin users");
+    if (formData.role !== "super_admin" && formData.assignedCompanies.length === 0) {
+      toast.error("Please assign at least one company");
       return;
     }
 
@@ -382,7 +451,7 @@ const UserManagement = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {!loading && users.length === 0 ? (
+                {!loading && filteredUsers.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={6}
@@ -392,21 +461,21 @@ const UserManagement = () => {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  users.map((user) => (
+                  filteredUsers.map((user) => (
                     <TableRow key={user.id}>
                       <TableCell className="font-medium">{user.name}</TableCell>
                       <TableCell>{user.email}</TableCell>
                       <TableCell>
                         <Badge
                           variant={
-                            user.role === "admin"
+                            user.role === "super_admin"
                               ? "default"
-                              : user.role === "client"
+                              : user.role === "admin"
                               ? "secondary"
                               : "outline"
                           }
                         >
-                          {user.role}
+                          {user.role.replace('_', ' ')}
                         </Badge>
                       </TableCell>
                       <TableCell className="max-w-xs">
@@ -424,6 +493,7 @@ const UserManagement = () => {
                           variant="ghost"
                           size="icon"
                           onClick={() => openEditDialog(user)}
+                          disabled={!isSuperAdmin && (user.role === "super_admin" || user.role === "admin")}
                         >
                           <Edit className="h-4 w-4" />
                         </Button>
@@ -431,6 +501,7 @@ const UserManagement = () => {
                           variant="ghost"
                           size="icon"
                           onClick={() => openDeleteDialog(user)}
+                          disabled={!isSuperAdmin && (user.role === "super_admin" || user.role === "admin")}
                         >
                           <Trash className="h-4 w-4 text-red-600" />
                         </Button>
@@ -470,15 +541,14 @@ const UserManagement = () => {
                   <Label htmlFor="add-role">Role *</Label>
                   <Select
                     value={formData.role}
-                    onValueChange={(value: any) =>
-                      setFormData({ ...formData, role: value })
-                    }
+                    onValueChange={(value: any) => handleRoleChange(value)}
                   >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="admin">Admin</SelectItem>
+                      {isSuperAdmin && <SelectItem value="super_admin">Super Admin</SelectItem>}
+                      {isSuperAdmin && <SelectItem value="admin">Admin</SelectItem>}
                       <SelectItem value="auditor">Auditor</SelectItem>
                       <SelectItem value="client">Client</SelectItem>
                     </SelectContent>
@@ -512,12 +582,12 @@ const UserManagement = () => {
                 </div>
               </div>
 
-              {/* Companies (non-admin users) */}
-              {formData.role !== "admin" && (
+              {/* Companies */}
+              {formData.role !== "super_admin" && (
                 <div className="space-y-2">
                   <Label className="flex items-center gap-2">
                     <Building2 className="h-4 w-4" />
-                    Assign Companies * (Required for non-admin users)
+                    Assign Companies *
                   </Label>
                   <Card className="p-4 max-h-48 overflow-y-auto">
                     {loading && companies.length === 0 ? (
@@ -526,7 +596,7 @@ const UserManagement = () => {
                       </p>
                     ) : companies.length === 0 ? (
                       <p className="text-sm text-muted-foreground">
-                        No companies available. Please create companies first.
+                        No companies available.
                       </p>
                     ) : (
                       <div className="space-y-2">
@@ -560,25 +630,21 @@ const UserManagement = () => {
               <div className="space-y-2">
                 <Label className="flex items-center gap-2">
                   <MapPin className="h-4 w-4" />
-                  Assign Locations (Optional)
+                  Assign Locations {formData.role === 'admin' ? '(Auto-selected)' : '(Optional)'}
                 </Label>
                 <Card className="p-4 max-h-48 overflow-y-auto">
-                  {formData.role !== "admin" &&
+                  {formData.role !== "super_admin" &&
                   formData.assignedCompanies.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
                       Select at least one company to see its locations.
                     </p>
-                  ) : loading && locations.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      Loading locations...
-                    </p>
-                  ) : filteredLocations.length === 0 ? (
+                  ) : filteredLocationsForForm.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
                       No locations available for the selected companies.
                     </p>
                   ) : (
                     <div className="space-y-2">
-                      {filteredLocations.map((location) => (
+                      {filteredLocationsForForm.map((location) => (
                         <div
                           key={location.id}
                           className="flex items-center space-x-2"
@@ -588,6 +654,8 @@ const UserManagement = () => {
                             checked={formData.assignedLocations.includes(
                               location.id
                             )}
+                            // If role is admin, disable manual deselection to enforce "all locations"
+                            disabled={formData.role === 'admin'}
                             onCheckedChange={() => toggleLocation(location.id)}
                           />
                           <label
@@ -601,6 +669,11 @@ const UserManagement = () => {
                     </div>
                   )}
                 </Card>
+                {formData.role === 'admin' && (
+                  <p className="text-xs text-muted-foreground">
+                    Admins are automatically assigned all locations for their companies.
+                  </p>
+                )}
               </div>
             </div>
 
@@ -646,15 +719,14 @@ const UserManagement = () => {
                   <Label htmlFor="edit-role">Role *</Label>
                   <Select
                     value={formData.role}
-                    onValueChange={(value: any) =>
-                      setFormData({ ...formData, role: value })
-                    }
+                    onValueChange={(value: any) => handleRoleChange(value)}
                   >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="admin">Admin</SelectItem>
+                      {isSuperAdmin && <SelectItem value="super_admin">Super Admin</SelectItem>}
+                      {isSuperAdmin && <SelectItem value="admin">Admin</SelectItem>}
                       <SelectItem value="auditor">Auditor</SelectItem>
                       <SelectItem value="client">Client</SelectItem>
                     </SelectContent>
@@ -662,12 +734,12 @@ const UserManagement = () => {
                 </div>
               </div>
 
-              {/* Companies for edit (non-admin) */}
-              {formData.role !== "admin" && (
+              {/* Companies for edit */}
+              {formData.role !== "super_admin" && (
                 <div className="space-y-2">
                   <Label className="flex items-center gap-2">
                     <Building2 className="h-4 w-4" />
-                    Assign Companies * (Required for non-admin users)
+                    Assign Companies *
                   </Label>
                   <Card className="p-4 max-h-48 overflow-y-auto">
                     {loading && companies.length === 0 ? (
@@ -706,29 +778,25 @@ const UserManagement = () => {
                 </div>
               )}
 
-              {/* Locations for edit (filtered) */}
+              {/* Locations for edit */}
               <div className="space-y-2">
                 <Label className="flex items-center gap-2">
                   <MapPin className="h-4 w-4" />
-                  Assign Locations (Optional)
+                  Assign Locations {formData.role === 'admin' ? '(Auto-selected)' : '(Optional)'}
                 </Label>
                 <Card className="p-4 max-h-48 overflow-y-auto">
-                  {formData.role !== "admin" &&
+                  {formData.role !== "super_admin" &&
                   formData.assignedCompanies.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
                       Select at least one company to see its locations.
                     </p>
-                  ) : loading && locations.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      Loading locations...
-                    </p>
-                  ) : filteredLocations.length === 0 ? (
+                  ) : filteredLocationsForForm.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
                       No locations available for the selected companies.
                     </p>
                   ) : (
                     <div className="space-y-2">
-                      {filteredLocations.map((location) => (
+                      {filteredLocationsForForm.map((location) => (
                         <div
                           key={location.id}
                           className="flex items-center space-x-2"
@@ -738,6 +806,7 @@ const UserManagement = () => {
                             checked={formData.assignedLocations.includes(
                               location.id
                             )}
+                            disabled={formData.role === 'admin'}
                             onCheckedChange={() => toggleLocation(location.id)}
                           />
                           <label
@@ -751,6 +820,11 @@ const UserManagement = () => {
                     </div>
                   )}
                 </Card>
+                {formData.role === 'admin' && (
+                  <p className="text-xs text-muted-foreground">
+                    Admins are automatically assigned all locations for their companies.
+                  </p>
+                )}
               </div>
             </div>
 

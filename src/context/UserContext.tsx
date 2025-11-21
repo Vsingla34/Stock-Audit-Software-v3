@@ -1,4 +1,4 @@
-// src/context/UserContext.tsx
+
 import {
   createContext,
   useContext,
@@ -9,7 +9,8 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/context/CompanyContext";
 
-export type UserRole = "admin" | "auditor" | "client";
+// ✅ Added 'super_admin'
+export type UserRole = "super_admin" | "admin" | "auditor" | "client";
 
 export interface UserProfile {
   id: string;
@@ -117,10 +118,15 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     if (!currentUser) return false;
 
     switch (permission) {
+      case "manageCompanies":
+        // Only Super Admin can create/manage companies
+        return currentUser.role === "super_admin";
       case "manageUsers":
-        return currentUser.role === "admin";
+        // Super Admin and Admin can manage users
+        return currentUser.role === "super_admin" || currentUser.role === "admin";
       case "conductAudits":
-        return currentUser.role === "admin" || currentUser.role === "auditor";
+        // Super Admin, Admin, and Auditor can audit
+        return ["super_admin", "admin", "auditor"].includes(currentUser.role);
       default:
         return true;
     }

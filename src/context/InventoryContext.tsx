@@ -100,7 +100,7 @@ interface InventoryContextType {
     matched: number;
     discrepancies: number;
   };
-  clearAllData: () => void;
+  clearAllData: () => Promise<void>;
   addLocation: (location: Omit<Location, "id">) => Promise<void>;
   updateLocation: (location: Location) => Promise<void>;
   deleteLocation: (locationId: string) => Promise<void>;
@@ -695,8 +695,15 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     return questions.find((q) => q.id === questionId);
   };
 
+  // ✅ UPDATED: Pass selectedCompanyId to SupabaseDataService
   const clearAllData = async () => {
-    await SupabaseDataService.clearInventoryData();
+    if (!selectedCompanyId) {
+      throw new Error("No company selected. Cannot clear data.");
+    }
+    
+    await SupabaseDataService.clearInventoryData(selectedCompanyId);
+    
+    // Reset state
     setItemMasterState([]);
     setAuditedItemsState([]);
     setQuestionnaireAnswers([]);
