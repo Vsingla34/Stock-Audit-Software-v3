@@ -1,4 +1,4 @@
-// src/pages/AddCompany.tsx - REPLACE ENTIRE FILE
+
 import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -125,7 +125,7 @@ const AddCompany = () => {
     if (!selectedCompany) return;
 
     try {
-      // Check if company has associated data
+      
       const { count: itemCount } = await supabase
         .from('inventory_items')
         .select('*', { count: 'exact', head: true })
@@ -257,7 +257,7 @@ const AddCompany = () => {
           </CardContent>
         </Card>
 
-        {/* Add Company Dialog */}
+        
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
@@ -302,7 +302,7 @@ const AddCompany = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Edit Company Dialog */}
+        
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
@@ -345,7 +345,7 @@ const AddCompany = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Delete Company Dialog */}
+        
         <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
           <DialogContent>
             <DialogHeader>

@@ -14,7 +14,7 @@ const Index = () => {
   const { canUploadData, canPerformAudits } = useUserAccess();
   const { currentUser } = useUser();
   
-  // Use the centralized location filter hook
+  
   const { 
     selectedLocation,
     setSelectedLocation, 
@@ -33,7 +33,7 @@ const Index = () => {
         <InventoryOverview />
 
         <div className="grid gap-6 md:grid-cols-2">
-          {/* RecentActivity now uses the shared selectedLocation state */}
+
           <RecentActivity selectedLocation={selectedLocation} />
           
           <div className="space-y-4">
@@ -78,7 +78,7 @@ const Index = () => {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-medium">Inventory Status</h2>
             
-            {/* Use the shared LocationFilterDropdown component */}
+            
             {shouldShowLocationFilter && (
               <LocationFilterDropdown
                 selectedLocation={selectedLocation}
@@ -89,7 +89,7 @@ const Index = () => {
             )}
           </div>
           
-          {/* InventoryTable also uses the same selectedLocation */}
+          
           <InventoryTable selectedLocation={selectedLocation} />
         </div>
       </div>

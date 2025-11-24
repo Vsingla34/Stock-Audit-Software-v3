@@ -1,10 +1,10 @@
-// src/pages/Upload.tsx
+
 import { AppLayout } from "@/components/layout/AppLayout";
 import { FileUploader } from "@/components/upload/FileUploader";
 import { ExampleData } from "@/components/upload/ExampleData";
 import { ClearDataButton } from "@/components/upload/ClearDataButton";
 import { UploadHistory } from "@/components/upload/UploadHistory";
-import { LocationUploadCard } from "@/components/upload/LocationUploadCard"; // ⬅️ your location-upload component
+import { LocationUploadCard } from "@/components/upload/LocationUploadCard"; 
 
 import {
   Card,
@@ -27,7 +27,7 @@ const Upload = () => {
     useUserAccess();
   const navigate = useNavigate();
 
-  // Redirect users without access
+  
   useEffect(() => {
     if (currentUser && !canUploadData()) {
       navigate("/");
@@ -35,7 +35,7 @@ const Upload = () => {
   }, [currentUser, navigate, canUploadData]);
 
   if (!currentUser || !canUploadData()) {
-    return null; // Don't render anything while redirecting
+    return null; 
   }
 
   const isAdminCanUploadItemMaster = canUploadItemMaster();
@@ -72,9 +72,9 @@ const Upload = () => {
             )}
           </TabsList>
 
-          {/* ========= Upload Tab ========= */}
+          
           <TabsContent value="upload" className="space-y-4">
-            {/* Item Master + Closing Stock */}
+            
             <Card>
               <CardHeader>
                 <CardTitle>Import Inventory Data</CardTitle>
@@ -94,7 +94,7 @@ const Upload = () => {
               </CardContent>
             </Card>
 
-            {/* Location upload via file (admin only, optional) */}
+
             {isAdminCanUploadItemMaster && (
               <Card>
                 <CardHeader>
@@ -136,18 +136,17 @@ const Upload = () => {
             </Card>
           </TabsContent>
 
-          {/* ========= Example Templates ========= */}
+          
           <TabsContent value="examples">
             <ExampleData />
           </TabsContent>
 
-          {/* ========= Clear Data (history + global clear) ========= */}
+          
           {isAdminCanUploadItemMaster && (
             <TabsContent value="clear" className="space-y-4">
-              {/* Per-upload / per-location delete */}
+              
               <UploadHistory />
 
-              {/* Global wipe */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-red-600">

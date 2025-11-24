@@ -32,7 +32,7 @@ export const UserProfile = () => {
     email: currentUser?.email || "",
   });
 
-  // --- Company name for the currently selected company ---
+  
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [companyLoading, setCompanyLoading] = useState(false);
 
@@ -130,7 +130,7 @@ export const UserProfile = () => {
 
       <CardContent>
         {isEditing && canEdit ? (
-          // --------- EDIT MODE ----------
+
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -169,7 +169,7 @@ export const UserProfile = () => {
             </div>
           </div>
         ) : (
-          // --------- VIEW MODE ----------
+          
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>

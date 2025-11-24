@@ -11,7 +11,7 @@ const LOCAL_STORAGE_KEYS = {
 };
 
 class DataPersistenceService {
-  // Item Master Methods
+
   public setItemMaster(items: InventoryItem[]): void {
     localStorage.setItem(LOCAL_STORAGE_KEYS.ITEM_MASTER, JSON.stringify(items));
   }
@@ -21,7 +21,7 @@ class DataPersistenceService {
     return savedData ? JSON.parse(savedData) : [];
   }
 
-  // Closing Stock Methods
+  
   public setClosingStock(items: InventoryItem[]): void {
     localStorage.setItem(LOCAL_STORAGE_KEYS.CLOSING_STOCK, JSON.stringify(items));
   }
@@ -31,7 +31,7 @@ class DataPersistenceService {
     return savedData ? JSON.parse(savedData) : [];
   }
 
-  // Audited Items Methods
+  
   public setAuditedItems(items: InventoryItem[]): void {
     localStorage.setItem(LOCAL_STORAGE_KEYS.AUDITED_ITEMS, JSON.stringify(items));
   }
@@ -41,7 +41,7 @@ class DataPersistenceService {
     return savedData ? JSON.parse(savedData) : [];
   }
 
-  // Location Methods
+  
   public updateLocation(location: Location): void {
     const locations = this.getLocations();
     const index = locations.findIndex(l => l.id === location.id);
@@ -66,7 +66,7 @@ class DataPersistenceService {
     localStorage.setItem(LOCAL_STORAGE_KEYS.LOCATIONS, JSON.stringify(filteredLocations));
   }
 
-  // Question Methods
+  
   public setQuestions(questions: Question[]): void {
     localStorage.setItem(LOCAL_STORAGE_KEYS.QUESTIONS, JSON.stringify(questions));
   }
@@ -76,7 +76,7 @@ class DataPersistenceService {
     return savedData ? JSON.parse(savedData) : [];
   }
 
-  // Questionnaire Answer Methods
+  
   public setQuestionnaireAnswers(answers: QuestionnaireAnswer[]): void {
     localStorage.setItem(LOCAL_STORAGE_KEYS.QUESTIONNAIRE_ANSWERS, JSON.stringify(answers));
   }
@@ -86,14 +86,14 @@ class DataPersistenceService {
     return savedData ? JSON.parse(savedData) : [];
   }
 
-  // Clear all data
+  
   public clearInventoryData(): void {
     localStorage.removeItem(LOCAL_STORAGE_KEYS.ITEM_MASTER);
     localStorage.removeItem(LOCAL_STORAGE_KEYS.CLOSING_STOCK);
     localStorage.removeItem(LOCAL_STORAGE_KEYS.AUDITED_ITEMS);
     localStorage.removeItem(LOCAL_STORAGE_KEYS.QUESTIONS);
     localStorage.removeItem(LOCAL_STORAGE_KEYS.QUESTIONNAIRE_ANSWERS);
-    // Note: We don't clear locations
+    
   }
 }
 

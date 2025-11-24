@@ -20,7 +20,7 @@ const Login = () => {
     try {
       await login(email, password);
 
-      // ✅ ALWAYS go to company selection after login
+      
       navigate("/company-selection", { replace: true });
     } catch (error: any) {
       console.error(error);

@@ -9,7 +9,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/context/CompanyContext";
 
-// ✅ Added 'super_admin'
+
 export type UserRole = "super_admin" | "admin" | "auditor" | "client";
 
 export interface UserProfile {
@@ -38,7 +38,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // 🔴 important: we will clear this on logout
+  
   const { setSelectedCompanyId } = useCompany();
 
   useEffect(() => {
@@ -100,8 +100,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     setCurrentUser(profile as UserProfile);
     setIsAuthenticated(true);
 
-    // ✅ Optional: also clear previous company on fresh login
-    //    (ensures a *new* selection each time user logs in)
+
     setSelectedCompanyId(null);
   };
 
@@ -110,7 +109,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     setCurrentUser(null);
     setIsAuthenticated(false);
 
-    // ✅ CRITICAL: force company reselection after EVERY logout
+    
     setSelectedCompanyId(null);
   };
 
@@ -119,13 +118,13 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
 
     switch (permission) {
       case "manageCompanies":
-        // Only Super Admin can create/manage companies
+        
         return currentUser.role === "super_admin";
       case "manageUsers":
-        // Super Admin and Admin can manage users
+        
         return currentUser.role === "super_admin" || currentUser.role === "admin";
       case "conductAudits":
-        // Super Admin, Admin, and Auditor can audit
+        
         return ["super_admin", "admin", "auditor"].includes(currentUser.role);
       default:
         return true;

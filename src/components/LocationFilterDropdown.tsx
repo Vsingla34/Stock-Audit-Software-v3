@@ -11,17 +11,7 @@ interface LocationFilterDropdownProps {
   className?: string;
 }
 
-/**
- * Reusable location filter dropdown component
- * Can be used in any parent component that needs location filtering
- * 
- * @example
- * <LocationFilterDropdown
- *   selectedLocation={selectedLocation}
- *   onLocationChange={setSelectedLocation}
- *   availableLocations={availableLocations}
- * />
- */
+
 export const LocationFilterDropdown: React.FC<LocationFilterDropdownProps> = ({
   selectedLocation,
   onLocationChange,

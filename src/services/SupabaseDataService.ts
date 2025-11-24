@@ -1,4 +1,4 @@
-// src/services/SupabaseDataService.ts
+
 import { supabase } from "@/integrations/supabase/client";
 import {
   InventoryItem,
@@ -76,7 +76,7 @@ class SupabaseDataService {
     return dbItem;
   }
 
-  // ---------- Upload history helpers ----------
+
 
   public async logUploadBatch(params: {
     batchKey: string;
@@ -133,7 +133,7 @@ class SupabaseDataService {
     return count ?? (data ? data.length : 0);
   }
 
-  // ---------- Item master / closing stock ----------
+  
 
   public async hasItemMaster(): Promise<boolean> {
     const { data, error } = await supabase
@@ -254,7 +254,7 @@ class SupabaseDataService {
         }
       }
 
-      console.log(`✅ Total items fetched: ${allItems.length}`);
+      
       return allItems.map((item) => this.dbToInventoryItem(item));
     } catch (error) {
       console.error("Error fetching item master:", error);
@@ -304,7 +304,7 @@ class SupabaseDataService {
     }
   }
 
-  // ---------- Audit items ----------
+  
 
   public async setAuditedItems(items: InventoryItem[]): Promise<void> {
     if (items.length > 0) {
@@ -316,7 +316,7 @@ class SupabaseDataService {
     }
   }
 
-  // now supports optional company filter
+  
   public async getAuditedItems(
     companyId?: string
   ): Promise<InventoryItem[]> {
@@ -358,7 +358,7 @@ class SupabaseDataService {
     }
   }
 
-  // ---------- Locations ----------
+  
 
   public async addLocation(
     location: Omit<Location, "id">
@@ -467,7 +467,7 @@ class SupabaseDataService {
     if (error) throw error;
   }
 
-  // ---------- Questionnaire ----------
+  
 
   public async getQuestions(companyId?: string): Promise<any[]> {
     try {
@@ -533,7 +533,7 @@ class SupabaseDataService {
   }
 
  public async deleteQuestion(questionId: string): Promise<void> {
-    // 1. Delete any answers associated with this question first
+    
     const { error: answerError } = await supabase
       .from("questionnaire_answers")
       .delete()
@@ -541,7 +541,7 @@ class SupabaseDataService {
       
     if (answerError) throw answerError;
 
-    // 2. Now delete the question
+    
     const { error } = await supabase
       .from("questions")
       .delete()
@@ -549,7 +549,7 @@ class SupabaseDataService {
       
     if (error) throw error;
   }
-  // ✅ MODIFIED: Now accepts companyId to filter
+  
   public async getQuestionnaireAnswers(
     companyId?: string
   ): Promise<QuestionnaireAnswer[]> {
@@ -560,12 +560,12 @@ class SupabaseDataService {
       let hasMore = true;
 
       while (hasMore) {
-        // ✅ MODIFIED: Base query built here
+        
         let query = supabase
           .from("questionnaire_answers")
           .select("*");
 
-        // ✅ MODIFIED: Apply filter if companyId is provided
+        
         if (companyId) {
           query = query.eq("company_id", companyId);
         }
@@ -589,7 +589,7 @@ class SupabaseDataService {
         answer: ans.answer,
         answeredBy: ans.answered_by ?? undefined,
         answeredOn: ans.answered_on,
-        companyId: ans.company_id ?? undefined, // ✅ ADDED
+        companyId: ans.company_id ?? undefined, 
       }));
     } catch (error) {
       throw error;
@@ -619,22 +619,22 @@ class SupabaseDataService {
     answer: answer.answer,
     answered_by: answeredBy,
     answered_on: answer.answeredOn || new Date().toISOString(),
-    company_id: answer.companyId ?? null, // ✅ ADDED
+    company_id: answer.companyId ?? null, 
   };
 
   const { error } = await supabase
     .from("questionnaire_answers")
-    .upsert(answerToUpsert); // no onConflict to avoid 42P10
+    .upsert(answerToUpsert); 
 
   if (error) throw error;
 }
 
 
-  // ---------- Global clear (SCOPED BY COMPANY) ----------
+  
 
   public async clearInventoryData(companyId: string): Promise<void> {
     try {
-      // 1. Clear Inventory Items for Company
+      
       const { error: itemsError } = await supabase
         .from("inventory_items")
         .delete()
@@ -642,7 +642,7 @@ class SupabaseDataService {
         
       if (itemsError) throw itemsError;
 
-      // 2. Clear Questionnaire Answers for Company
+      
       const { error: answersError } = await supabase
         .from("questionnaire_answers")
         .delete()
@@ -650,7 +650,7 @@ class SupabaseDataService {
         
       if (answersError) throw answersError;
 
-      // 3. Clear Upload History for Company (Fixes the visual list in Upload.tsx)
+      
       const { error: historyError } = await supabase
         .from("inventory_upload_history")
         .delete()

@@ -31,7 +31,7 @@ const ProtectedRoute = ({
 }: {
   children: React.ReactNode;
   requiredPermission?: string | null;
-  /** If provided, user role must be in this list */
+  
   allowedRoles?: Role[];
 }) => {
   const { isAuthenticated, currentUser } = useUser();
@@ -39,19 +39,19 @@ const ProtectedRoute = ({
   const { selectedCompanyId } = useCompany();
   const location = useLocation();
 
-  // Not logged in → login
+  
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
 
-  // Company guard (except for company selection / add company)
+  
   const isCompanySelectionRoute = location.pathname === "/company-selection";
   const isAddCompanyRoute = location.pathname === "/add-company";
   if (!selectedCompanyId && !isCompanySelectionRoute && !isAddCompanyRoute) {
     return <Navigate to="/company-selection" replace />;
   }
 
-  // Role guard (if specified)
+  
   if (allowedRoles && allowedRoles.length > 0) {
     const role = currentUser?.role as Role | undefined;
     if (!role || !allowedRoles.includes(role)) {
@@ -59,7 +59,7 @@ const ProtectedRoute = ({
     }
   }
 
-  // Permission guard (if specified)
+  
   if (requiredPermission && !hasPermission(requiredPermission)) {
     return <Navigate to="/" replace />;
   }
@@ -76,7 +76,7 @@ function App() {
 
   return (
     <Routes>
-      {/* LOGIN: logged-in user goes to company selection */}
+      
       <Route
         path="/login"
         element={
@@ -88,7 +88,7 @@ function App() {
         }
       />
 
-      {/* DASHBOARD */}
+      
       <Route
         path="/"
         element={
@@ -98,10 +98,10 @@ function App() {
         }
       />
 
-      {/* COMPANY SELECTION PAGE */}
+      
       <Route path="/company-selection" element={<CompanySelection />} />
 
-      {/* OTHER ROUTES */}
+      
       <Route
         path="/scanner"
         element={
@@ -135,7 +135,7 @@ function App() {
         }
       />
 
-      {/* ✅ Only super_admin, admin and client can view Analytics */}
+      
       <Route
         path="/analytics"
         element={
@@ -170,7 +170,7 @@ function App() {
         }
       />
       
-      {/* ✅ ONLY SUPER ADMIN can Add Companies */}
+      
       <Route
         path="/add-company"
         element={

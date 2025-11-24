@@ -1,4 +1,4 @@
-// src/pages/Profile.tsx
+
 import { useEffect, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,7 +46,7 @@ export default function Profile() {
         const profileRow = data as UserProfileRow;
         setProfile(profileRow);
 
-        // Companies
+
         if (
           profileRow.role === "admin" ||
           !profileRow.assigned_companies ||
@@ -67,7 +67,7 @@ export default function Profile() {
           setCompanyNames(names);
         }
 
-        // Locations
+
         if (
           profileRow.role === "admin" ||
           !profileRow.assigned_locations ||
@@ -150,7 +150,7 @@ export default function Profile() {
 
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Left column */}
+              
               <div className="space-y-2">
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase">
@@ -177,7 +177,7 @@ export default function Profile() {
                 </div>
               </div>
 
-              {/* Right column */}
+
               <div className="space-y-2">
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase">
@@ -193,7 +193,7 @@ export default function Profile() {
                   <p className="text-sm">{companyNames}</p>
                 </div>
 
-                {/* 🔹 NEW: Locations row just after Company */}
+                
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase">
                     Locations

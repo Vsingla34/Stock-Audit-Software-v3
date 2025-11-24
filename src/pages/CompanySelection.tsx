@@ -1,5 +1,4 @@
 
-// src/pages/CompanySelection.tsx
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -35,7 +34,7 @@ const CompanySelection = () => {
 
   useEffect(() => {
     fetchInitialData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    
   }, []);
 
   const fetchInitialData = async () => {
@@ -65,8 +64,7 @@ const CompanySelection = () => {
         .eq("is_active", true)
         .order("name");
 
-      // ✅ Modified: Only Super Admin sees all companies.
-      // Admin, Auditor, Client see only assigned companies.
+    
       if (profile.role !== "super_admin") {
         if (!profile.assigned_companies || profile.assigned_companies.length === 0) {
            setCompanies([]);
@@ -95,7 +93,7 @@ const CompanySelection = () => {
       localStorage.setItem("selectedCompanyId", companyId);
       sessionStorage.setItem("selectedCompanyId", companyId);
     } catch {
-      /* ignore */
+      
     }
     navigate("/");
   };
@@ -122,7 +120,7 @@ const CompanySelection = () => {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <div className="max-w-6xl w-full space-y-6">
-        {/* Header */}
+
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div className="space-y-1">
             <h1 className="text-3xl font-bold tracking-tight">Companies</h1>
@@ -132,7 +130,7 @@ const CompanySelection = () => {
             </p>
           </div>
 
-          {/* ✅ Only Super Admin sees Add Company button */}
+          
           {isSuperAdmin && (
             <div className="flex flex-wrap gap-2">
               <Button onClick={() => navigate("/add-company")}>
@@ -143,7 +141,7 @@ const CompanySelection = () => {
           )}
         </div>
 
-        {/* Company grid */}
+
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {companies.map((company) => (
             <Card

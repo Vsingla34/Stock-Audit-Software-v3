@@ -16,7 +16,7 @@ export const SearchInventory = () => {
   const { searchItem, addItemToAudit } = useInventory();
   const { currentUser } = useUser();
   
-  // Use the centralized location filter hook
+  
   const { 
     isAdmin, 
     userAccessibleLocations 
@@ -28,11 +28,11 @@ export const SearchInventory = () => {
     if (searchQuery.length >= 2) {
       const results = searchItem(searchQuery);
       
-      // Filter results based on user role and accessible locations
+      
       let filteredResults = results;
       
       if (!isAdmin) {
-        // For non-admin users, filter by their accessible locations
+        
         const accessibleLocationNames = userAccessibleLocations.map(loc => loc.name);
         filteredResults = results.filter(item => 
           accessibleLocationNames.includes(item.location)
@@ -41,7 +41,7 @@ export const SearchInventory = () => {
       
       setSearchResults(filteredResults);
       
-      // Initialize quantities for new search results
+      
       const newQuantities: Record<string, number> = {};
       filteredResults.forEach(item => {
         newQuantities[`${item.id}-${item.location}`] = quantities[`${item.id}-${item.location}`] || 0;
@@ -75,7 +75,7 @@ export const SearchInventory = () => {
     const quantity = quantities[itemKey] || 0;
     
     try {
-      // Pass auditor information
+      
       await addItemToAudit(
         item, 
         quantity,
@@ -93,7 +93,7 @@ export const SearchInventory = () => {
     }
   };
 
-  // Clear search when user doesn't have access to any locations
+  
   useEffect(() => {
     if (!isAdmin && userAccessibleLocations.length === 0) {
       setSearchResults([]);
@@ -165,7 +165,7 @@ export const SearchInventory = () => {
             {searchResults.map((item) => {
               const itemKey = getItemKey(item);
               
-              // Show existing auditor entries if any
+              
               const auditorEntries = item.auditorEntries || [];
               const currentUserEntry = auditorEntries.find(e => e.auditorId === currentUser?.id);
               
@@ -177,7 +177,7 @@ export const SearchInventory = () => {
                     <div className="text-sm text-muted-foreground">Location: {item.location}</div>
                     <div className="text-sm">System Quantity: {item.systemQuantity}</div>
                     
-                    {/* Show auditor breakdown if multiple auditors */}
+                    
                     {auditorEntries.length > 0 && (
                       <div className="mt-2 text-xs bg-gray-50 p-2 rounded border">
                         <strong>Auditor Breakdown:</strong>

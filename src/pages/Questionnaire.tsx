@@ -18,8 +18,7 @@ const Questionnaire = () => {
   
   const userLocations = accessibleLocations();
   
-  // ✅ FIX: Removed the useEffect that was auto-selecting the first location
-  // This will now allow the user to manually select from all their locations
+  
   
   const locationName = selectedLocation && selectedLocation !== "default" 
     ? locations.find(loc => loc.id === selectedLocation)?.name
@@ -60,7 +59,7 @@ const Questionnaire = () => {
                       locations={userLocations}
                       selectedLocation={selectedLocation}
                       onLocationChange={setSelectedLocation}
-                      placeholder="Select a location to audit" // Added placeholder
+                      placeholder="Select a location to audit" 
                     />
                   )}
                 </div>
@@ -84,7 +83,7 @@ const Questionnaire = () => {
                   locations={userRole === "admin" ? locations : userLocations}
                   selectedLocation={responseLocation}
                   onLocationChange={setResponseLocation}
-                  placeholder="Select a location to view" // Added placeholder
+                  placeholder="Select a location to view" 
                 />
               </div>
               

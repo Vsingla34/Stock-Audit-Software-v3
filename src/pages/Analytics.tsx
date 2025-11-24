@@ -8,7 +8,7 @@ const Analytics = () => {
   const { auditedItems, itemMaster, getInventorySummary } = useInventory();
   const summary = getInventorySummary();
 
-  // Calculate category-based audit data
+  
   const getCategoryData = () => {
     const categories: Record<string, { name: string, total: number, audited: number }> = {};
     
@@ -32,14 +32,14 @@ const Analytics = () => {
     return Object.values(categories);
   };
 
-  // Data for status pie chart
+  
   const statusData = [
     { name: "Matched", value: summary.matched, color: "#22c55e" },
     { name: "Discrepancies", value: summary.discrepancies, color: "#ef4444" },
     { name: "Pending", value: summary.pendingItems, color: "#94a3b8" },
   ];
 
-  // Data for location-based bar chart
+  
   const getLocationData = () => {
     const locations: Record<string, { name: string, system: number, physical: number }> = {};
     

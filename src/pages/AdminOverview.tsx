@@ -9,13 +9,13 @@ import { FileChartColumn, Building } from "lucide-react";
 const AdminOverview = () => {
   const { locations, getLocationSummary } = useInventory();
   
-  // Get summaries for all locations
+  
   const locationSummaries = locations.map(location => ({
     location,
     summary: getLocationSummary(location.name)
   }));
 
-  // Calculate overall stats
+  
   const overallStats = {
     totalItems: locationSummaries.reduce((sum, loc) => sum + loc.summary.totalItems, 0),
     auditedItems: locationSummaries.reduce((sum, loc) => sum + loc.summary.auditedItems, 0),

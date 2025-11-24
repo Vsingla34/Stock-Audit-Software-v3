@@ -51,7 +51,7 @@ const Reports = () => {
   const reportRef = useRef(null);
   const [visibleCount, setVisibleCount] = useState(100);
 
-  // Fetch Company Name on load
+  
   useEffect(() => {
     const fetchCompanyName = async () => {
       if (!selectedCompanyId) return;
@@ -72,7 +72,7 @@ const Reports = () => {
     fetchCompanyName();
   }, [selectedCompanyId]);
 
-  // Memoized filtered data
+  
   const { filteredAuditedItems, filteredItemMaster, summary } = useMemo(() => {
     const locationName = getLocationName(selectedLocation);
 
@@ -117,7 +117,7 @@ const Reports = () => {
     getLocationSummary,
   ]);
 
-  // Memoized table data
+  
   const tableData = useMemo(() => {
     return filteredItemMaster.map((item) => {
       const auditedItem = filteredAuditedItems.find(
@@ -339,7 +339,7 @@ const Reports = () => {
   const generatePDFReport = useCallback(() => {
     const doc = new jsPDF();
 
-    // Header
+    
     doc.setFontSize(20);
     doc.setTextColor(40);
     doc.text("Inventory Audit Report", 14, 20);
@@ -347,7 +347,7 @@ const Reports = () => {
     doc.setFontSize(11);
     doc.setTextColor(100);
     
-    // Metadata
+
     doc.text(`Company: ${companyName || "N/A"}`, 14, 30);
     
     const locationName = getLocationName(selectedLocation);
@@ -358,7 +358,7 @@ const Reports = () => {
 
     doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 44);
 
-    // Summary Table
+
     doc.setFontSize(14);
     doc.setTextColor(0);
     doc.text("Audit Summary", 14, 58);
@@ -392,7 +392,7 @@ const Reports = () => {
       ? (doc as any)["lastAutoTable"].finalY + 10
       : 90;
     
-    // Observations
+    
     doc.setFontSize(14);
     doc.text("Observations", 14, currentY);
 
@@ -425,7 +425,7 @@ const Reports = () => {
       observationY += 7;
     });
 
-    // Discrepancies Table
+    
     const discrepancies = tableData
       .filter((item) => item.status === "discrepancy")
       .map((item) => {
@@ -463,9 +463,9 @@ const Reports = () => {
       });
     }
 
-    // Question-Driven Logic for Questionnaire Section
+    
     if (selectedLocation) {
-      // 1. Get VALID questions for this location
+      
       const validQuestions = getQuestionsForLocation(selectedLocation);
 
       if (validQuestions.length > 0) {
@@ -473,7 +473,7 @@ const Reports = () => {
           ? (doc as any)["lastAutoTable"].finalY + 15
           : observationY + 15;
 
-        // Check for page break before heading
+        
         if (lastTableY > doc.internal.pageSize.height - 40) {
            doc.addPage();
         }
@@ -481,17 +481,17 @@ const Reports = () => {
         doc.setFontSize(14);
         doc.text("Audit Questionnaire Responses", 14, lastTableY);
 
-        // 2. Iterate QUESTIONS first, then find answers
+        
         const answerData = validQuestions
           .map((question) => {
-            // Find answer for this specific question & location
+            
             const answer = questionnaireAnswers.find(
               (a) => a.questionId === question.id && a.locationId === selectedLocation
             );
 
             return [
-              question.text, // Valid Question Text
-              answer ? formatQuestionnaireAnswer(answer.answer, question) : "-", // Answer or empty
+              question.text, 
+              answer ? formatQuestionnaireAnswer(answer.answer, question) : "-", 
               answer?.answeredBy || "-",
               answer ? new Date(answer.answeredOn).toLocaleDateString() : "-",
             ];
@@ -513,7 +513,7 @@ const Reports = () => {
         }
       }
 
-      // 🔹 UPDATED: Sign-off section with Auto-fill and 2 columns
+      
       const lastPos = (doc as any)["lastAutoTable"]
         ? (doc as any)["lastAutoTable"].finalY + 20
         : doc.internal.pageSize.height - 60;
@@ -521,17 +521,15 @@ const Reports = () => {
       const pageHeight = doc.internal.pageSize.height;
       let signOffY = lastPos;
       
-      // Add page if not enough space for signatures (increased space check)
+      
       if (signOffY + 60 > pageHeight) {
           doc.addPage();
           signOffY = 20;
       }
 
-      // --- NEW LOGIC FOR NAMES AND DATES ---
-      // 1. Get Auditor Name from any answer for this location
       const auditorName = questionnaireAnswers.find(a => a.locationId === selectedLocation)?.answeredBy || "N/A";
 
-      // 2. Get Store Manager Name from the questionnaire answer
+      
       let storeManagerName = "N/A";
       const questionsForSignOff = getQuestionsForLocation(selectedLocation);
       const managerQuestion = questionsForSignOff.find(q => q.text.trim().toLowerCase() === 'location manager');
@@ -546,24 +544,24 @@ const Reports = () => {
       }
       
       const currentDate = new Date().toLocaleDateString();
-      // ------------------------------------
+
 
       doc.setFontSize(12);
       
-      // Auditor Sign-off Column
+      
       doc.text("Auditor Sign-off", 14, signOffY);
       doc.setFontSize(10);
-      doc.text(`Name: ${auditorName}`, 14, signOffY + 10); // Auto-filled
-      doc.text("Signature: _____________________", 14, signOffY + 20); // Empty
-      doc.text(`Date: ${currentDate}`, 14, signOffY + 30); // Auto-filled
+      doc.text(`Name: ${auditorName}`, 14, signOffY + 10); 
+      doc.text("Signature: _____________________", 14, signOffY + 20); 
+      doc.text(`Date: ${currentDate}`, 14, signOffY + 30); 
 
-      // Store Manager Sign-off Column
+
       doc.setFontSize(12);
-      doc.text("Store Manager Sign-off", 120, signOffY); // Changed label
+      doc.text("Store Manager Sign-off", 120, signOffY); 
       doc.setFontSize(10);
-      doc.text(`Name: ${storeManagerName}`, 120, signOffY + 10); // Auto-filled
-      doc.text("Signature: _____________________", 120, signOffY + 20); // Empty
-      doc.text(`Date: ${currentDate}`, 120, signOffY + 30); // Auto-filled
+      doc.text(`Name: ${storeManagerName}`, 120, signOffY + 10); 
+      doc.text("Signature: _____________________", 120, signOffY + 20); 
+      doc.text(`Date: ${currentDate}`, 120, signOffY + 30); 
     }
 
     const locationInfo = selectedLocation
