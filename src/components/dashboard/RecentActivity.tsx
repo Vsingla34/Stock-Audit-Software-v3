@@ -17,11 +17,11 @@ export const RecentActivity = ({ selectedLocation }: RecentActivityProps) => {
   const { accessibleLocations } = useUserAccess();
   const { selectedCompanyId } = useCompany();
 
-  // Get user's accessible location names
+ 
   const userAccessibleLocations = accessibleLocations();
   const accessibleLocationNames = userAccessibleLocations.map((loc) => loc.name);
 
-  // Map of locationName -> location (for fast lookup)
+  
   const locationByName = useMemo(() => {
     const map = new Map<string, (typeof locations)[number]>();
     locations.forEach((loc) => {
@@ -30,32 +30,29 @@ export const RecentActivity = ({ selectedLocation }: RecentActivityProps) => {
     return map;
   }, [locations]);
 
-  // Filter audited items based on:
-  // 1. Current company
-  // 2. User role + accessible locations
-  // 3. Selected location filter
+ 
   const filteredItems = auditedItems.filter((item) => {
     const itemLocation = locationByName.get(item.location);
 
-    // If we can't resolve the location, ignore this item
+   
     if (!itemLocation) return false;
 
-    // ✅ Company filter – only show items whose location belongs to current company
+    
     if (selectedCompanyId && itemLocation.companyId !== selectedCompanyId) {
       return false;
     }
 
-    // Admin logic
+    
     if (currentUser?.role === "admin") {
       if (selectedLocation && selectedLocation !== "all") {
         const locationObj = locations.find((loc) => loc.id === selectedLocation);
         return item.location === locationObj?.name;
       }
-      // If no specific location selected (or "all"), show all items of current company
+      
       return true;
     }
 
-    // Non-admin logic
+   
     if (selectedLocation && selectedLocation !== "all") {
       const locationObj = locations.find((loc) => loc.id === selectedLocation);
       return (
@@ -64,11 +61,11 @@ export const RecentActivity = ({ selectedLocation }: RecentActivityProps) => {
       );
     }
 
-    // Show items from accessible locations only, within current company
+    
     return accessibleLocationNames.includes(item.location);
   });
 
-  // Get the most recent 5 audited items from filtered results
+  
   const recentItems = [...filteredItems]
     .sort((a, b) => {
       if (!a.lastAudited || !b.lastAudited) return 0;

@@ -36,13 +36,13 @@ export const ClearDataButton = () => {
         onClick={() => setDialogOpen(true)}
       >
         <Trash2 className="mr-2 h-4 w-4" />
-        Clear All Inventory Data
+        Clear Company Inventory Data
       </Button>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Clear Inventory Data</DialogTitle>
+            <DialogTitle>Clear Company Inventory Data</DialogTitle>
             <DialogDescription>
               Are you sure you want to clear all inventory data? This action cannot be undone.
             </DialogDescription>
@@ -58,7 +58,7 @@ export const ClearDataButton = () => {
               variant="destructive" 
               onClick={handleClear}
             >
-              Delete All Data
+              Delete  All Data
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -37,10 +37,10 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
     [accessibleLocations]
   );
 
-  // --- Build combined table data (all rows, all items) ----------------------
+ 
   const allTableData = useMemo(() => {
     return itemMaster
-      .filter((item) => item.location !== "") // exclude blueprints (no location)
+      .filter((item) => item.location !== "") 
       .map((item) => {
         const auditedItem = auditedItems.find(
           (a) => a.id === item.id && a.location === item.location
@@ -63,13 +63,13 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
       });
   }, [itemMaster, auditedItems]);
 
-  // --- Apply access + location filters (still ALL items logically) ----------
+  
   const filteredData = useMemo(() => {
     if (currentUser?.role === "admin" && !selectedLocation) {
-      // Admin: all locations
+      
       return allTableData;
     } else if (selectedLocation) {
-      // Specific location selected (id -> name)
+     
       const locationObj = locations.find((loc) => loc.id === selectedLocation);
       if (locationObj) {
         return allTableData.filter(
@@ -78,7 +78,7 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
       }
       return [];
     } else if (currentUser?.role !== "admin") {
-      // Non-admin: only accessible locations
+     
       const accessibleLocationNames = userLocations.map((loc) => loc.name);
       return allTableData.filter((item) =>
         accessibleLocationNames.includes(item.location)
@@ -94,10 +94,10 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
     userLocations,
   ]);
 
-  // --- Limit rows rendered for performance ----------------------------------
+ 
   const [visibleCount, setVisibleCount] = useState(ROW_LIMIT);
 
-  // Reset visible rows when filter / role changes
+  
   useEffect(() => {
     setVisibleCount(ROW_LIMIT);
   }, [selectedLocation, currentUser?.role, filteredData.length]);
@@ -119,7 +119,7 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
     setVisibleCount(filteredData.length);
   };
 
-  // --- Status / styling helpers ---------------------------------------------
+  
   const renderStatus = useCallback(
     (status: string | undefined, systemQty: number, physicalQty: number) => {
       switch (status) {
@@ -204,7 +204,7 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
 
   return (
     <div className="space-y-4">
-      {/* Inventory Table */}
+      
       <div className="rounded-md border bg-white">
         <Table>
           <TableHeader>
@@ -309,7 +309,7 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
           </TableBody>
         </Table>
 
-        {/* Footer: show counts + paging controls */}
+        
         {filteredData.length > 0 && (
           <div className="flex items-center justify-between px-4 py-2 text-xs text-muted-foreground">
             <span>

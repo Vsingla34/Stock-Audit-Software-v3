@@ -30,7 +30,7 @@ export const BarcodeScanner = () => {
     const scannedBufferRef = useRef('');
     const lastKeypressTime = useRef(0);
 
-    // UPDATED: Handle item scanning with auditor tracking
+    
     const handleItemScan = async (barcode: string, locationId: string): Promise<boolean> => {
         console.log("=== handleItemScan called ===");
         console.log("Barcode:", barcode);
@@ -45,7 +45,7 @@ export const BarcodeScanner = () => {
         }
 
         try {
-            // 1. ROBUST LOCATION VALIDATION AND NAME RETRIEVAL
+            
             let locationName = '';
             
             if (!locationId || locationId === "") {
@@ -55,7 +55,7 @@ export const BarcodeScanner = () => {
                  return false; 
             }
             
-            // Convert ID to NAME
+
             const locationObj = locations.find(loc => loc.id === locationId);
             locationName = locationObj?.name || '';
             
@@ -68,7 +68,7 @@ export const BarcodeScanner = () => {
                  return false;
             }
             
-            // CRITICAL: Find item by SKU AND location match
+
             console.log("Searching in itemMaster:", itemMaster.length, "items");
             const masterItem = itemMaster.find(item => 
                 (item.sku === barcode) && item.location === locationName
@@ -93,27 +93,26 @@ export const BarcodeScanner = () => {
                 return false;
             }
 
-            // 2. Get existing audit data
+            
             const existingAuditedItem = auditedItems.find(
                 item => item.id === masterItem.id && item.location === locationName
             );
 
             console.log("Existing Audited Item:", existingAuditedItem);
 
-            // 3. Calculate new quantity for THIS auditor only
+
             const existingAuditorEntries = existingAuditedItem?.auditorEntries || [];
             const currentAuditorEntry = existingAuditorEntries.find(
                 entry => entry.auditorId === currentUser?.id
             );
             
             const currentAuditorQuantity = currentAuditorEntry?.quantityFound || 0;
-            const newAuditorQuantity = currentAuditorQuantity + 1; // THIS auditor's new count
+            const newAuditorQuantity = currentAuditorQuantity + 1; 
 
             console.log("Quantities - Current Auditor:", currentAuditorQuantity, 
                        "New Auditor Qty:", newAuditorQuantity);
 
-            // 4. Construct Item to Update with THIS auditor's quantity
-            // The updateAuditedItem function will calculate the total from all auditors
+            
             const itemToUpdate: InventoryItem = {
                 id: masterItem.id,
                 sku: masterItem.sku,
@@ -121,28 +120,28 @@ export const BarcodeScanner = () => {
                 category: masterItem.category,
                 location: locationName, 
                 systemQuantity: masterItem.systemQuantity,
-                physicalQuantity: newAuditorQuantity, // THIS auditor's count (will be summed in updateAuditedItem)
-                status: 'pending', // Status will be recalculated
+                physicalQuantity: newAuditorQuantity, 
+                status: 'pending', 
                 lastAudited: new Date().toISOString(),
                 notes: existingAuditedItem?.notes || masterItem.notes,
             };
 
             console.log("Item to update (with this auditor's qty):", itemToUpdate);
 
-            // 5. Persistence with auditor tracking - this will calculate total
+            
             await updateAuditedItem(
                 itemToUpdate,
                 currentUser?.id,
                 currentUser?.email || currentUser?.name || 'Unknown Auditor'
             );
 
-            // 6. Get the updated item to show correct total in toast
+            
             const updatedItem = itemMaster.find(i => i.id === masterItem.id && i.location === locationName);
             const totalPhysicalQuantity = updatedItem?.physicalQuantity || newAuditorQuantity;
 
             console.log("Update completed, total physical:", totalPhysicalQuantity);
 
-            // 7. Success Toast with auditor info
+            
             const quantityInfo = currentAuditorQuantity > 0 
                 ? `Your count: ${currentAuditorQuantity} → ${newAuditorQuantity} (Total: ${totalPhysicalQuantity}/${masterItem.systemQuantity})`
                 : `Your count: ${newAuditorQuantity} (Total: ${totalPhysicalQuantity}/${masterItem.systemQuantity})`;
@@ -169,7 +168,7 @@ export const BarcodeScanner = () => {
         }
     };
 
-    // Hardware scanner logic
+
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
             if (!isHardwareScannerMode || !selectedLocation) {
@@ -272,7 +271,7 @@ export const BarcodeScanner = () => {
     };
 
     const onScanError = (errorMessage: string) => {
-        // Suppress frequent scan errors
+
     };
 
     const handleStartHardwareScanner = () => {

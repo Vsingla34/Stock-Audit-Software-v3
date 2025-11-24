@@ -3,8 +3,6 @@ import { Question, QuestionOption, QuestionType, useInventory } from "@/context/
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { useUser } from "@/context/UserContext";
-
 import {
   Select,
   SelectContent,
@@ -24,19 +22,18 @@ interface QuestionFormProps {
   onCancel: () => void;
 }
 
+
 export const QuestionForm = ({ question, onSave, onCancel }: QuestionFormProps) => {
   const { addQuestion, updateQuestion } = useInventory();
 
   const [text, setText] = useState(question?.text || "");
   const [type, setType] = useState<QuestionType>(question?.type || "text");
   const [required, setRequired] = useState(question?.required ?? true);
-  const { currentUser } = useUser();
 
   const [options, setOptions] = useState<QuestionOption[]>(
     question?.options || [{ id: `opt-${Date.now()}-1`, text: "" }]
   );
 
-  // Reset form if question changes
   useEffect(() => {
     if (question) {
       setText(question.text);
@@ -77,7 +74,6 @@ export const QuestionForm = ({ question, onSave, onCancel }: QuestionFormProps) 
       return;
     }
 
-    // ✅ FIX: Updated check to use snake_case for types.
     if ((type === "single_select" || type === "multi_select") && options.some(opt => !opt.text.trim())) {
       toast.error("All options must have text");
       return;
@@ -87,7 +83,6 @@ export const QuestionForm = ({ question, onSave, onCancel }: QuestionFormProps) 
       text,
       type,
       required,
-      // ✅ FIX: Updated check to use snake_case for types.
       options: type === "single_select" || type === "multi_select" ? options.filter(opt => opt.text.trim() !== '') : null
     };
 
@@ -109,11 +104,11 @@ export const QuestionForm = ({ question, onSave, onCancel }: QuestionFormProps) 
   };
 
   return (
-    <Card className="w-full">
-      <CardHeader>
+    <Card className="w-full border-0 shadow-none">
+      <CardHeader className="px-0 pt-0">
         <CardTitle>{question ? "Edit Question" : "Add New Question"}</CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="px-0">
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-2">
             <Label htmlFor="question-text">Question Text</Label>
@@ -134,7 +129,6 @@ export const QuestionForm = ({ question, onSave, onCancel }: QuestionFormProps) 
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="text">Text Answer</SelectItem>
-                {/* ✅ FIX: Changed values to snake_case. */}
                 <SelectItem value="single_select">Single Select</SelectItem>
                 <SelectItem value="multi_select">Multiple Select</SelectItem>
                 <SelectItem value="yes_no">Yes/No</SelectItem>
@@ -151,16 +145,12 @@ export const QuestionForm = ({ question, onSave, onCancel }: QuestionFormProps) 
             />
           </div>
 
-          {/* ✅ FIX: Updated check to use snake_case for types. */}
           {(type === "single_select" || type === "multi_select") && (
             <div className="space-y-4">
               <Label>Answer Options</Label>
               <div className="space-y-3">
                 {options.map((option, index) => (
-                  <div
-                    key={option.id}
-                    className="flex items-center gap-2"
-                  >
+                  <div key={option.id} className="flex items-center gap-2">
                     <Input
                       placeholder={`Option ${index + 1}`}
                       value={option.text}
@@ -190,13 +180,13 @@ export const QuestionForm = ({ question, onSave, onCancel }: QuestionFormProps) 
           )}
         </form>
       </CardContent>
-      <CardFooter className="flex justify-between">
+      <CardFooter className="flex justify-end gap-2 px-0">
         <Button variant="outline" onClick={onCancel}>
           Cancel
         </Button>
         <Button onClick={handleSubmit}>
           <Save className="h-4 w-4 mr-2" />
-          {question ? "Update Question" : "Add Question"}
+          {question ? "Update" : "Save"}
         </Button>
       </CardFooter>
     </Card>

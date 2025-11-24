@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -30,7 +29,7 @@ import {
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { Users, Plus, Edit, Trash, Building2, MapPin } from "lucide-react";
+import { Users, Plus, Edit, Trash, Building2, MapPin, Filter } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useUser } from "@/context/UserContext";
@@ -64,6 +63,9 @@ const UserManagement = () => {
   const [locations, setLocations] = useState<Location[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // ✅ New State for Filter
+  const [companyFilter, setCompanyFilter] = useState<string>("all");
 
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -85,7 +87,6 @@ const UserManagement = () => {
 
   const fetchData = async () => {
     try {
-      // Fetch Users
       let usersQuery = supabase
         .from("user_profiles")
         .select("*")
@@ -95,7 +96,6 @@ const UserManagement = () => {
       if (usersError) throw usersError;
       setUsers(usersData || []);
 
-      // Fetch Locations
       const { data: locationsData, error: locationsError } = await supabase
         .from("locations")
         .select("id, name, company_id")
@@ -110,7 +110,6 @@ const UserManagement = () => {
         companyId: loc.company_id ?? null,
       }));
 
-      // Fetch Companies
       const { data: companiesData, error: companiesError } = await supabase
         .from("companies")
         .select("id, name")
@@ -119,12 +118,10 @@ const UserManagement = () => {
 
       if (companiesError) throw companiesError;
       
-      // Filter accessible data based on role
       if (isSuperAdmin) {
         setLocations(allLocations);
         setCompanies(companiesData || []);
       } else {
-        // Admin can only see/assign companies they belong to
         const myCompanyIds = currentUser?.assigned_companies || [];
         setCompanies((companiesData || []).filter(c => myCompanyIds.includes(c.id)));
         setLocations(allLocations.filter(l => l.companyId && myCompanyIds.includes(l.companyId)));
@@ -182,14 +179,12 @@ const UserManagement = () => {
     setIsDeleteDialogOpen(true);
   };
 
-  // Helper to find all locations for a given list of company IDs
   const getAllLocationsForCompanies = (companyIds: string[]) => {
     return locations
       .filter(loc => loc.companyId && companyIds.includes(loc.companyId))
       .map(loc => loc.id);
   };
 
-  // Toggle location manually
   const toggleLocation = (locationId: string) => {
     setFormData((prev) => ({
       ...prev,
@@ -199,7 +194,6 @@ const UserManagement = () => {
     }));
   };
 
-  // Toggle Company with Auto-Select logic for Admins
   const toggleCompany = (companyId: string) => {
     setFormData((prev) => {
       const newAssignedCompanies = prev.assignedCompanies.includes(companyId)
@@ -228,7 +222,6 @@ const UserManagement = () => {
     });
   };
 
-  // Handle Role Change
   const handleRoleChange = (value: "super_admin" | "admin" | "auditor" | "client") => {
     setFormData(prev => {
       let newLocations = prev.assignedLocations;
@@ -264,9 +257,32 @@ const UserManagement = () => {
     return names.length ? names.join(", ") : "-";
   };
 
+  // ✅ UPDATED: Correct Filtering Logic
   const filteredUsers = users.filter(user => {
+    // 1. Always hide Super Admins
     if (user.role === 'super_admin') return false;
-    if (!isSuperAdmin && user.role === 'admin') return false;
+
+    // 2. Logic for Admins
+    if (!isSuperAdmin) {
+      // Hide other Admins
+      if (user.role === 'admin') return false;
+
+      // Hide users who are NOT in the Admin's assigned companies
+      const myCompanies = currentUser?.assigned_companies || [];
+      const userCompanies = user.assigned_companies || [];
+      
+      // Check intersection: Does user belong to any of my companies?
+      const hasCommonCompany = userCompanies.some(id => myCompanies.includes(id));
+      
+      if (!hasCommonCompany) return false;
+    }
+
+    // 3. Apply Dropdown Filter
+    if (companyFilter !== "all") {
+      const userCompanies = user.assigned_companies || [];
+      if (!userCompanies.includes(companyFilter)) return false;
+    }
+
     return true;
   });
 
@@ -282,14 +298,12 @@ const UserManagement = () => {
     }
 
     try {
-      // ✅ FIX: Create a temporary client that does NOT persist session.
-      // This prevents the new user login from overriding the current Super Admin session.
       const tempSupabase = createClient(
         import.meta.env.VITE_SUPABASE_URL,
         import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
         {
           auth: {
-            persistSession: false, // Crucial: Don't save this session to localStorage
+            persistSession: false,
             autoRefreshToken: false,
             detectSessionInUrl: false,
           },
@@ -310,8 +324,6 @@ const UserManagement = () => {
       if (authError) throw authError;
 
       if (authData.user) {
-        // ✅ Use the main `supabase` client (Admin session) to insert profile
-        // This works because the Super Admin has permission to insert into user_profiles
         const { error: profileError } = await supabase
           .from("user_profiles")
           .insert([
@@ -394,21 +406,20 @@ const UserManagement = () => {
     if (!selectedUser) return;
 
     try {
-      const { error: profileError } = await supabase
-        .from("user_profiles")
-        .delete()
-        .eq("id", selectedUser.id);
+      const { error } = await supabase.rpc('delete_user_account', { 
+        user_id: selectedUser.id 
+      });
 
-      if (profileError) throw profileError;
+      if (error) throw error;
 
-      toast.success("User deleted successfully");
+      toast.success("User account deleted successfully");
       setIsDeleteDialogOpen(false);
       setSelectedUser(null);
       fetchData();
     } catch (error: any) {
       console.error("Error deleting user:", error);
       toast.error("Failed to delete user", {
-        description: error.message,
+        description: error.message || "Could not delete user account",
       });
     }
   };
@@ -416,21 +427,43 @@ const UserManagement = () => {
   return (
     <AppLayout>
       <div className="space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
+        {/* Header with Filter and Add Button */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">User Management</h1>
             <p className="text-muted-foreground">
               Manage user accounts, roles, and access permissions.
             </p>
           </div>
-          <Button onClick={openAddDialog}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add User
-          </Button>
+          
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            {/* ✅ Company Filter Dropdown */}
+            <div className="w-full sm:w-[200px]">
+              <Select value={companyFilter} onValueChange={setCompanyFilter}>
+                <SelectTrigger>
+                  <div className="flex items-center gap-2">
+                    <Filter className="h-4 w-4 text-muted-foreground" />
+                    <SelectValue placeholder="Filter by Company" />
+                  </div>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Companies</SelectItem>
+                  {companies.map((company) => (
+                    <SelectItem key={company.id} value={company.id}>
+                      {company.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Button onClick={openAddDialog} className="whitespace-nowrap">
+              <Plus className="mr-2 h-4 w-4" />
+              Add User
+            </Button>
+          </div>
         </div>
 
-        {/* User table */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -514,7 +547,6 @@ const UserManagement = () => {
           </CardContent>
         </Card>
 
-        {/* ADD USER DIALOG */}
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
@@ -525,7 +557,6 @@ const UserManagement = () => {
             </DialogHeader>
 
             <div className="grid gap-4 py-4">
-              {/* Name + Role */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="add-name">Name *</Label>
@@ -556,7 +587,6 @@ const UserManagement = () => {
                 </div>
               </div>
 
-              {/* Email + Password */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="add-email">Email *</Label>
@@ -582,7 +612,6 @@ const UserManagement = () => {
                 </div>
               </div>
 
-              {/* Companies */}
               {formData.role !== "super_admin" && (
                 <div className="space-y-2">
                   <Label className="flex items-center gap-2">
@@ -626,7 +655,6 @@ const UserManagement = () => {
                 </div>
               )}
 
-              {/* Locations (filtered by companies) */}
               <div className="space-y-2">
                 <Label className="flex items-center gap-2">
                   <MapPin className="h-4 w-4" />
@@ -654,7 +682,6 @@ const UserManagement = () => {
                             checked={formData.assignedLocations.includes(
                               location.id
                             )}
-                            // If role is admin, disable manual deselection to enforce "all locations"
                             disabled={formData.role === 'admin'}
                             onCheckedChange={() => toggleLocation(location.id)}
                           />
@@ -692,7 +719,6 @@ const UserManagement = () => {
           </DialogContent>
         </Dialog>
 
-        {/* EDIT USER DIALOG */}
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
           <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
@@ -703,7 +729,6 @@ const UserManagement = () => {
             </DialogHeader>
 
             <div className="grid gap-4 py-4">
-              {/* Name + Role */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="edit-name">Name *</Label>
@@ -734,7 +759,6 @@ const UserManagement = () => {
                 </div>
               </div>
 
-              {/* Companies for edit */}
               {formData.role !== "super_admin" && (
                 <div className="space-y-2">
                   <Label className="flex items-center gap-2">
@@ -778,7 +802,6 @@ const UserManagement = () => {
                 </div>
               )}
 
-              {/* Locations for edit */}
               <div className="space-y-2">
                 <Label className="flex items-center gap-2">
                   <MapPin className="h-4 w-4" />
@@ -843,7 +866,6 @@ const UserManagement = () => {
           </DialogContent>
         </Dialog>
 
-        {/* DELETE CONFIRM DIALOG */}
         <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
           <DialogContent>
             <DialogHeader>

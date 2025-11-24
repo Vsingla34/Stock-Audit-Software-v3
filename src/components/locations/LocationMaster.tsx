@@ -1,4 +1,4 @@
-// src/components/locations/LocationMaster.tsx
+
 import { useState, useEffect } from "react";
 import { useInventory } from "@/context/InventoryContext";
 import { useCompany } from "@/context/CompanyContext";
@@ -42,12 +42,12 @@ export const LocationMaster = () => {
   const [companyLoaded, setCompanyLoaded] = useState(false);
   const [companies, setCompanies] = useState<Company[]>([]);
 
-  // Derived role checks
+ 
   const isAdmin = userRole === "admin";
   const isClient = userRole === "client";
   const isAuditor = userRole === "auditor";
 
-  // Fetch companies list for mapping
+ 
   useEffect(() => {
     const fetchCompanies = async () => {
       try {
@@ -66,7 +66,7 @@ export const LocationMaster = () => {
     fetchCompanies();
   }, []);
 
-  // Fetch current company name
+  
   useEffect(() => {
     const fetchCurrentCompanyName = async () => {
       if (!selectedCompanyId) {
@@ -94,7 +94,7 @@ export const LocationMaster = () => {
     fetchCurrentCompanyName();
   }, [selectedCompanyId]);
 
-  // CRUD handlers
+
   const handleAddLocation = async (newLocation: Omit<Location, "id">) => {
     try {
       await addLocation(newLocation);
@@ -162,7 +162,7 @@ export const LocationMaster = () => {
             <span>Location Master</span>
           </div>
 
-          {/* Admin & Client can add; Auditor can't */}
+         
           {(isAdmin || isClient) && !isAdding && (
             <Button onClick={() => setIsAdding(true)} size="sm" className="h-8">
               <Plus className="mr-1 h-4 w-4" />
@@ -228,7 +228,7 @@ export const LocationMaster = () => {
                           location={editLocation}
                           companyName={getCompanyName(location.companyId)}
                           itemCount={getLocationItemCount(itemMaster, location.name)}
-                          onSave={isAdmin ? handleUpdateLocation : undefined} // only admin can save edits
+                          onSave={isAdmin ? handleUpdateLocation : undefined} 
                           onCancel={cancelEditing}
                         />
                       ) : (
@@ -237,11 +237,11 @@ export const LocationMaster = () => {
                           location={location}
                           companyName={getCompanyName(location.companyId)}
                           itemCount={getLocationItemCount(itemMaster, location.name)}
-                          onEdit={handleUpdateLocation}       // handler provided
-                          onDelete={handleDeleteLocation}     // handler provided
-                          startEditing={startEditing}         // to enter edit mode
-                          canEdit={isAdmin}                   // controls button enabled state
-                          canDelete={isAdmin}                 // controls button enabled state
+                          onEdit={handleUpdateLocation}       
+                          onDelete={handleDeleteLocation}    
+                          startEditing={startEditing}        
+                          canEdit={isAdmin}                   
+                          canDelete={isAdmin}                 
                         />
                       )
                     )

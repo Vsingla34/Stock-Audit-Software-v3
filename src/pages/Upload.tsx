@@ -151,7 +151,7 @@ const Upload = () => {
               <Card>
                 <CardHeader>
                   <CardTitle className="text-red-600">
-                    Clear All Data
+                    Clear Company Data
                   </CardTitle>
                   <CardDescription>
                     This will reset all your inventory data. This action cannot

@@ -31,7 +31,7 @@ const ZERO_SUMMARY: Summary = {
   pendingItems: 0,
 };
 
-// Sentinel for “All Locations” in the Select control
+
 const ALL_LOCATIONS_VALUE = "__ALL__";
 
 function normalizeSummary(raw: Partial<Summary>): Summary {
@@ -49,35 +49,34 @@ export const InventoryOverview = () => {
   const { accessibleLocations, userRole } = useUserAccess();
   const { selectedCompanyId } = useCompany();
 
-  const [selectedLocation, setSelectedLocation] = useState<string>(""); // store "" for All
+  const [selectedLocation, setSelectedLocation] = useState<string>(""); 
   const [hasInitialized, setHasInitialized] = useState(false);
 
-  // All locations user has access to (hook returns a function)
+  
   const userLocations = useMemo(() => accessibleLocations(), [accessibleLocations]);
 
-  // Filter user locations by current company
+ 
   const companyUserLocations = useMemo(() => {
     if (!selectedCompanyId) return userLocations;
     return userLocations.filter((loc) => loc.companyId === selectedCompanyId);
   }, [userLocations, selectedCompanyId]);
 
-  // Initialize selected location
   useEffect(() => {
     if (!hasInitialized && currentUser) {
       if (currentUser.role !== "admin" && companyUserLocations.length > 0) {
         setSelectedLocation(companyUserLocations[0].id);
       } else if (currentUser.role === "admin") {
-        setSelectedLocation(""); // All
+        setSelectedLocation(""); 
       }
       setHasInitialized(true);
     }
   }, [currentUser, companyUserLocations, hasInitialized]);
 
-  // If current selection becomes invalid due to company switch, reset
+  
   useEffect(() => {
     if (!currentUser) return;
     if (currentUser.role === "admin") {
-      // admin can always fall back to All
+      
       if (
         selectedLocation &&
         !companyUserLocations.some((l) => l.id === selectedLocation)
@@ -85,7 +84,7 @@ export const InventoryOverview = () => {
         setSelectedLocation("");
       }
     } else {
-      // non-admin must have a concrete location
+     
       if (
         !selectedLocation ||
         !companyUserLocations.some((l) => l.id === selectedLocation)
@@ -95,7 +94,7 @@ export const InventoryOverview = () => {
     }
   }, [currentUser, companyUserLocations, selectedLocation]);
 
-  // Compute summary with company filter
+ 
   const summary: Summary = useMemo(() => {
     if (!currentUser) return ZERO_SUMMARY;
 
@@ -109,7 +108,7 @@ export const InventoryOverview = () => {
       return normalizeSummary(getLocationSummary(locationObj.name));
     }
 
-    // Admin + "all locations" for current company
+    
     if (currentUser.role === "admin") {
       if (!selectedCompanyId) {
         return normalizeSummary(getInventorySummary());
@@ -161,7 +160,7 @@ export const InventoryOverview = () => {
       : 0;
   }, [summary.auditedItems, summary.totalItems]);
 
-  // Map UI value to state: ALL_LOCATIONS_VALUE -> ""
+  
   const handleLocationChange = useCallback((value: string) => {
     setSelectedLocation(value === ALL_LOCATIONS_VALUE ? "" : value);
   }, []);
@@ -187,7 +186,7 @@ export const InventoryOverview = () => {
   return (
     <>
       <Select
-        // Use sentinel for the control value so “All Locations” is selectable again
+       
         value={selectedLocation || ALL_LOCATIONS_VALUE}
         onValueChange={handleLocationChange}
         disabled={currentUser?.role !== "admin" && companyUserLocations.length <= 1}

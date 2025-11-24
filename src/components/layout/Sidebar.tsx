@@ -3,6 +3,7 @@
 import { useMemo, useState, useEffect, useCallback } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useUserAccess } from "@/hooks/useUserAccess";
+import logo from "../../../public/logo.png"
 import {
   BarChart3,
   FileSpreadsheet,
@@ -23,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { useCompany } from "@/context/CompanyContext";
 import { supabase } from "@/integrations/supabase/client";
 
-// Simple in-memory cache so we don't refetch the same company on every page change
+
 const companyNameCache: Record<string, string> = {};
 
 export function Sidebar({
@@ -42,14 +43,14 @@ export function Sidebar({
     null
   );
 
-  // Optimized fetch: cached per companyId and memoized with useCallback
+ 
   const fetchCompanyName = useCallback(async () => {
     if (!selectedCompanyId) {
       setCurrentCompanyName(null);
       return;
     }
 
-    // ✅ Use cache first – no network call if we already know this company
+   
     const cached = companyNameCache[selectedCompanyId];
     if (cached) {
       setCurrentCompanyName(cached);
@@ -110,7 +111,7 @@ export function Sidebar({
       );
     }
     
-    // ✅ Only Super Admin can create companies
+    
     if (userRole === "super_admin") {
       nav.push({ name: "Company", href: "/add-company", icon: Building2 });
     }
@@ -131,7 +132,7 @@ export function Sidebar({
         <div>
           <div className="space-y-1">
             <h2 className="mb-2 px-4 text-lg font-semibold tracking-tight">
-              Inventory Audit App
+             <div className="relative"> <img src={logo} alt="Software Logo" className="h-10 w-auto relative -left-5"/></div>
             </h2>
             <div className="bg-accent/50 rounded-lg p-2 mb-4">
               <p className="text-xs text-muted-foreground mb-1">
@@ -142,7 +143,7 @@ export function Sidebar({
                 {userRoleDisplay()}
               </p>
 
-              {/* Same UI, just one extra line for company */}
+             
               {currentCompanyName && (
                 <p className="text-xs text-muted-foreground mt-1 truncate">
                   Company:{" "}

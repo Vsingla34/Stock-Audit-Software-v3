@@ -532,14 +532,23 @@ class SupabaseDataService {
     if (error) throw error;
   }
 
-  public async deleteQuestion(questionId: string): Promise<void> {
+ public async deleteQuestion(questionId: string): Promise<void> {
+    // 1. Delete any answers associated with this question first
+    const { error: answerError } = await supabase
+      .from("questionnaire_answers")
+      .delete()
+      .eq("question_id", questionId);
+      
+    if (answerError) throw answerError;
+
+    // 2. Now delete the question
     const { error } = await supabase
       .from("questions")
       .delete()
       .eq("id", questionId);
+      
     if (error) throw error;
   }
-
   // ✅ MODIFIED: Now accepts companyId to filter
   public async getQuestionnaireAnswers(
     companyId?: string

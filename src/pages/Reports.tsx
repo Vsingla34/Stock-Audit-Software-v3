@@ -1,14 +1,16 @@
 import { AppLayout } from "@/components/layout/AppLayout";
-import { useInventory } from "@/context/InventoryContext";
+import { useInventory, Question } from "@/context/InventoryContext";
+import { useCompany } from "@/context/CompanyContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Download, FileText, FileType, FileSpreadsheet } from "lucide-react";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
 import { autoTable } from "jspdf-autotable";
-import { useRef, useMemo, useCallback, useState } from "react";
+import { useRef, useMemo, useCallback, useState, useEffect } from "react";
 import { useLocationFilter } from "@/hooks/useLocationFilter";
 import { LocationFilterDropdown } from "@/components/LocationFilterDropdown";
+import { supabase } from "@/integrations/supabase/client";
 import {
   Table,
   TableBody,
@@ -30,8 +32,8 @@ const Reports = () => {
     itemMaster,
     getInventorySummary,
     getLocationSummary,
-    getLocationQuestionnaireAnswers,
-    getQuestionById,
+    questionnaireAnswers,
+    getQuestionsForLocation,
   } = useInventory();
 
   const {
@@ -43,10 +45,32 @@ const Reports = () => {
     getLocationName,
   } = useLocationFilter();
 
-  const reportRef = useRef(null);
+  const { selectedCompanyId } = useCompany();
+  const [companyName, setCompanyName] = useState<string>("");
 
-  // 🔹 NEW: limit how many rows we render in the UI table
+  const reportRef = useRef(null);
   const [visibleCount, setVisibleCount] = useState(100);
+
+  // Fetch Company Name on load
+  useEffect(() => {
+    const fetchCompanyName = async () => {
+      if (!selectedCompanyId) return;
+      try {
+        const { data, error } = await supabase
+          .from("companies")
+          .select("name")
+          .eq("id", selectedCompanyId)
+          .single();
+        
+        if (data && !error) {
+          setCompanyName(data.name);
+        }
+      } catch (err) {
+        console.error("Error fetching company name:", err);
+      }
+    };
+    fetchCompanyName();
+  }, [selectedCompanyId]);
 
   // Memoized filtered data
   const { filteredAuditedItems, filteredItemMaster, summary } = useMemo(() => {
@@ -93,7 +117,7 @@ const Reports = () => {
     getLocationSummary,
   ]);
 
-  // Memoized table data with auditor information (ALL rows – used for exports)
+  // Memoized table data
   const tableData = useMemo(() => {
     return filteredItemMaster.map((item) => {
       const auditedItem = filteredAuditedItems.find(
@@ -117,7 +141,6 @@ const Reports = () => {
     });
   }, [filteredItemMaster, filteredAuditedItems]);
 
-  // 🔹 UI-only slice: we only render up to `visibleCount` rows in the table
   const visibleTableData = useMemo(
     () => tableData.slice(0, visibleCount),
     [tableData, visibleCount]
@@ -125,7 +148,6 @@ const Reports = () => {
 
   const generateCSV = useCallback((data: any[], filename: string) => {
     const headers = Array.from(new Set(data.flatMap((item) => Object.keys(item))));
-
     let csvContent = headers.join(",") + "\n";
 
     data.forEach((item) => {
@@ -139,9 +161,7 @@ const Reports = () => {
       csvContent += row + "\n";
     });
 
-    const blob = new Blob([csvContent], {
-      type: "text/csv;charset=utf-8;",
-    });
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
@@ -155,7 +175,6 @@ const Reports = () => {
   }, []);
 
   const downloadReconciliationReport = useCallback(() => {
-    // ❗ uses tableData (ALL rows)
     const allAuditors = new Set<string>();
     tableData.forEach((item) => {
       item.auditorEntries.forEach((entry: any) => {
@@ -203,9 +222,7 @@ const Reports = () => {
   }, [tableData, selectedLocation, getLocationName, generateCSV]);
 
   const downloadDiscrepancyReport = useCallback(() => {
-    // ❗ uses tableData (ALL rows)
     const discrepancies = tableData.filter((item) => item.variance !== 0);
-
     const allAuditors = new Set<string>();
     discrepancies.forEach((item) => {
       item.auditorEntries.forEach((entry: any) => {
@@ -277,16 +294,44 @@ const Reports = () => {
   }, [summary, selectedLocation, getLocationName, generateCSV]);
 
   const formatQuestionnaireAnswer = useCallback(
-    (answer: string | string[], questionType: string) => {
-      if (questionType === "yesNo") {
-        return answer === "yes" ? "Yes" : "No";
+    (answer: string | string[], question: Question) => {
+      let val: any = answer;
+
+      if (typeof val === "string") {
+        try {
+          if (val.trim().startsWith("[") || val.trim().startsWith("{")) {
+            const parsed = JSON.parse(val);
+            val = parsed;
+          }
+        } catch {
+          // ignore
+        }
       }
 
-      if (Array.isArray(answer)) {
-        return answer.join(", ");
+      if (question.type === "yes_no") {
+        const v = Array.isArray(val) ? val[0] : val;
+        const s = String(v ?? "").toLowerCase();
+        if (["yes", "true", "1"].includes(s)) return "Yes";
+        if (["no", "false", "0"].includes(s)) return "No";
+        return String(v ?? "");
       }
 
-      return answer;
+      if ((question.type === "single_select" || question.type === "multi_select") && question.options) {
+        const ids = Array.isArray(val) ? val : [val];
+        
+        const labels = ids.map((id: string) => {
+          const opt = question.options?.find((o) => o.id === id);
+          return opt ? opt.text : id;
+        });
+        
+        return labels.join(", ");
+      }
+
+      if (Array.isArray(val)) {
+        return val.join(", ");
+      }
+
+      return String(val);
     },
     []
   );
@@ -294,23 +339,29 @@ const Reports = () => {
   const generatePDFReport = useCallback(() => {
     const doc = new jsPDF();
 
-    doc.setFontSize(18);
-    const locationName = getLocationName(selectedLocation);
-    const reportTitle = locationName
-      ? `Inventory Audit Report - ${locationName}`
-      : "Inventory Audit Report - All Locations";
-
-    doc.text(reportTitle, 14, 22);
+    // Header
+    doc.setFontSize(20);
+    doc.setTextColor(40);
+    doc.text("Inventory Audit Report", 14, 20);
 
     doc.setFontSize(11);
-    doc.text(
-      `Generated on: ${new Date().toLocaleDateString()}`,
-      14,
-      30
-    );
+    doc.setTextColor(100);
+    
+    // Metadata
+    doc.text(`Company: ${companyName || "N/A"}`, 14, 30);
+    
+    const locationName = getLocationName(selectedLocation);
+    const locationText = locationName 
+      ? `Location: ${locationName}` 
+      : "Location: All Locations";
+    doc.text(locationText, 14, 37);
 
+    doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 44);
+
+    // Summary Table
     doc.setFontSize(14);
-    doc.text("Audit Summary", 14, 40);
+    doc.setTextColor(0);
+    doc.text("Audit Summary", 14, 58);
 
     const summaryTableBody = [
       ["Total Items", summary.totalItems.toString()],
@@ -330,7 +381,7 @@ const Reports = () => {
     ];
 
     autoTable(doc, {
-      startY: 45,
+      startY: 62, 
       head: [["Metric", "Value"]],
       body: summaryTableBody,
       theme: "grid",
@@ -340,6 +391,8 @@ const Reports = () => {
     let currentY = (doc as any)["lastAutoTable"]
       ? (doc as any)["lastAutoTable"].finalY + 10
       : 90;
+    
+    // Observations
     doc.setFontSize(14);
     doc.text("Observations", 14, currentY);
 
@@ -372,7 +425,7 @@ const Reports = () => {
       observationY += 7;
     });
 
-    // Discrepancy details with auditor breakdown (uses ALL tableData)
+    // Discrepancies Table
     const discrepancies = tableData
       .filter((item) => item.status === "discrepancy")
       .map((item) => {
@@ -410,33 +463,39 @@ const Reports = () => {
       });
     }
 
+    // Question-Driven Logic for Questionnaire Section
     if (selectedLocation) {
-      const answers = getLocationQuestionnaireAnswers(selectedLocation);
+      // 1. Get VALID questions for this location
+      const validQuestions = getQuestionsForLocation(selectedLocation);
 
-      if (answers.length > 0) {
+      if (validQuestions.length > 0) {
         const lastTableY = (doc as any)["lastAutoTable"]
           ? (doc as any)["lastAutoTable"].finalY + 15
           : observationY + 15;
 
+        // Check for page break before heading
+        if (lastTableY > doc.internal.pageSize.height - 40) {
+           doc.addPage();
+        }
+
         doc.setFontSize(14);
         doc.text("Audit Questionnaire Responses", 14, lastTableY);
 
-        const answerData = answers
-          .map((answer) => {
-            const question = getQuestionById(answer.questionId);
-            if (!question) return null;
+        // 2. Iterate QUESTIONS first, then find answers
+        const answerData = validQuestions
+          .map((question) => {
+            // Find answer for this specific question & location
+            const answer = questionnaireAnswers.find(
+              (a) => a.questionId === question.id && a.locationId === selectedLocation
+            );
 
             return [
-              question.text,
-              formatQuestionnaireAnswer(
-                answer.answer,
-                question.type
-              ),
-              answer.answeredBy || "N/A",
-              new Date(answer.answeredOn).toLocaleDateString(),
+              question.text, // Valid Question Text
+              answer ? formatQuestionnaireAnswer(answer.answer, question) : "-", // Answer or empty
+              answer?.answeredBy || "-",
+              answer ? new Date(answer.answeredOn).toLocaleDateString() : "-",
             ];
-          })
-          .filter(Boolean) as string[][];
+          });
 
         if (answerData.length > 0) {
           autoTable(doc, {
@@ -452,23 +511,59 @@ const Reports = () => {
             },
           });
         }
-
-        const lastPos = (doc as any)["lastAutoTable"]
-          ? (doc as any)["lastAutoTable"].finalY + 20
-          : doc.internal.pageSize.height - 60;
-
-        doc.setFontSize(12);
-        doc.text("Auditor Sign-off", 14, lastPos);
-
-        doc.setFontSize(10);
-        doc.text("Name: _________________________", 14, lastPos + 10);
-        doc.text("Signature: _____________________", 14, lastPos + 20);
-        doc.text("Date: __________________________", 14, lastPos + 30);
-
-        doc.text("Client Sign-off", 120, lastPos + 10);
-        doc.text("Name: _________________________", 120, lastPos + 20);
-        doc.text("Signature: _____________________", 120, lastPos + 30);
       }
+
+      // 🔹 UPDATED: Sign-off section with Auto-fill and 2 columns
+      const lastPos = (doc as any)["lastAutoTable"]
+        ? (doc as any)["lastAutoTable"].finalY + 20
+        : doc.internal.pageSize.height - 60;
+
+      const pageHeight = doc.internal.pageSize.height;
+      let signOffY = lastPos;
+      
+      // Add page if not enough space for signatures (increased space check)
+      if (signOffY + 60 > pageHeight) {
+          doc.addPage();
+          signOffY = 20;
+      }
+
+      // --- NEW LOGIC FOR NAMES AND DATES ---
+      // 1. Get Auditor Name from any answer for this location
+      const auditorName = questionnaireAnswers.find(a => a.locationId === selectedLocation)?.answeredBy || "N/A";
+
+      // 2. Get Store Manager Name from the questionnaire answer
+      let storeManagerName = "N/A";
+      const questionsForSignOff = getQuestionsForLocation(selectedLocation);
+      const managerQuestion = questionsForSignOff.find(q => q.text.trim().toLowerCase() === 'location manager');
+      
+      if (managerQuestion) {
+          const managerAnswer = questionnaireAnswers.find(
+              (a) => a.questionId === managerQuestion.id && a.locationId === selectedLocation
+          );
+          if (managerAnswer) {
+              storeManagerName = formatQuestionnaireAnswer(managerAnswer.answer, managerQuestion);
+          }
+      }
+      
+      const currentDate = new Date().toLocaleDateString();
+      // ------------------------------------
+
+      doc.setFontSize(12);
+      
+      // Auditor Sign-off Column
+      doc.text("Auditor Sign-off", 14, signOffY);
+      doc.setFontSize(10);
+      doc.text(`Name: ${auditorName}`, 14, signOffY + 10); // Auto-filled
+      doc.text("Signature: _____________________", 14, signOffY + 20); // Empty
+      doc.text(`Date: ${currentDate}`, 14, signOffY + 30); // Auto-filled
+
+      // Store Manager Sign-off Column
+      doc.setFontSize(12);
+      doc.text("Store Manager Sign-off", 120, signOffY); // Changed label
+      doc.setFontSize(10);
+      doc.text(`Name: ${storeManagerName}`, 120, signOffY + 10); // Auto-filled
+      doc.text("Signature: _____________________", 120, signOffY + 20); // Empty
+      doc.text(`Date: ${currentDate}`, 120, signOffY + 30); // Auto-filled
     }
 
     const locationInfo = selectedLocation
@@ -482,9 +577,10 @@ const Reports = () => {
     summary,
     tableData,
     getLocationName,
-    getLocationQuestionnaireAnswers,
-    getQuestionById,
+    questionnaireAnswers,
+    getQuestionsForLocation,
     formatQuestionnaireAnswer,
+    companyName
   ]);
 
   const handleShowMore = () => {
@@ -518,7 +614,7 @@ const Reports = () => {
                   selectedLocation={selectedLocation}
                   onLocationChange={(value) => {
                     setSelectedLocation(value);
-                    setVisibleCount(100); // reset pagination when location changes
+                    setVisibleCount(100); 
                   }}
                   availableLocations={availableLocations}
                   showAllOption={isAdmin}
@@ -526,7 +622,6 @@ const Reports = () => {
               )}
             </div>
 
-            {/* Cards with download buttons stay the same */}
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
               <Card className="bg-gradient-to-br from-indigo-50 to-white">
                 <CardHeader>

@@ -2,7 +2,7 @@
 import React from "react";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { Sidebar } from "@/components/layout/Sidebar";
-import { ToastProvider } from "@/components/ui/toast";
+
 
 interface AppLayoutProps {
   children: React.ReactNode;

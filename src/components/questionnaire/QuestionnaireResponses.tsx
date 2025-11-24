@@ -3,11 +3,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertCircle, Download, FileText } from "lucide-react";
+import { AlertCircle, Download, FileText, FileSpreadsheet } from "lucide-react";
 import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable"; // Use named import
+import autoTable from "jspdf-autotable";
+import * as XLSX from "xlsx"; 
 
-// Add module declaration for autotable
 declare module "jspdf" {
   interface jsPDF {
     autoTable: (options: any) => jsPDF;
@@ -25,12 +25,12 @@ export const QuestionnaireResponses = ({
 }: QuestionnaireResponsesProps) => {
   const { questions, questionnaireAnswers, getQuestionById } = useInventory();
 
-  // Central helper: convert stored answer → human-readable text
+  
   const formatAnswerForDisplay = (answerObj: QuestionnaireAnswer): string => {
     const question = getQuestionById(answerObj.questionId);
     let raw: any = answerObj.answer;
 
-    // If answer is a JSON-stringified array, parse it
+    
     if (typeof raw === "string") {
       try {
         const parsed = JSON.parse(raw);
@@ -38,7 +38,7 @@ export const QuestionnaireResponses = ({
           raw = parsed;
         }
       } catch {
-        // keep as string
+        
       }
     }
 
@@ -46,7 +46,7 @@ export const QuestionnaireResponses = ({
       return Array.isArray(raw) ? raw.join(", ") : String(raw ?? "");
     }
 
-    // Yes / No
+
     if (question.type === "yes_no") {
       const v = Array.isArray(raw) ? raw[0] : raw;
       const s = String(v ?? "").toLowerCase();
@@ -55,14 +55,14 @@ export const QuestionnaireResponses = ({
       return String(v ?? "");
     }
 
-    // Single select → one option id → label
+    
     if (question.type === "single_select") {
       const optionId = Array.isArray(raw) ? raw[0] : raw;
       const opt = question.options?.find((o) => o.id === optionId);
       return opt?.text ?? String(optionId ?? "");
     }
 
-    // Multi select → array of option ids → labels
+    
     if (question.type === "multi_select") {
       const ids = Array.isArray(raw) ? raw : [raw];
       const labels = ids
@@ -74,13 +74,73 @@ export const QuestionnaireResponses = ({
       return labels.join(", ");
     }
 
-    // Text question
+    
     return Array.isArray(raw) ? raw.join(", ") : String(raw ?? "");
   };
 
-  /**
-   * ✅ NEW: This function now generates a PDF with a table
-   */
+
+  const generateExcel = () => {
+    try {
+      const filteredAnswers = questionnaireAnswers.filter(
+        (answer) => answer.locationId === locationId
+      );
+
+      if (filteredAnswers.length === 0 && questions.length === 0) {
+        toast.error("No data available to export");
+        return;
+      }
+
+      
+      const excelData = questions.map((question) => {
+        const answer = filteredAnswers.find(
+          (a) => a.questionId === question.id
+        );
+        
+        const answerText = answer 
+          ? formatAnswerForDisplay(answer) 
+          : "-";
+
+        const answeredBy = answer?.answeredBy 
+          ? `${answer.answeredBy} (${new Date(answer.answeredOn).toLocaleDateString()})` 
+          : "-";
+
+        return {
+          "Question": question.text,
+          "Answer": answerText,
+          "Answered By": answeredBy
+        };
+      });
+
+      
+      const worksheet = XLSX.utils.json_to_sheet(excelData);
+
+      
+      const colWidths = [
+        { wch: 40 }, 
+        { wch: 40 }, 
+        { wch: 30 }, 
+      ];
+      worksheet["!cols"] = colWidths;
+
+      
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Questionnaire");
+
+      
+      const safeName = locationName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      const fileName = `questionnaire_responses_${safeName}.xlsx`;
+
+      
+      XLSX.writeFile(workbook, fileName);
+
+      toast.success("Excel file downloaded successfully");
+    } catch (error) {
+      console.error("Excel generation error:", error);
+      toast.error("Failed to generate Excel file");
+    }
+  };
+
+  
   const generatePDF = () => {
     try {
       const locationAnswers = questionnaireAnswers.filter(
@@ -94,63 +154,63 @@ export const QuestionnaireResponses = ({
 
       const doc = new jsPDF();
 
-      // Title
+      
       doc.setFontSize(18);
       doc.text(`Audit Questionnaire Responses: ${locationName}`, 14, 22);
 
       doc.setFontSize(12);
       doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 30);
 
-      // --- START: Table Generation ---
+      
 
-      // Define table columns
+      
       const head = [['Question', 'Answer', 'Answered By']];
 
-      // Define table body by mapping over the answers
-      const body = locationAnswers.map(answer => {
+      
+      const body = locationAnswers
+      .map(answer => {
         const question = getQuestionById(answer.questionId);
         
-        // Split long text to fit in cells
-        const questionText = question
-          ? doc.splitTextToSize(question.text, 80) // 80mm width for question
-          : "Unknown Question";
         
-        const answerText = doc.splitTextToSize(formatAnswerForDisplay(answer) || "-", 70); // 70mm width for answer
+        if (!question) return null;
+        
+        const questionText = doc.splitTextToSize(question.text, 80);
+        const answerText = doc.splitTextToSize(formatAnswerForDisplay(answer) || "-", 70);
         
         const answeredOn = new Date(answer.answeredOn).toLocaleString();
         const answeredBy = answer.answeredBy
-          ? `${answer.answeredBy} on ${answeredOn}`
-          : `Answered on ${answeredOn}`;
+          ? `${answer.answeredBy}\n${answeredOn}`
+          : `${answeredOn}`;
           
         return [questionText, answerText, answeredBy];
-      });
+      })
+      .filter(row => row !== null);
 
-      // Add the table to the document
+      
       autoTable(doc, {
         head: head,
         body: body,
-        startY: 40, // Start after the title
+        startY: 40, 
         theme: "grid",
         styles: {
           cellPadding: 2,
           fontSize: 10,
-          valign: 'middle', // Vertically center content
+          valign: 'middle', 
         },
         headStyles: {
-          fillColor: [41, 128, 185], // A professional blue
+          fillColor: [41, 128, 185], 
           textColor: 255,
           fontStyle: 'bold',
         },
         columnStyles: {
-          0: { cellWidth: 80 },   // Question column
-          1: { cellWidth: 70 },   // Answer column
-          2: { cellWidth: 'auto' }, // Answered By column
+          0: { cellWidth: 80 },  
+          1: { cellWidth: 70 },   
+          2: { cellWidth: 'auto' }, 
         },
       });
 
-      // --- END: Table Generation ---
-
-      // Sign-off page (this logic remains the same)
+      
+     
       doc.addPage();
       doc.setFontSize(12);
       doc.text("Approval Sign-off", 14, 20);
@@ -192,9 +252,14 @@ export const QuestionnaireResponses = ({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
-        {filteredAnswers.length > 0 ? (
+        {questions.length > 0 ? (
           <div className="space-y-6">
-            <div className="flex justify-end">
+            
+            <div className="flex justify-end gap-2">
+              <Button onClick={generateExcel} variant="outline" className="border-green-600 text-green-700 hover:bg-green-50">
+                <FileSpreadsheet className="h-4 w-4 mr-2" />
+                Export Excel
+              </Button>
               <Button onClick={generatePDF}>
                 <Download className="h-4 w-4 mr-2" />
                 Export PDF
@@ -206,8 +271,9 @@ export const QuestionnaireResponses = ({
                 const answer = filteredAnswers.find(
                   (a) => a.questionId === question.id
                 );
-                if (!answer) return null;
-
+                
+               
+                
                 return (
                   <div
                     key={question.id}
@@ -225,13 +291,15 @@ export const QuestionnaireResponses = ({
                     </div>
 
                     <div className="bg-white p-3 rounded border">
-                      <p>{formatAnswerForDisplay(answer) || "-"}</p>
+                      <p>{answer ? formatAnswerForDisplay(answer) : "-"}</p>
                     </div>
 
-                    <div className="text-xs text-muted-foreground">
-                      {answer.answeredBy && <>Answered by {answer.answeredBy} on </>}
-                      {new Date(answer.answeredOn).toLocaleString()}
-                    </div>
+                    {answer && (
+                      <div className="text-xs text-muted-foreground">
+                        {answer.answeredBy && <>Answered by {answer.answeredBy} on </>}
+                        {new Date(answer.answeredOn).toLocaleString()}
+                      </div>
+                    )}
                   </div>
                 );
               })}

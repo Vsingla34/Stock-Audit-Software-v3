@@ -1,4 +1,4 @@
-// src/components/locations/LocationRow.tsx
+
 import { Button } from "@/components/ui/button";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { Pencil, Trash2 } from "lucide-react";
@@ -8,9 +8,9 @@ type Props = {
   location: Location;
   companyName: string;
   itemCount: number;
-  // When user clicks edit, parent will call startEditing(location)
+
   startEditing?: (loc: Location) => void;
-  onEdit?: (loc: Location) => void;      // kept for compatibility
+  onEdit?: (loc: Location) => void;    
   onDelete?: (id: string) => void;
   canEdit: boolean;
   canDelete: boolean;
@@ -27,7 +27,7 @@ export const LocationRow = ({
 }: Props) => {
   const handleEditClick = () => {
     if (!canEdit) return;
-    // Prefer startEditing to enter edit mode row
+    
     if (startEditing) startEditing(location);
   };
 

@@ -27,7 +27,7 @@ export const LocationForm = ({
   const [description, setDescription] = useState("");
   const [active, setActive] = useState(true);
 
-  // selected company from context
+
   const { selectedCompanyId } = useCompany();
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -38,7 +38,7 @@ export const LocationForm = ({
       return;
     }
 
-    // get company id from context / storage
+  
     const companyIdFromSession = sessionStorage.getItem("selectedCompanyId");
     const companyIdFromLocal = localStorage.getItem("selectedCompanyId");
 
