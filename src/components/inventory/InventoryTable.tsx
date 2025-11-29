@@ -14,12 +14,14 @@ import {
   Clock,
   TrendingUp,
   TrendingDown,
+  Search, 
 } from "lucide-react";
 import { format } from "date-fns";
 import { useUser } from "@/context/UserContext";
 import { useUserAccess } from "@/hooks/useUserAccess";
 import { useMemo, useCallback, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input"; 
 
 interface InventoryTableProps {
   selectedLocation?: string;
@@ -32,12 +34,14 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
   const { currentUser } = useUser();
   const { accessibleLocations } = useUserAccess();
 
+  const [searchQuery, setSearchQuery] = useState(""); 
+
   const userLocations = useMemo(
     () => accessibleLocations(),
     [accessibleLocations]
   );
 
- 
+  
   const allTableData = useMemo(() => {
     return itemMaster
       .filter((item) => item.location !== "") 
@@ -64,12 +68,12 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
   }, [itemMaster, auditedItems]);
 
   
-  const filteredData = useMemo(() => {
+  const locationFilteredData = useMemo(() => {
     if (currentUser?.role === "admin" && !selectedLocation) {
       
       return allTableData;
     } else if (selectedLocation) {
-     
+      
       const locationObj = locations.find((loc) => loc.id === selectedLocation);
       if (locationObj) {
         return allTableData.filter(
@@ -78,7 +82,7 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
       }
       return [];
     } else if (currentUser?.role !== "admin") {
-     
+      
       const accessibleLocationNames = userLocations.map((loc) => loc.name);
       return allTableData.filter((item) =>
         accessibleLocationNames.includes(item.location)
@@ -94,13 +98,26 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
     userLocations,
   ]);
 
- 
+  
+  const filteredData = useMemo(() => {
+    if (!searchQuery.trim()) return locationFilteredData;
+
+    const query = searchQuery.toLowerCase();
+    return locationFilteredData.filter(
+      (item) =>
+        item.sku.toLowerCase().includes(query) ||
+        (item.name && item.name.toLowerCase().includes(query)) ||
+        (item.category && item.category.toLowerCase().includes(query))
+    );
+  }, [locationFilteredData, searchQuery]);
+
+  
   const [visibleCount, setVisibleCount] = useState(ROW_LIMIT);
 
   
   useEffect(() => {
     setVisibleCount(ROW_LIMIT);
-  }, [selectedLocation, currentUser?.role, filteredData.length]);
+  }, [selectedLocation, currentUser?.role, locationFilteredData.length, searchQuery]);
 
   const visibleData = useMemo(
     () => filteredData.slice(0, visibleCount),
@@ -125,7 +142,7 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
       switch (status) {
         case "matched":
           return (
-            <div className="flex items-center">
+            <div className="flex items-center justify-center">
               <CheckCircle className="h-4 w-4 text-green-500 mr-1" />
               <Badge
                 variant="default"
@@ -137,7 +154,7 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
           );
         case "discrepancy":
           return (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center justify-center gap-2">
               <Badge
                 variant="destructive"
                 className="bg-red-100 text-red-800 border-red-200"
@@ -148,7 +165,7 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
           );
         default:
           return (
-            <div className="flex items-center">
+            <div className="flex items-center justify-center">
               <Clock className="h-4 w-4 text-gray-400 mr-1" />
               <Badge variant="outline" className="text-gray-600">
                 Pending
@@ -205,6 +222,21 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
   return (
     <div className="space-y-4">
       
+      
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            type="text"
+            placeholder="Search items by Name, SKU, or Category..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+      </div>
+
+
       <div className="rounded-md border bg-white">
         <Table>
           <TableHeader>
@@ -298,10 +330,19 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
                   className="text-center py-8 text-muted-foreground"
                 >
                   <div className="flex flex-col items-center gap-2">
-                    <Clock className="h-8 w-8 text-gray-400" />
-                    <span>
-                      No inventory data available for the selected location.
-                    </span>
+                    {searchQuery ? (
+                        <>
+                            <Search className="h-8 w-8 text-gray-400" />
+                            <span>No items found matching "{searchQuery}"</span>
+                        </>
+                    ) : (
+                        <>
+                            <Clock className="h-8 w-8 text-gray-400" />
+                            <span>
+                            No inventory data available for the selected location.
+                            </span>
+                        </>
+                    )}
                   </div>
                 </TableCell>
               </TableRow>
@@ -309,7 +350,7 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
           </TableBody>
         </Table>
 
-        
+
         {filteredData.length > 0 && (
           <div className="flex items-center justify-between px-4 py-2 text-xs text-muted-foreground">
             <span>
@@ -319,8 +360,9 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
               <div className="space-x-2">
                 <Button
                   variant="outline"
-                  size="xs"
+                  size="xs" 
                   onClick={handleShowMore}
+                  className="h-8 px-2"
                 >
                   Show next {ROW_LIMIT}
                 </Button>
@@ -328,6 +370,7 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
                   variant="ghost"
                   size="xs"
                   onClick={handleShowAll}
+                  className="h-8 px-2"
                 >
                   Show all
                 </Button>
@@ -337,7 +380,7 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
         )}
       </div>
 
-      {/* Legend */}
+      
       <div className="bg-gray-50 p-4 rounded-lg">
         <h4 className="font-medium mb-2">Status Legend:</h4>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">

@@ -1,8 +1,7 @@
 
 import { useEffect, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -11,7 +10,8 @@ interface UserProfileRow {
   id: string;
   email: string;
   name: string;
-  role: "admin" | "auditor" | "client";
+  
+  role: "super_admin" | "admin" | "auditor" | "client";
   assigned_companies: string[] | null;
   assigned_locations: string[] | null;
 }
@@ -46,8 +46,9 @@ export default function Profile() {
         const profileRow = data as UserProfileRow;
         setProfile(profileRow);
 
-
+        
         if (
+          profileRow.role === "super_admin" || 
           profileRow.role === "admin" ||
           !profileRow.assigned_companies ||
           profileRow.assigned_companies.length === 0
@@ -67,8 +68,9 @@ export default function Profile() {
           setCompanyNames(names);
         }
 
-
+        
         if (
+          profileRow.role === "super_admin" || 
           profileRow.role === "admin" ||
           !profileRow.assigned_locations ||
           profileRow.assigned_locations.length === 0
@@ -118,16 +120,22 @@ export default function Profile() {
     );
   }
 
+  
   const niceRoleLabel =
-    profile.role === "admin"
+    profile.role === "super_admin"
+      ? "Super Administrator"
+      : profile.role === "admin"
       ? "Admin"
       : profile.role === "client"
       ? "Client"
       : "Inventory Auditor";
 
+  
   const accessText =
-    profile.role === "admin"
-      ? "As an admin, you can manage all companies, locations, users and reports."
+    profile.role === "super_admin"
+      ? "As a Super Admin, you have full system access, including creating companies and managing all users."
+      : profile.role === "admin"
+      ? "As an admin, you can manage users, locations, and reports for your assigned companies."
       : profile.role === "client"
       ? "As a client, you can view analytics, reports and audit results for your companies."
       : "As an auditor, you can conduct stock audits and view reports for your assigned locations.";
@@ -144,7 +152,6 @@ export default function Profile() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
-           
            
           </CardHeader>
 
@@ -165,7 +172,7 @@ export default function Profile() {
                   </p>
                   <Badge
                     variant={
-                      profile.role === "admin"
+                      profile.role === "super_admin" || profile.role === "admin"
                         ? "default"
                         : profile.role === "client"
                         ? "secondary"
@@ -177,7 +184,7 @@ export default function Profile() {
                 </div>
               </div>
 
-
+              
               <div className="space-y-2">
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase">
@@ -193,7 +200,6 @@ export default function Profile() {
                   <p className="text-sm">{companyNames}</p>
                 </div>
 
-                
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase">
                     Locations

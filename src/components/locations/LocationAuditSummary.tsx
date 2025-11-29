@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useInventory } from "@/context/InventoryContext";
 import { useUserAccess } from "@/hooks/useUserAccess";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,12 +12,25 @@ import {
 import { Building } from "lucide-react";
 import { useUser } from "@/context/UserContext"; 
 
-export const LocationAuditSummary = () => {
+interface LocationAuditSummaryProps {
+  locationId?: string;
+  hideDropdown?: boolean;
+  className?: string;
+}
+
+export const LocationAuditSummary = ({ 
+  locationId: externalLocationId, 
+  hideDropdown = false,
+  className 
+}: LocationAuditSummaryProps) => {
   const { locations, getLocationSummary } = useInventory();
   const { currentUser } = useUser(); 
-  const [selectedLocation, setSelectedLocation] = useState<string>("");
+  const [internalLocationId, setInternalLocationId] = useState<string>("");
   const { accessibleLocations } = useUserAccess();
   const userAccessibleLocations = accessibleLocations();
+
+  // Use external ID if provided (controlled mode), otherwise use internal state
+  const selectedLocation = externalLocationId !== undefined ? externalLocationId : internalLocationId;
 
   const selectedLocationObj = locations.find(loc => loc.id === selectedLocation);
   
@@ -26,7 +39,7 @@ export const LocationAuditSummary = () => {
     : null;
 
   return (
-    <Card>
+    <Card className={className}>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Building className="h-5 w-5" />
@@ -35,39 +48,41 @@ export const LocationAuditSummary = () => {
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
-          <Select
-            value={selectedLocation}
-            onValueChange={setSelectedLocation}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Select a location" />
-            </SelectTrigger>
-            
-            <SelectContent>
-              {currentUser?.role === "admin" ? (
-                <>
-                  <SelectItem value="">All Locations</SelectItem>
-                  {locations.map((location) => (
-                    <SelectItem key={location.id} value={location.id}>
-                      {location.name}
-                    </SelectItem>
-                  ))}
-                </>
-              ) : (
-                userAccessibleLocations.length > 0 ? (
-                  userAccessibleLocations.map((location) => (
-                    <SelectItem key={location.id} value={location.id}>
-                      {location.name}
-                    </SelectItem>
-                  ))
+          {!hideDropdown && (
+            <Select
+              value={selectedLocation}
+              onValueChange={setInternalLocationId}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select a location" />
+              </SelectTrigger>
+              
+              <SelectContent>
+                {currentUser?.role === "super_admin" || currentUser?.role === "admin" ? (
+                  <>
+                    <SelectItem value="">All Locations</SelectItem>
+                    {locations.map((location) => (
+                      <SelectItem key={location.id} value={location.id}>
+                        {location.name}
+                      </SelectItem>
+                    ))}
+                  </>
                 ) : (
-                  <SelectItem value="no-locations" disabled>
-                    No assigned locations
-                  </SelectItem>
-                )
-              )}
-            </SelectContent>
-          </Select>
+                  userAccessibleLocations.length > 0 ? (
+                    userAccessibleLocations.map((location) => (
+                      <SelectItem key={location.id} value={location.id}>
+                        {location.name}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <SelectItem value="no-locations" disabled>
+                      No assigned locations
+                    </SelectItem>
+                  )
+                )}
+              </SelectContent>
+            </Select>
+          )}
 
           {locationSummary ? (
             <div className="mt-4 grid grid-cols-2 gap-4">
@@ -102,13 +117,13 @@ export const LocationAuditSummary = () => {
             <div className="mt-4">
               <div className="mb-2 flex justify-between text-sm">
                 <span>Progress</span>
-                <span>{Math.round((locationSummary.auditedItems / locationSummary.totalItems) * 100)}%</span>
+                <span>{locationSummary.totalItems > 0 ? Math.round((locationSummary.auditedItems / locationSummary.totalItems) * 100) : 0}%</span>
               </div>
               <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
                 <div
                   className="h-full bg-blue-600"
                   style={{
-                    width: `${(locationSummary.auditedItems / locationSummary.totalItems) * 100}%`,
+                    width: `${locationSummary.totalItems > 0 ? (locationSummary.auditedItems / locationSummary.totalItems) * 100 : 0}%`,
                   }}
                 />
               </div>

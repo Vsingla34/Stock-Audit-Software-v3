@@ -9,6 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { useUser } from "@/context/UserContext"; 
 import { useUserAccess } from "@/hooks/useUserAccess";
+import { LocationAuditSummary } from "@/components/locations/LocationAuditSummary";
+import { RecentActivity } from "@/components/dashboard/RecentActivity"; // ✅ Import RecentActivity
 
 export const BarcodeScanner = () => {
     const [isScanning, setIsScanning] = useState(false);
@@ -30,7 +32,7 @@ export const BarcodeScanner = () => {
     const scannedBufferRef = useRef('');
     const lastKeypressTime = useRef(0);
 
-    
+    // Handle item scanning with auditor tracking
     const handleItemScan = async (barcode: string, locationId: string): Promise<boolean> => {
         console.log("=== handleItemScan called ===");
         console.log("Barcode:", barcode);
@@ -45,7 +47,6 @@ export const BarcodeScanner = () => {
         }
 
         try {
-            
             let locationName = '';
             
             if (!locationId || locationId === "") {
@@ -55,11 +56,8 @@ export const BarcodeScanner = () => {
                  return false; 
             }
             
-
             const locationObj = locations.find(loc => loc.id === locationId);
             locationName = locationObj?.name || '';
-            
-            console.log("Location Name:", locationName);
             
             if (locationName === '') {
                  toast.error("Invalid Location", {
@@ -68,19 +66,12 @@ export const BarcodeScanner = () => {
                  return false;
             }
             
-
-            console.log("Searching in itemMaster:", itemMaster.length, "items");
             const masterItem = itemMaster.find(item => 
                 (item.sku === barcode) && item.location === locationName
             );
             
-            console.log("Master Item Found:", masterItem);
-            
             if (!masterItem) {
                 const itemInOtherLocation = itemMaster.find(item => item.sku === barcode);
-                
-                console.log("Item in other location:", itemInOtherLocation);
-                
                 if (itemInOtherLocation) {
                     toast.error("Item not found at this location", {
                         description: `Item ${barcode} exists at ${itemInOtherLocation.location}, but not at ${locationName}.`,
@@ -93,13 +84,9 @@ export const BarcodeScanner = () => {
                 return false;
             }
 
-            
             const existingAuditedItem = auditedItems.find(
                 item => item.id === masterItem.id && item.location === locationName
             );
-
-            console.log("Existing Audited Item:", existingAuditedItem);
-
 
             const existingAuditorEntries = existingAuditedItem?.auditorEntries || [];
             const currentAuditorEntry = existingAuditorEntries.find(
@@ -107,12 +94,8 @@ export const BarcodeScanner = () => {
             );
             
             const currentAuditorQuantity = currentAuditorEntry?.quantityFound || 0;
-            const newAuditorQuantity = currentAuditorQuantity + 1; 
+            const newAuditorQuantity = currentAuditorQuantity + 1;
 
-            console.log("Quantities - Current Auditor:", currentAuditorQuantity, 
-                       "New Auditor Qty:", newAuditorQuantity);
-
-            
             const itemToUpdate: InventoryItem = {
                 id: masterItem.id,
                 sku: masterItem.sku,
@@ -121,27 +104,20 @@ export const BarcodeScanner = () => {
                 location: locationName, 
                 systemQuantity: masterItem.systemQuantity,
                 physicalQuantity: newAuditorQuantity, 
-                status: 'pending', 
+                status: 'pending',
                 lastAudited: new Date().toISOString(),
                 notes: existingAuditedItem?.notes || masterItem.notes,
             };
 
-            console.log("Item to update (with this auditor's qty):", itemToUpdate);
-
-            
             await updateAuditedItem(
                 itemToUpdate,
                 currentUser?.id,
                 currentUser?.email || currentUser?.name || 'Unknown Auditor'
             );
 
-            
             const updatedItem = itemMaster.find(i => i.id === masterItem.id && i.location === locationName);
             const totalPhysicalQuantity = updatedItem?.physicalQuantity || newAuditorQuantity;
 
-            console.log("Update completed, total physical:", totalPhysicalQuantity);
-
-            
             const quantityInfo = currentAuditorQuantity > 0 
                 ? `Your count: ${currentAuditorQuantity} → ${newAuditorQuantity} (Total: ${totalPhysicalQuantity}/${masterItem.systemQuantity})`
                 : `Your count: ${newAuditorQuantity} (Total: ${totalPhysicalQuantity}/${masterItem.systemQuantity})`;
@@ -168,7 +144,7 @@ export const BarcodeScanner = () => {
         }
     };
 
-
+    // Hardware scanner logic
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
             if (!isHardwareScannerMode || !selectedLocation) {
@@ -179,10 +155,6 @@ export const BarcodeScanner = () => {
             const timeSinceLastKey = currentTime - lastKeypressTime.current;
             lastKeypressTime.current = currentTime;
 
-            const debugMsg = `Key: ${event.key}, Buffer: ${scannedBufferRef.current}, Time: ${timeSinceLastKey}ms`;
-            console.log(debugMsg);
-            setDebugInfo(debugMsg);
-
             if (timeSinceLastKey > 100) {
                 scannedBufferRef.current = '';
             }
@@ -192,8 +164,6 @@ export const BarcodeScanner = () => {
                 event.stopPropagation();
                 
                 const barcode = scannedBufferRef.current.trim();
-                console.log("=== ENTER PRESSED ===");
-                console.log("Final Buffer:", barcode);
                 
                 if (barcode) {
                     handleItemScan(barcode, selectedLocation)
@@ -216,12 +186,10 @@ export const BarcodeScanner = () => {
 
             if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
                 scannedBufferRef.current += event.key;
-                console.log("Buffer updated:", scannedBufferRef.current);
             }
         };
 
         if (isHardwareScannerMode) {
-            console.log("Hardware scanner mode ACTIVE");
             document.addEventListener('keydown', handleKeyDown, true);
             
             const focusInterval = setInterval(() => {
@@ -234,8 +202,6 @@ export const BarcodeScanner = () => {
                 document.removeEventListener('keydown', handleKeyDown, true);
                 clearInterval(focusInterval);
             };
-        } else {
-            console.log("Hardware scanner mode INACTIVE");
         }
     }, [isHardwareScannerMode, selectedLocation, itemMaster, auditedItems, locations, currentUser]);
 
@@ -243,7 +209,6 @@ export const BarcodeScanner = () => {
         if (isHardwareScannerMode && scannedBufferRef.current) {
             const timeout = setTimeout(() => {
                 if (scannedBufferRef.current) {
-                    console.log("Buffer auto-cleared:", scannedBufferRef.current);
                     scannedBufferRef.current = '';
                 }
             }, 500);
@@ -260,7 +225,6 @@ export const BarcodeScanner = () => {
     }, []);
 
     const onScanSuccess = (decodedText: string, decodedResult: any) => {
-        console.log("Camera scan success:", decodedText);
         handleItemScan(decodedText, selectedLocation)
             .then(success => {
                 if (success) {
@@ -271,7 +235,7 @@ export const BarcodeScanner = () => {
     };
 
     const onScanError = (errorMessage: string) => {
-
+        // Suppress frequent scan errors
     };
 
     const handleStartHardwareScanner = () => {
@@ -281,10 +245,6 @@ export const BarcodeScanner = () => {
             });
             return;
         }
-
-        console.log("=== Starting Hardware Scanner Mode ===");
-        console.log("Selected Location:", selectedLocation);
-        console.log("Current User:", currentUser?.email || currentUser?.name);
         
         setIsHardwareScannerMode(true);
         scannedBufferRef.current = '';
@@ -297,12 +257,10 @@ export const BarcodeScanner = () => {
         setTimeout(() => {
             (document.activeElement as HTMLElement)?.blur();
             hardwareScannerInputRef.current?.focus();
-            console.log("Focus set to hidden input");
         }, 100);
     };
 
     const handleStopHardwareScanner = () => {
-        console.log("=== Stopping Hardware Scanner Mode ===");
         setIsHardwareScannerMode(false);
         scannedBufferRef.current = '';
         setDebugInfo('');
@@ -369,7 +327,6 @@ export const BarcodeScanner = () => {
                 toast.error("Camera not available", {
                     description: "Try using hardware scanner mode or manual entry instead."
                 });
-                console.error("Fallback camera error:", fallbackErr);
                 html5QrCodeRef.current = null;
             }
         }
@@ -399,7 +356,6 @@ export const BarcodeScanner = () => {
         }
         
         if (manualBarcode.trim()) {
-            console.log("Manual submit:", manualBarcode.trim());
             handleItemScan(manualBarcode.trim(), selectedLocation)
                 .then(success => {
                     if (success) {
@@ -447,9 +403,8 @@ export const BarcodeScanner = () => {
                                     <SelectValue placeholder="Select location" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {currentUser?.role === "admin" ? (
+                                    {currentUser?.role === "super_admin" || currentUser?.role === "admin" ? (
                                     <>
-                                        <SelectItem value="" disabled>Select a location to audit</SelectItem>
                                         {locations.map((location) => (
                                             <SelectItem key={location.id} value={location.id}>
                                                 {location.name}
@@ -489,11 +444,6 @@ export const BarcodeScanner = () => {
                                         {scannedBarcode && (
                                             <p className="text-xs text-blue-500 mt-2 font-mono bg-blue-100 px-2 py-1 rounded">
                                                 Last: {scannedBarcode}
-                                            </p>
-                                        )}
-                                        {debugInfo && (
-                                            <p className="text-xs text-gray-500 mt-2 font-mono bg-gray-100 px-2 py-1 rounded max-w-full truncate">
-                                                Debug: {debugInfo}
                                             </p>
                                         )}
                                     </div>
@@ -582,57 +532,28 @@ export const BarcodeScanner = () => {
                 </CardContent>
             </Card>
 
-            <Card>
-                <CardHeader>
-                    <CardTitle>Scanning Instructions</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                    <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
-                        <h3 className="font-medium text-blue-900 mb-1">Multi-Auditor Support</h3>
-                        <p className="text-sm text-blue-800">
-                            Your scans are tracked individually. If multiple auditors scan the same item, 
-                            their counts will be added together for the total physical quantity.
-                        </p>
-                    </div>
-
-                    <div>
-                        <h3 className="font-medium mb-1">Camera Scanning:</h3>
-                        <ol className="list-decimal list-inside space-y-1 text-sm">
-                            <li>Select a specific location from the dropdown</li>
-                            <li>Click "Camera Scan" to activate the barcode scanner</li>
-                            <li>Point the camera at the barcode on the item</li>
-                            <li>Hold steady until the barcode is recognized</li>
-                        </ol>
-                    </div>
-                    
-                    <div>
-                        <h3 className="font-medium mb-1">Hardware Scanner:</h3>
-                        <ol className="list-decimal list-inside space-y-1 text-sm">
-                            <li>Connect your USB barcode scanner</li>
-                            <li>Select a specific location</li>
-                            <li>Click "Hardware Scan" to activate</li>
-                            <li>Scan items - your counts are tracked separately</li>
-                            <li>Press ESC to stop scanning</li>
-                        </ol>
-                    </div>
-
-                    <div>
-                        <h3 className="font-medium mb-1">Status Updates:</h3>
-                        <ul className="list-disc list-inside space-y-1 text-sm">
-                            <li><span className="text-green-600">Matched</span> - Total qty equals system qty</li>
-                            <li><span className="text-red-600">Discrepancy</span> - Total qty differs from system qty</li>
-                            <li>Toast shows your count and total count</li>
-                        </ul>
-                    </div>
-                    
-                    <div>
-                        <h3 className="font-medium">Supported formats:</h3>
-                        <p className="text-sm text-muted-foreground">
-                            QR Code, CODE128, CODE39, UPC-A, UPC-E, EAN-13, EAN-8
-                        </p>
-                    </div>
-                </CardContent>
-            </Card>
+            {/* Right Column: Summary + Recent Activity */}
+            <div className="space-y-6">
+                {selectedLocation ? (
+                    <>
+                        {/* 1. Stats Dashboard */}
+                        <LocationAuditSummary 
+                            locationId={selectedLocation} 
+                            hideDropdown={true} 
+                        />
+                        
+                        {/* 2. Activity Feed (Recent Scans) */}
+                        <RecentActivity selectedLocation={selectedLocation} />
+                    </>
+                ) : (
+                    <Card className="h-full flex items-center justify-center p-6">
+                        <div className="text-center text-muted-foreground">
+                            <MapPin className="h-12 w-12 mx-auto mb-4 opacity-20" />
+                            <p>Select a location from the dropdown on the left to view audit summary.</p>
+                        </div>
+                    </Card>
+                )}
+            </div>
         </div>
     );
 };

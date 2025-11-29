@@ -18,8 +18,9 @@ const Questionnaire = () => {
   
   const userLocations = accessibleLocations();
   
-  
-  
+  // Logic to determine if user can manage questions
+  const canManageQuestions = userRole === "admin" || userRole === "super_admin";
+
   const locationName = selectedLocation && selectedLocation !== "default" 
     ? locations.find(loc => loc.id === selectedLocation)?.name
     : "";
@@ -41,7 +42,7 @@ const Questionnaire = () => {
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid grid-cols-2 w-[400px]">
             <TabsTrigger value="management">
-              {userRole === "admin" ? "Manage Questions" : "Answer Questions"}
+              {canManageQuestions ? "Manage Questions" : "Answer Questions"}
             </TabsTrigger>
             <TabsTrigger value="responses" disabled={!userRole || userRole === "client"}>
               View Responses
@@ -49,7 +50,7 @@ const Questionnaire = () => {
           </TabsList>
           
           <TabsContent value="management" className="space-y-6 mt-6">
-            {userRole === "admin" ? (
+            {canManageQuestions ? (
               <QuestionList />
             ) : (
               <div className="space-y-6">
@@ -59,7 +60,7 @@ const Questionnaire = () => {
                       locations={userLocations}
                       selectedLocation={selectedLocation}
                       onLocationChange={setSelectedLocation}
-                      placeholder="Select a location to audit" 
+                      placeholder="Select a location to audit" // Added placeholder
                     />
                   )}
                 </div>
@@ -80,10 +81,10 @@ const Questionnaire = () => {
             <div className="space-y-6">
               <div className="max-w-md">
                 <LocationSelector
-                  locations={userRole === "admin" ? locations : userLocations}
+                  locations={canManageQuestions ? locations : userLocations}
                   selectedLocation={responseLocation}
                   onLocationChange={setResponseLocation}
-                  placeholder="Select a location to view" 
+                  placeholder="Select a location to view" // Added placeholder
                 />
               </div>
               

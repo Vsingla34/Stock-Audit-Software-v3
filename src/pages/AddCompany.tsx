@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -6,13 +5,14 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Save, Building2, Edit, Trash, Plus } from "lucide-react";
+import { Save, Building2, Edit, Trash } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { useUserAccess } from "@/hooks/useUserAccess"; // ✅ Added hook
 
 interface Company {
   id: string;
@@ -23,6 +23,7 @@ interface Company {
 }
 
 const AddCompany = () => {
+  const { userRole } = useUserAccess(); // ✅ Get User Role
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -64,7 +65,7 @@ const AddCompany = () => {
     }
 
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('companies')
         .insert([{
           name: formData.name.trim(),
@@ -125,7 +126,7 @@ const AddCompany = () => {
     if (!selectedCompany) return;
 
     try {
-      
+      // 1. Check for associated data
       const { count: itemCount } = await supabase
         .from('inventory_items')
         .select('*', { count: 'exact', head: true })
@@ -136,13 +137,44 @@ const AddCompany = () => {
         .select('*', { count: 'exact', head: true })
         .eq('company_id', selectedCompany.id);
 
-      if ((itemCount || 0) > 0 || (locationCount || 0) > 0) {
-        toast.error("Cannot delete company", {
-          description: "This company has associated inventory items or locations. Please remove them first."
-        });
-        return;
+      const hasAssociatedData = (itemCount || 0) > 0 || (locationCount || 0) > 0;
+
+      if (hasAssociatedData) {
+        // If NOT Super Admin, block delete
+        if (userRole !== "super_admin") {
+          toast.error("Cannot delete company", {
+            description: "This company has associated inventory items or locations. Please remove them first."
+          });
+          return;
+        }
+
+        // ✅ If SUPER ADMIN, perform Cascade Delete
+        toast.info("Deleting associated data...", { duration: 2000 });
+
+        // A. Delete Inventory Items & Upload History
+        await supabase.from('inventory_items').delete().eq('company_id', selectedCompany.id);
+        await supabase.from('inventory_upload_history').delete().eq('company_id', selectedCompany.id);
+        
+        // B. Delete Questionnaire Answers (linked to Locations)
+        // First get all location IDs for this company
+        const { data: locs } = await supabase
+          .from('locations')
+          .select('id')
+          .eq('company_id', selectedCompany.id);
+        
+        if (locs && locs.length > 0) {
+          const locIds = locs.map(l => l.id);
+          await supabase.from('questionnaire_answers').delete().in('location_id', locIds);
+        }
+
+        // C. Delete Locations
+        await supabase.from('locations').delete().eq('company_id', selectedCompany.id);
+
+        // D. Delete Questions
+        await supabase.from('questions').delete().eq('company_id', selectedCompany.id);
       }
 
+      // 2. Finally delete the Company
       const { error } = await supabase
         .from('companies')
         .delete()
@@ -257,7 +289,7 @@ const AddCompany = () => {
           </CardContent>
         </Card>
 
-        
+        {/* Add Company Dialog */}
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
@@ -302,7 +334,7 @@ const AddCompany = () => {
           </DialogContent>
         </Dialog>
 
-        
+        {/* Edit Company Dialog */}
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
@@ -345,18 +377,23 @@ const AddCompany = () => {
           </DialogContent>
         </Dialog>
 
-        
+        {/* Delete Company Dialog */}
         <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Delete Company</DialogTitle>
               <DialogDescription>
-                Are you sure you want to delete "{selectedCompany?.name}"? This action cannot be undone.
+                Are you sure you want to delete "{selectedCompany?.name}"? 
+                {userRole === "super_admin" 
+                  ? " This will PERMANENTLY DELETE all locations, inventory items, and audit data associated with this company."
+                  : " This action cannot be undone."}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>Cancel</Button>
-              <Button variant="destructive" onClick={handleDeleteCompany}>Delete</Button>
+              <Button variant="destructive" onClick={handleDeleteCompany}>
+                {userRole === "super_admin" ? "Force Delete" : "Delete"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

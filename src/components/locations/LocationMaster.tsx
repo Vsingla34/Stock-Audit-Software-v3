@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { useInventory } from "@/context/InventoryContext";
 import { useCompany } from "@/context/CompanyContext";
@@ -42,12 +41,18 @@ export const LocationMaster = () => {
   const [companyLoaded, setCompanyLoaded] = useState(false);
   const [companies, setCompanies] = useState<Company[]>([]);
 
- 
+  
+  const isSuperAdmin = userRole === "super_admin";
   const isAdmin = userRole === "admin";
   const isClient = userRole === "client";
   const isAuditor = userRole === "auditor";
 
- 
+  
+  const canAddLocation = isSuperAdmin || isAdmin || isClient;
+  const canEditLocation = isSuperAdmin || isAdmin;
+  const canDeleteLocation = isSuperAdmin || isAdmin;
+
+  
   useEffect(() => {
     const fetchCompanies = async () => {
       try {
@@ -94,7 +99,7 @@ export const LocationMaster = () => {
     fetchCurrentCompanyName();
   }, [selectedCompanyId]);
 
-
+  
   const handleAddLocation = async (newLocation: Omit<Location, "id">) => {
     try {
       await addLocation(newLocation);
@@ -162,8 +167,8 @@ export const LocationMaster = () => {
             <span>Location Master</span>
           </div>
 
-         
-          {(isAdmin || isClient) && !isAdding && (
+
+          {canAddLocation && !isAdding && (
             <Button onClick={() => setIsAdding(true)} size="sm" className="h-8">
               <Plus className="mr-1 h-4 w-4" />
               Add Location
@@ -228,7 +233,7 @@ export const LocationMaster = () => {
                           location={editLocation}
                           companyName={getCompanyName(location.companyId)}
                           itemCount={getLocationItemCount(itemMaster, location.name)}
-                          onSave={isAdmin ? handleUpdateLocation : undefined} 
+                          onSave={canEditLocation ? handleUpdateLocation : undefined} 
                           onCancel={cancelEditing}
                         />
                       ) : (
@@ -237,11 +242,11 @@ export const LocationMaster = () => {
                           location={location}
                           companyName={getCompanyName(location.companyId)}
                           itemCount={getLocationItemCount(itemMaster, location.name)}
-                          onEdit={handleUpdateLocation}       
-                          onDelete={handleDeleteLocation}    
-                          startEditing={startEditing}        
-                          canEdit={isAdmin}                   
-                          canDelete={isAdmin}                 
+                          onEdit={handleUpdateLocation}
+                          onDelete={handleDeleteLocation}
+                          startEditing={startEditing}
+                          canEdit={canEditLocation}   
+                          canDelete={canDeleteLocation} 
                         />
                       )
                     )

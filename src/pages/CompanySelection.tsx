@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -9,6 +8,13 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
   Building2,
   ArrowRight,
   PlusCircle,
@@ -16,6 +22,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useCompany } from "@/context/CompanyContext";
+import { CompanyForm } from "@/components/company/CompanyForm"; 
 
 interface Company {
   id: string;
@@ -31,6 +38,9 @@ const CompanySelection = () => {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState<string>("");
+  
+  
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
 
   useEffect(() => {
     fetchInitialData();
@@ -64,7 +74,7 @@ const CompanySelection = () => {
         .eq("is_active", true)
         .order("name");
 
-    
+      
       if (profile.role !== "super_admin") {
         if (!profile.assigned_companies || profile.assigned_companies.length === 0) {
            setCompanies([]);
@@ -96,6 +106,12 @@ const CompanySelection = () => {
       
     }
     navigate("/");
+  };
+
+  
+  const handleCompanyCreated = () => {
+    setIsAddDialogOpen(false); 
+    fetchInitialData(); 
   };
 
   const isSuperAdmin = userRole === "super_admin";
@@ -133,15 +149,15 @@ const CompanySelection = () => {
           
           {isSuperAdmin && (
             <div className="flex flex-wrap gap-2">
-              <Button onClick={() => navigate("/add-company")}>
+              <Button onClick={() => setIsAddDialogOpen(true)}>
                 <PlusCircle className="mr-2 h-4 w-4" />
-                Manage Companies
+                Add Company
               </Button>
             </div>
           )}
         </div>
 
-
+        
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {companies.map((company) => (
             <Card
@@ -174,13 +190,33 @@ const CompanySelection = () => {
                 <CardTitle>No companies found</CardTitle>
                 <CardDescription>
                   {isSuperAdmin
-                    ? "Create the first company using the Manage Companies button."
+                    ? "Create the first company using the Add Company button."
                     : "Please contact your administrator."}
                 </CardDescription>
               </CardHeader>
             </Card>
           )}
         </div>
+
+        
+        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+          <DialogContent className="sm:max-w-[600px]">
+            <DialogHeader>
+              <DialogTitle>Add New Company</DialogTitle>
+              <DialogDescription>
+                Enter the details below to create a new company.
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="py-4">
+              <CompanyForm 
+                onSuccess={handleCompanyCreated}
+                onCancel={() => setIsAddDialogOpen(false)}
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
+
       </div>
     </div>
   );
