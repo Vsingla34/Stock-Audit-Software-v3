@@ -4,7 +4,7 @@ import { RecentActivity } from "@/components/dashboard/RecentActivity";
 import { InventoryTable } from "@/components/inventory/InventoryTable";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
-import { Download, Barcode, Search, ClipboardList, Upload } from "lucide-react";
+import { Barcode, Search, ClipboardList, Upload } from "lucide-react";
 import { useUserAccess } from "@/hooks/useUserAccess";
 import { useUser } from "@/context/UserContext";
 import { useLocationFilter } from "@/hooks/useLocationFilter";
@@ -18,7 +18,8 @@ const Index = () => {
     selectedLocation,
     setSelectedLocation,
     availableLocations,
-    shouldShowLocationFilter
+    shouldShowLocationFilter,
+    isAdmin // FIX: Get the corrected boolean from the hook
   } = useLocationFilter();
 
   return (
@@ -80,7 +81,7 @@ const Index = () => {
                 selectedLocation={selectedLocation}
                 onLocationChange={setSelectedLocation}
                 availableLocations={availableLocations}
-                showAllOption={currentUser?.role === "admin"}
+                showAllOption={isAdmin} 
               />
             )}
           </div>

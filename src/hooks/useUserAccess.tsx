@@ -1,4 +1,3 @@
-
 import { useUser } from "@/context/UserContext";
 import { useInventory } from "@/context/InventoryContext";
 
@@ -11,7 +10,7 @@ export const useUserAccess = () => {
     if (!currentUser) return [];
     
     
-    if (currentUser.role === "super_admin") {
+    if (currentUser.role === "super_admin" || currentUser.role === "admin") {
       return locations;
     }
     
@@ -30,7 +29,7 @@ export const useUserAccess = () => {
     if (!currentUser) return false;
     
     
-    if (currentUser.role === "super_admin") return true;
+    if (currentUser.role === "super_admin" || currentUser.role === "admin") return true;
     
     
     return currentUser.assigned_locations?.includes(locationId) || false;

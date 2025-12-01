@@ -14,14 +14,14 @@ import {
   Clock,
   TrendingUp,
   TrendingDown,
-  Search, 
+  Search,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useUser } from "@/context/UserContext";
 import { useUserAccess } from "@/hooks/useUserAccess";
 import { useMemo, useCallback, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input"; 
+import { Input } from "@/components/ui/input";
 
 interface InventoryTableProps {
   selectedLocation?: string;
@@ -34,17 +34,17 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
   const { currentUser } = useUser();
   const { accessibleLocations } = useUserAccess();
 
-  const [searchQuery, setSearchQuery] = useState(""); 
+  const [searchQuery, setSearchQuery] = useState("");
 
   const userLocations = useMemo(
     () => accessibleLocations(),
     [accessibleLocations]
   );
 
-  
+  // Combine itemMaster with auditedItems to get current status
   const allTableData = useMemo(() => {
     return itemMaster
-      .filter((item) => item.location !== "") 
+      .filter((item) => item.location !== "")
       .map((item) => {
         const auditedItem = auditedItems.find(
           (a) => a.id === item.id && a.location === item.location
@@ -67,29 +67,37 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
       });
   }, [itemMaster, auditedItems]);
 
-  
+  // Filter data based on selected location and user role
   const locationFilteredData = useMemo(() => {
-    if (currentUser?.role === "admin" && !selectedLocation) {
-      
-      return allTableData;
-    } else if (selectedLocation) {
-      
-      const locationObj = locations.find((loc) => loc.id === selectedLocation);
-      if (locationObj) {
-        return allTableData.filter(
-          (item) => item.location === locationObj.name
+    // 1. Determine if "All Locations" is selected (or no selection made)
+    const isAllLocations = !selectedLocation || selectedLocation === "all";
+
+    // 2. Handle "All Locations" view
+    if (isAllLocations) {
+      // Admins and Super Admins see everything
+      if (currentUser?.role === "admin" || currentUser?.role === "super_admin") {
+        return allTableData;
+      } 
+      // Other roles (Auditors/Clients) only see what they are assigned to
+      else {
+        const accessibleLocationNames = userLocations.map((loc) => loc.name);
+        return allTableData.filter((item) =>
+          accessibleLocationNames.includes(item.location)
         );
       }
-      return [];
-    } else if (currentUser?.role !== "admin") {
-      
-      const accessibleLocationNames = userLocations.map((loc) => loc.name);
-      return allTableData.filter((item) =>
-        accessibleLocationNames.includes(item.location)
+    } 
+    
+    // 3. Handle Specific Location view
+    // If we are here, selectedLocation is a specific ID (not "all")
+    const locationObj = locations.find((loc) => loc.id === selectedLocation);
+    if (locationObj) {
+      return allTableData.filter(
+        (item) => item.location === locationObj.name
       );
     }
 
-    return currentUser?.role === "admin" ? allTableData : [];
+    // 4. Fallback if location ID is invalid
+    return [];
   }, [
     allTableData,
     selectedLocation,
@@ -98,7 +106,7 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
     userLocations,
   ]);
 
-  
+  // Filter based on search query
   const filteredData = useMemo(() => {
     if (!searchQuery.trim()) return locationFilteredData;
 
@@ -111,10 +119,9 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
     );
   }, [locationFilteredData, searchQuery]);
 
-  
+  // Pagination / Infinite Scroll simulation
   const [visibleCount, setVisibleCount] = useState(ROW_LIMIT);
 
-  
   useEffect(() => {
     setVisibleCount(ROW_LIMIT);
   }, [selectedLocation, currentUser?.role, locationFilteredData.length, searchQuery]);
@@ -136,7 +143,7 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
     setVisibleCount(filteredData.length);
   };
 
-  
+  // Render helpers
   const renderStatus = useCallback(
     (status: string | undefined, systemQty: number, physicalQty: number) => {
       switch (status) {
@@ -221,8 +228,7 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
 
   return (
     <div className="space-y-4">
-      
-      
+      {/* Search Bar */}
       <div className="flex items-center gap-2">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -235,7 +241,6 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
           />
         </div>
       </div>
-
 
       <div className="rounded-md border bg-white">
         <Table>
@@ -350,7 +355,6 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
           </TableBody>
         </Table>
 
-
         {filteredData.length > 0 && (
           <div className="flex items-center justify-between px-4 py-2 text-xs text-muted-foreground">
             <span>
@@ -360,7 +364,7 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
               <div className="space-x-2">
                 <Button
                   variant="outline"
-                  size="xs" 
+                  size="sm"
                   onClick={handleShowMore}
                   className="h-8 px-2"
                 >
@@ -368,7 +372,7 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
                 </Button>
                 <Button
                   variant="ghost"
-                  size="xs"
+                  size="sm"
                   onClick={handleShowAll}
                   className="h-8 px-2"
                 >
@@ -380,7 +384,6 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
         )}
       </div>
 
-      
       <div className="bg-gray-50 p-4 rounded-lg">
         <h4 className="font-medium mb-2">Status Legend:</h4>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">

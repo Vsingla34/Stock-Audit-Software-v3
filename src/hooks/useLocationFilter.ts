@@ -3,33 +3,31 @@ import { useUser } from "@/context/UserContext";
 import { useUserAccess } from "@/hooks/useUserAccess";
 import { useInventory } from "@/context/InventoryContext";
 
-
 export const useLocationFilter = () => {
   const { currentUser } = useUser();
   const { accessibleLocations } = useUserAccess();
   const { locations } = useInventory();
   const [selectedLocation, setSelectedLocation] = useState<string>("all");
 
-
   const userAccessibleLocations = accessibleLocations();
 
-  
-  const availableLocations = currentUser?.role === "admin" 
+  // FIX: Explicitly include super_admin in the admin check
+  const isSuperOrAdmin = currentUser?.role === "admin" || currentUser?.role === "super_admin";
+
+  const availableLocations = isSuperOrAdmin 
     ? locations 
     : userAccessibleLocations;
 
-  
   useEffect(() => {
-    if (currentUser?.role !== "admin" && userAccessibleLocations.length === 1) {
+    // FIX: Use the combined check here
+    if (!isSuperOrAdmin && userAccessibleLocations.length === 1) {
       setSelectedLocation(userAccessibleLocations[0].id);
     }
-  }, [currentUser?.role, userAccessibleLocations]);
-
+  }, [isSuperOrAdmin, userAccessibleLocations]);
 
   const shouldShowLocationFilter = 
-    currentUser?.role === "admin" || userAccessibleLocations.length > 1;
+    isSuperOrAdmin || userAccessibleLocations.length > 1;
 
-  
   const getLocationName = (locationId: string): string | undefined => {
     if (locationId === "all") return undefined;
     return locations.find(loc => loc.id === locationId)?.name;
@@ -41,7 +39,7 @@ export const useLocationFilter = () => {
     availableLocations,
     shouldShowLocationFilter,
     getLocationName,
-    isAdmin: currentUser?.role === "admin",
+    isAdmin: isSuperOrAdmin, // FIX: Return the combined boolean
     userAccessibleLocations,
   };
 };
