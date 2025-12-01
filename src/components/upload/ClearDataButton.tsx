@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,7 +31,7 @@ export const ClearDataButton = () => {
     <>
       <Button 
         variant="destructive" 
-        className="w-full" 
+        className="w-full bg-red-600 hover:bg-red-700 text-white shadow-sm transition-all" 
         onClick={() => setDialogOpen(true)}
       >
         <Trash2 className="mr-2 h-4 w-4" />
@@ -40,25 +39,27 @@ export const ClearDataButton = () => {
       </Button>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
-            <DialogTitle>Clear Company Inventory Data</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="text-gray-900">Clear Company Inventory Data</DialogTitle>
+            <DialogDescription className="text-gray-500">
               Are you sure you want to clear all inventory data? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
+          <DialogFooter className="gap-2 sm:gap-0">
             <Button 
               variant="outline" 
               onClick={() => setDialogOpen(false)}
+              className="border-gray-200 text-gray-700 hover:bg-indigo-50 hover:text-indigo-700"
             >
               Cancel
             </Button>
             <Button 
               variant="destructive" 
               onClick={handleClear}
+              className="bg-red-600 hover:bg-red-700 text-white shadow-sm"
             >
-              Delete  All Data
+              Delete All Data
             </Button>
           </DialogFooter>
         </DialogContent>

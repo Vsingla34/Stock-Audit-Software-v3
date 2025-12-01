@@ -1,4 +1,3 @@
-// src/components/upload/FileUploader.tsx
 import { useState } from "react";
 import { useInventory } from "@/context/InventoryContext";
 import { toast } from "sonner";
@@ -24,16 +23,11 @@ export interface FileUploaderProps {
   canUploadClosingStock?: boolean;
 }
 
-/**
- * ✅ Generate a REAL UUID v4 string so Postgres uuid columns accept it.
- */
 const generateBatchKey = (): string => {
-  // Modern browsers / Node 18+
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
   }
 
-  // Fallback UUID v4 polyfill
   const template = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx";
   return template.replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0;
@@ -132,7 +126,6 @@ export const FileUploader = ({
     setIsImporting(true);
 
     try {
-      // ---------- ITEM MASTER UPLOAD ----------
       if (canUploadItemMaster && itemMasterFile) {
         if (!selectedCompanyId) {
           throw new Error(
@@ -191,7 +184,6 @@ export const FileUploader = ({
         setItemMasterFile(null);
       }
 
-      // ---------- CLOSING STOCK UPLOAD ----------
       else if (canUploadClosingStock && closingStockFile) {
         if (!selectedCompanyId) {
           throw new Error(
@@ -343,8 +335,8 @@ export const FileUploader = ({
       )}
 
       {hasItemMaster && (
-        <Alert>
-          <AlertCircle className="h-4 w-4" />
+        <Alert className="bg-indigo-50 border-indigo-200 text-indigo-800">
+          <AlertCircle className="h-4 w-4 text-indigo-600" />
           <AlertDescription>
             <strong>Item Master Loaded:</strong>{" "}
             {
@@ -404,7 +396,7 @@ export const FileUploader = ({
         <div className="md:col-span-2">
           <div className="flex justify-center mb-4">
             <Button
-              className="w-full max-w-md"
+              className="w-full max-w-md bg-indigo-600 hover:bg-indigo-700 text-white shadow-md transition-all disabled:opacity-50"
               disabled={isImportDisabled}
               onClick={handleImport}
             >

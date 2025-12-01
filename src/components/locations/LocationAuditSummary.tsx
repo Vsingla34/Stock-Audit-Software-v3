@@ -39,10 +39,10 @@ export const LocationAuditSummary = ({
     : null;
 
   return (
-    <Card className={className}>
+    <Card className={`shadow-sm border-gray-200 ${className}`}>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Building className="h-5 w-5" />
+        <CardTitle className="flex items-center gap-2 text-gray-900">
+          <Building className="h-5 w-5 text-indigo-600" />
           <span>Location Audit Summary</span>
         </CardTitle>
       </CardHeader>
@@ -53,7 +53,7 @@ export const LocationAuditSummary = ({
               value={selectedLocation}
               onValueChange={setInternalLocationId}
             >
-              <SelectTrigger>
+              <SelectTrigger className="border-gray-200 focus:ring-indigo-600 focus:border-indigo-600">
                 <SelectValue placeholder="Select a location" />
               </SelectTrigger>
               
@@ -86,21 +86,21 @@ export const LocationAuditSummary = ({
 
           {locationSummary ? (
             <div className="mt-4 grid grid-cols-2 gap-4">
-              <div className="rounded-lg bg-blue-50 p-4">
-                <div className="text-sm text-blue-600">Total Items</div>
-                <div className="text-2xl font-bold">{locationSummary.totalItems}</div>
+              <div className="rounded-lg bg-indigo-50 p-4 border border-indigo-100">
+                <div className="text-sm text-indigo-600 font-medium">Total Items</div>
+                <div className="text-2xl font-bold text-gray-900">{locationSummary.totalItems}</div>
               </div>
-              <div className="rounded-lg bg-green-50 p-4">
-                <div className="text-sm text-green-600">Audited Items</div>
-                <div className="text-2xl font-bold">{locationSummary.auditedItems}</div>
+              <div className="rounded-lg bg-green-50 p-4 border border-green-100">
+                <div className="text-sm text-green-600 font-medium">Audited Items</div>
+                <div className="text-2xl font-bold text-gray-900">{locationSummary.auditedItems}</div>
               </div>
-              <div className="rounded-lg bg-yellow-50 p-4">
-                <div className="text-sm text-yellow-600">Pending Items</div>
-                <div className="text-2xl font-bold">{locationSummary.pendingItems}</div>
+              <div className="rounded-lg bg-amber-50 p-4 border border-amber-100">
+                <div className="text-sm text-amber-600 font-medium">Pending Items</div>
+                <div className="text-2xl font-bold text-gray-900">{locationSummary.pendingItems}</div>
               </div>
-              <div className="rounded-lg bg-purple-50 p-4">
-                <div className="text-sm text-purple-600">Match Rate</div>
-                <div className="text-2xl font-bold">
+              <div className="rounded-lg bg-violet-50 p-4 border border-violet-100">
+                <div className="text-sm text-violet-600 font-medium">Match Rate</div>
+                <div className="text-2xl font-bold text-gray-900">
                   {locationSummary.auditedItems > 0
                     ? `${Math.round((locationSummary.matched / locationSummary.auditedItems) * 100)}%`
                     : "N/A"}
@@ -108,7 +108,7 @@ export const LocationAuditSummary = ({
               </div>
             </div>
           ) : (
-            <div className="py-8 text-center text-muted-foreground">
+            <div className="py-8 text-center text-gray-500">
               Select a location to view its audit summary
             </div>
           )}
@@ -116,12 +116,12 @@ export const LocationAuditSummary = ({
           {locationSummary && locationSummary.auditedItems > 0 && (
             <div className="mt-4">
               <div className="mb-2 flex justify-between text-sm">
-                <span>Progress</span>
-                <span>{locationSummary.totalItems > 0 ? Math.round((locationSummary.auditedItems / locationSummary.totalItems) * 100) : 0}%</span>
+                <span className="text-gray-600 font-medium">Progress</span>
+                <span className="text-indigo-600 font-bold">{locationSummary.totalItems > 0 ? Math.round((locationSummary.auditedItems / locationSummary.totalItems) * 100) : 0}%</span>
               </div>
-              <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
                 <div
-                  className="h-full bg-blue-600"
+                  className="h-full bg-indigo-600 rounded-full transition-all duration-500 ease-in-out"
                   style={{
                     width: `${locationSummary.totalItems > 0 ? (locationSummary.auditedItems / locationSummary.totalItems) * 100 : 0}%`,
                   }}

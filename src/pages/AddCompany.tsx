@@ -7,12 +7,12 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Save, Building2, Edit, Trash } from "lucide-react";
+import { Save, Building2, Edit, Trash, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { useUserAccess } from "@/hooks/useUserAccess"; // ✅ Added hook
+import { useUserAccess } from "@/hooks/useUserAccess"; 
 
 interface Company {
   id: string;
@@ -23,7 +23,7 @@ interface Company {
 }
 
 const AddCompany = () => {
-  const { userRole } = useUserAccess(); // ✅ Get User Role
+  const { userRole } = useUserAccess(); 
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -219,7 +219,7 @@ const AddCompany = () => {
       <AppLayout>
         <div className="flex items-center justify-center min-h-screen">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
             <p className="text-muted-foreground">Loading companies...</p>
           </div>
         </div>
@@ -232,53 +232,71 @@ const AddCompany = () => {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Company Management</h1>
-            <p className="text-muted-foreground">Manage companies and their information</p>
+            <h1 className="text-3xl font-bold tracking-tight text-gray-900">Company Management</h1>
+            <p className="text-gray-500">Manage companies and their information</p>
           </div>
-          
+          <Button onClick={openAddDialog} className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-all">
+            <Plus className="mr-2 h-4 w-4" />
+            Add Company
+          </Button>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Building2 className="h-5 w-5" />
+        <Card className="shadow-sm border-gray-200">
+          <CardHeader className="bg-gray-50/50 border-b border-gray-100">
+            <CardTitle className="flex items-center gap-2 text-gray-900">
+              <Building2 className="h-5 w-5 text-indigo-600" />
               Companies ({companies.length})
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-0">
             {companies.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <Building2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <div className="text-center py-12 text-gray-500">
+                <Building2 className="h-12 w-12 mx-auto mb-4 opacity-20" />
                 <p>No companies found. Create your first company to get started.</p>
               </div>
             ) : (
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>Company Name</TableHead>
-                    <TableHead>Address</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                  <TableRow className="bg-gray-50 hover:bg-gray-50">
+                    <TableHead className="font-semibold text-gray-700">Company Name</TableHead>
+                    <TableHead className="font-semibold text-gray-700">Address</TableHead>
+                    <TableHead className="font-semibold text-gray-700">Status</TableHead>
+                    <TableHead className="font-semibold text-gray-700">Created</TableHead>
+                    <TableHead className="text-right font-semibold text-gray-700">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {companies.map((company) => (
-                    <TableRow key={company.id}>
-                      <TableCell className="font-medium">{company.name}</TableCell>
-                      <TableCell>{company.address || "—"}</TableCell>
+                    <TableRow key={company.id} className="hover:bg-gray-50/50 transition-colors border-gray-100">
+                      <TableCell className="font-medium text-gray-900">{company.name}</TableCell>
+                      <TableCell className="text-gray-600">{company.address || "—"}</TableCell>
                       <TableCell>
-                        <Badge variant={company.is_active ? "default" : "secondary"}>
+                        <Badge 
+                          variant="outline" 
+                          className={company.is_active 
+                            ? "bg-green-50 text-green-700 border-green-200" 
+                            : "bg-gray-100 text-gray-600 border-gray-200"}
+                        >
                           {company.is_active ? "Active" : "Inactive"}
                         </Badge>
                       </TableCell>
-                      <TableCell>{new Date(company.created_at).toLocaleDateString()}</TableCell>
+                      <TableCell className="text-gray-600">{new Date(company.created_at).toLocaleDateString()}</TableCell>
                       <TableCell className="text-right space-x-2">
-                        <Button variant="ghost" size="icon" onClick={() => openEditDialog(company)}>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          onClick={() => openEditDialog(company)}
+                          className="hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+                        >
                           <Edit className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => openDeleteDialog(company)}>
-                          <Trash className="h-4 w-4 text-red-600" />
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          onClick={() => openDeleteDialog(company)}
+                          className="hover:bg-red-50 hover:text-red-600 transition-colors"
+                        >
+                          <Trash className="h-4 w-4 text-gray-400" />
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -293,26 +311,28 @@ const AddCompany = () => {
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
-              <DialogTitle>Add New Company</DialogTitle>
-              <DialogDescription>Enter the company details below.</DialogDescription>
+              <DialogTitle className="text-gray-900">Add New Company</DialogTitle>
+              <DialogDescription className="text-gray-500">Enter the company details below.</DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="space-y-2">
-                <Label htmlFor="add-name">Company Name *</Label>
+                <Label htmlFor="add-name" className="text-gray-700">Company Name *</Label>
                 <Input
                   id="add-name"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   placeholder="Enter company name"
+                  className="focus-visible:ring-indigo-600"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="add-address">Address</Label>
+                <Label htmlFor="add-address" className="text-gray-700">Address</Label>
                 <Textarea
                   id="add-address"
                   value={formData.address}
                   onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                   placeholder="Enter company address"
+                  className="focus-visible:ring-indigo-600"
                 />
               </div>
               <div className="flex items-center space-x-2">
@@ -320,13 +340,14 @@ const AddCompany = () => {
                   id="add-active"
                   checked={formData.is_active}
                   onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
+                  className="data-[state=checked]:bg-indigo-600"
                 />
-                <Label htmlFor="add-active">Active</Label>
+                <Label htmlFor="add-active" className="text-gray-700 font-normal">Active</Label>
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleAddCompany}>
+              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} className="border-gray-200 text-gray-700">Cancel</Button>
+              <Button onClick={handleAddCompany} className="bg-indigo-600 hover:bg-indigo-700 text-white">
                 <Save className="mr-2 h-4 w-4" />
                 Add Company
               </Button>
@@ -338,24 +359,26 @@ const AddCompany = () => {
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
-              <DialogTitle>Edit Company</DialogTitle>
-              <DialogDescription>Update the company details below.</DialogDescription>
+              <DialogTitle className="text-gray-900">Edit Company</DialogTitle>
+              <DialogDescription className="text-gray-500">Update the company details below.</DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="space-y-2">
-                <Label htmlFor="edit-name">Company Name *</Label>
+                <Label htmlFor="edit-name" className="text-gray-700">Company Name *</Label>
                 <Input
                   id="edit-name"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  className="focus-visible:ring-indigo-600"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-address">Address</Label>
+                <Label htmlFor="edit-address" className="text-gray-700">Address</Label>
                 <Textarea
                   id="edit-address"
                   value={formData.address}
                   onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  className="focus-visible:ring-indigo-600"
                 />
               </div>
               <div className="flex items-center space-x-2">
@@ -363,13 +386,14 @@ const AddCompany = () => {
                   id="edit-active"
                   checked={formData.is_active}
                   onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
+                  className="data-[state=checked]:bg-indigo-600"
                 />
-                <Label htmlFor="edit-active">Active</Label>
+                <Label htmlFor="edit-active" className="text-gray-700 font-normal">Active</Label>
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleEditCompany}>
+              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} className="border-gray-200 text-gray-700">Cancel</Button>
+              <Button onClick={handleEditCompany} className="bg-indigo-600 hover:bg-indigo-700 text-white">
                 <Save className="mr-2 h-4 w-4" />
                 Update Company
               </Button>
@@ -381,8 +405,8 @@ const AddCompany = () => {
         <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Delete Company</DialogTitle>
-              <DialogDescription>
+              <DialogTitle className="text-red-600">Delete Company</DialogTitle>
+              <DialogDescription className="text-gray-500">
                 Are you sure you want to delete "{selectedCompany?.name}"? 
                 {userRole === "super_admin" 
                   ? " This will PERMANENTLY DELETE all locations, inventory items, and audit data associated with this company."
@@ -390,8 +414,8 @@ const AddCompany = () => {
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>Cancel</Button>
-              <Button variant="destructive" onClick={handleDeleteCompany}>
+              <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} className="border-gray-200 text-gray-700">Cancel</Button>
+              <Button variant="destructive" onClick={handleDeleteCompany} className="bg-red-600 hover:bg-red-700 text-white">
                 {userRole === "super_admin" ? "Force Delete" : "Delete"}
               </Button>
             </DialogFooter>

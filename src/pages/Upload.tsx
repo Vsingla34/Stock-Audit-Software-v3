@@ -1,4 +1,3 @@
-
 import { AppLayout } from "@/components/layout/AppLayout";
 import { FileUploader } from "@/components/upload/FileUploader";
 import { ExampleData } from "@/components/upload/ExampleData";
@@ -44,7 +43,7 @@ const Upload = () => {
     <AppLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Upload Data</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-gray-900">Upload Data</h1>
           <p className="text-muted-foreground">
             {isAdminCanUploadItemMaster
               ? "Import your Item Master, Closing Stock data, and optionally Locations"
@@ -53,10 +52,10 @@ const Upload = () => {
         </div>
 
         {currentUser.role === "auditor" && (
-          <Alert className="border-blue-500 bg-blue-50">
-            <AlertCircle className="h-5 w-5 text-blue-500" />
-            <AlertTitle className="text-blue-700">Auditor Access</AlertTitle>
-            <AlertDescription className="text-blue-600">
+          <Alert className="border-indigo-200 bg-indigo-50">
+            <AlertCircle className="h-5 w-5 text-indigo-600" />
+            <AlertTitle className="text-indigo-800">Auditor Access</AlertTitle>
+            <AlertDescription className="text-indigo-700">
               As an auditor, you can only upload Closing Stock data for your
               assigned locations.
             </AlertDescription>
@@ -64,20 +63,35 @@ const Upload = () => {
         )}
 
         <Tabs defaultValue="upload" className="w-full">
-          <TabsList className="grid w-full grid-cols-3 mb-4">
-            <TabsTrigger value="upload">Upload Files</TabsTrigger>
-            <TabsTrigger value="examples">Example Templates</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-3 mb-4 bg-gray-100">
+            <TabsTrigger 
+              value="upload"
+              className="data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-sm"
+            >
+              Upload Files
+            </TabsTrigger>
+            <TabsTrigger 
+              value="examples"
+              className="data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-sm"
+            >
+              Example Templates
+            </TabsTrigger>
             {isAdminCanUploadItemMaster && (
-              <TabsTrigger value="clear">Clear Data</TabsTrigger>
+              <TabsTrigger 
+                value="clear"
+                className="data-[state=active]:bg-white data-[state=active]:text-red-600 data-[state=active]:shadow-sm"
+              >
+                Clear Data
+              </TabsTrigger>
             )}
           </TabsList>
 
           
           <TabsContent value="upload" className="space-y-4">
             
-            <Card>
+            <Card className="shadow-sm border-gray-200">
               <CardHeader>
-                <CardTitle>Import Inventory Data</CardTitle>
+                <CardTitle className="text-gray-900">Import Inventory Data</CardTitle>
                 <CardDescription>
                   {isAdminCanUploadItemMaster
                     ? "Upload your Item Master (without quantity) and Closing Stock (with quantity) files"
@@ -96,12 +110,12 @@ const Upload = () => {
 
 
             {isAdminCanUploadItemMaster && (
-              <Card>
+              <Card className="shadow-sm border-gray-200">
                 <CardHeader>
-                  <CardTitle>Upload Locations (Optional)</CardTitle>
+                  <CardTitle className="text-gray-900">Upload Locations (Optional)</CardTitle>
                   <CardDescription>
                     Upload a CSV / Excel file with columns like{" "}
-                    <span className="font-medium">name, status, description</span>{" "}
+                    <span className="font-medium text-gray-700">name, status, description</span>{" "}
                     to create or update locations. You can still add locations
                     manually from the Locations page.
                   </CardDescription>
@@ -112,11 +126,11 @@ const Upload = () => {
               </Card>
             )}
 
-            <Card className="p-6 border-blue-200 bg-blue-50">
-              <h3 className="text-md font-semibold text-blue-800 mb-2">
+            <Card className="p-6 border-indigo-200 bg-indigo-50 shadow-sm">
+              <h3 className="text-md font-semibold text-indigo-900 mb-2">
                 Important Notes:
               </h3>
-              <ul className="list-disc list-inside text-sm text-blue-700 space-y-1">
+              <ul className="list-disc list-inside text-sm text-indigo-800 space-y-1">
                 <li>
                   Item Master should contain product information WITHOUT
                   quantities
@@ -147,7 +161,7 @@ const Upload = () => {
               
               <UploadHistory />
 
-              <Card>
+              <Card className="border-red-100 shadow-sm">
                 <CardHeader>
                   <CardTitle className="text-red-600">
                     Clear Company Data

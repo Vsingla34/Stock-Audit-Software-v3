@@ -159,17 +159,20 @@ export const LocationMaster = () => {
   };
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className="shadow-sm border-gray-200">
+      <CardHeader className="border-b border-gray-100 pb-4">
         <CardTitle className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Building className="h-5 w-5" />
+          <div className="flex items-center gap-2 text-gray-900">
+            <Building className="h-5 w-5 text-indigo-600" />
             <span>Location Master</span>
           </div>
 
-
           {canAddLocation && !isAdding && (
-            <Button onClick={() => setIsAdding(true)} size="sm" className="h-8">
+            <Button 
+              onClick={() => setIsAdding(true)} 
+              size="sm" 
+              className="h-9 bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-all"
+            >
               <Plus className="mr-1 h-4 w-4" />
               Add Location
             </Button>
@@ -177,11 +180,11 @@ export const LocationMaster = () => {
         </CardTitle>
 
         {companyLoaded && (
-          <p className="text-xs text-muted-foreground mt-1">
+          <p className="text-sm text-gray-500 mt-1">
             {currentCompanyName ? (
               <>
                 Current company:{" "}
-                <span className="font-medium">{currentCompanyName}</span>
+                <span className="font-medium text-indigo-700">{currentCompanyName}</span>
               </>
             ) : (
               "No company selected"
@@ -190,38 +193,40 @@ export const LocationMaster = () => {
         )}
       </CardHeader>
 
-      <CardContent>
+      <CardContent className="pt-6">
         {isAuditor ? (
-          <div className="text-sm text-muted-foreground">
+          <div className="text-sm text-gray-500 bg-gray-50 p-4 rounded-lg border border-gray-100">
             Location management is restricted to Admin and Client users.
             You can still view assigned locations and perform audits.
           </div>
         ) : (
           <>
             {isAdding && (
-              <LocationForm
-                locations={locations}
-                onSave={handleAddLocation}
-                onCancel={() => setIsAdding(false)}
-              />
+              <div className="mb-6 animate-in slide-in-from-top-2">
+                <LocationForm
+                  locations={locations}
+                  onSave={handleAddLocation}
+                  onCancel={() => setIsAdding(false)}
+                />
+              </div>
             )}
 
-            <div className="rounded-md border">
+            <div className="rounded-md border border-gray-200 overflow-hidden">
               <Table>
-                <TableHeader>
+                <TableHeader className="bg-gray-50/50">
                   <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead>Company</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Items</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead className="font-semibold text-gray-700">Name</TableHead>
+                    <TableHead className="font-semibold text-gray-700">Description</TableHead>
+                    <TableHead className="font-semibold text-gray-700">Company</TableHead>
+                    <TableHead className="font-semibold text-gray-700">Status</TableHead>
+                    <TableHead className="font-semibold text-gray-700">Items</TableHead>
+                    <TableHead className="text-right font-semibold text-gray-700">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {locations.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center py-4 text-muted-foreground">
+                      <TableCell colSpan={6} className="text-center py-8 text-gray-500">
                         No locations found. Add a location to get started.
                       </TableCell>
                     </TableRow>

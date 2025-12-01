@@ -19,6 +19,7 @@ import {
   ArrowRight,
   PlusCircle,
   CheckCircle2,
+  Briefcase
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -117,18 +118,23 @@ const CompanySelection = () => {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4">
         <div className="mb-8 flex items-center gap-2">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-600 text-white">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-200">
             <CheckCircle2 className="h-6 w-6" />
           </div>
-          <span className="text-3xl font-bold text-slate-900 tracking-tight">StockCheck360</span>
+          <span className="text-3xl font-bold text-gray-900 tracking-tight">StockCheck360</span>
         </div>
-        <Card className="max-w-md w-full border-0 shadow-xl ring-1 ring-slate-900/5">
+        <Card className="max-w-md w-full border-gray-200 shadow-xl">
           <CardHeader>
-            <CardTitle className="text-center text-xl">
+            <div className="flex justify-center mb-4">
+              <div className="p-3 bg-gray-100 rounded-full">
+                <Briefcase className="h-8 w-8 text-gray-400" />
+              </div>
+            </div>
+            <CardTitle className="text-center text-xl text-gray-900">
               No Companies Available
             </CardTitle>
-            <CardDescription className="text-center mt-2">
-              You have not been assigned to any companies. Please contact the Super Administrator.
+            <CardDescription className="text-center mt-2 text-gray-500">
+              You have not been assigned to any companies. Please contact the Super Administrator to get access.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -141,8 +147,13 @@ const CompanySelection = () => {
       <div className="max-w-6xl mx-auto space-y-8">
         
         {/* Header Section */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-slate-200">
-        
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-gray-200">
+          <div className="space-y-1">
+            <h2 className="text-3xl font-bold tracking-tight text-gray-900">Select Company</h2>
+            <p className="text-gray-500 text-lg">
+              Choose a workspace to access your dashboard and inventory data.
+            </p>
+          </div>
 
           <div className="flex items-center gap-4">
              {isSuperAdmin && (
@@ -157,50 +168,45 @@ const CompanySelection = () => {
           </div>
         </div>
 
-        <div className="space-y-2">
-          <h2 className="text-3xl font-bold tracking-tight text-slate-900">Select Company</h2>
-          <p className="text-slate-500 text-lg">
-            Choose a workspace to access your dashboard and inventory data.
-          </p>
-        </div>
-
         {/* Grid */}
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {companies.map((company) => (
             <Card
               key={company.id}
-              className="group cursor-pointer border-0 shadow-md ring-1 ring-slate-900/5 transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:ring-indigo-500/20 bg-white"
+              className="group cursor-pointer border-gray-200 shadow-sm hover:shadow-md transition-all duration-300 hover:-translate-y-1 hover:border-indigo-200 bg-white"
               onClick={() => handleCompanySelect(company.id)}
             >
               <CardHeader className="p-6">
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-4">
-                    <div className="p-3 bg-indigo-50 rounded-xl group-hover:bg-indigo-100 transition-colors">
+                    <div className="p-3 bg-indigo-50 rounded-xl group-hover:bg-indigo-100 transition-colors border border-indigo-100">
                       <Building2 className="h-6 w-6 text-indigo-600" />
                     </div>
                     <div>
-                      <CardTitle className="text-lg font-semibold text-slate-900 group-hover:text-indigo-700 transition-colors">
+                      <CardTitle className="text-lg font-semibold text-gray-900 group-hover:text-indigo-700 transition-colors">
                         {company.name}
                       </CardTitle>
-                      <CardDescription className="mt-1 text-slate-500 line-clamp-1">
+                      <CardDescription className="mt-1 text-gray-500 line-clamp-1">
                         {company.address || "No address provided"}
                       </CardDescription>
                     </div>
                   </div>
-                  <ArrowRight className="h-5 w-5 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-1 transition-all" />
+                  <div className="p-1 rounded-full text-gray-300 group-hover:text-indigo-600 group-hover:bg-indigo-50 transition-all">
+                    <ArrowRight className="h-5 w-5" />
+                  </div>
                 </div>
               </CardHeader>
             </Card>
           ))}
 
           {!loading && companies.length === 0 && (
-            <Card className="sm:col-span-2 lg:col-span-3 border-dashed border-2 border-slate-200 bg-slate-50/50 shadow-none">
+            <Card className="sm:col-span-2 lg:col-span-3 border-dashed border-2 border-gray-200 bg-gray-50/50 shadow-none">
               <CardHeader className="text-center py-12">
-                <div className="mx-auto bg-white p-4 rounded-full shadow-sm ring-1 ring-slate-900/5 mb-4">
-                  <Building2 className="h-8 w-8 text-slate-400" />
+                <div className="mx-auto bg-white p-4 rounded-full shadow-sm ring-1 ring-gray-900/5 mb-4">
+                  <Building2 className="h-8 w-8 text-gray-400" />
                 </div>
-                <CardTitle className="text-slate-900">No companies found</CardTitle>
-                <CardDescription className="mt-2 max-w-sm mx-auto">
+                <CardTitle className="text-gray-900">No companies found</CardTitle>
+                <CardDescription className="mt-2 max-w-sm mx-auto text-gray-500">
                   {isSuperAdmin
                     ? "Get started by creating your first company workspace using the button above."
                     : "You don't have access to any companies yet. Please contact your administrator."}
@@ -213,8 +219,8 @@ const CompanySelection = () => {
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogContent className="sm:max-w-[600px]">
             <DialogHeader>
-              <DialogTitle>Add New Company</DialogTitle>
-              <DialogDescription>
+              <DialogTitle className="text-gray-900">Add New Company</DialogTitle>
+              <DialogDescription className="text-gray-500">
                 Enter the details below to create a new company workspace.
               </DialogDescription>
             </DialogHeader>

@@ -1,16 +1,15 @@
-
 import { useEffect, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { User, Mail, Building2, MapPin, Shield, CheckCircle2, Loader2 } from "lucide-react";
 
 interface UserProfileRow {
   id: string;
   email: string;
   name: string;
-  
   role: "super_admin" | "admin" | "auditor" | "client";
   assigned_companies: string[] | null;
   assigned_locations: string[] | null;
@@ -103,8 +102,9 @@ export default function Profile() {
   if (loading) {
     return (
       <AppLayout>
-        <div className="flex items-center justify-center h-[400px]">
-          <p className="text-muted-foreground">Loading profile...</p>
+        <div className="flex flex-col items-center justify-center min-h-[60vh]">
+          <Loader2 className="h-10 w-10 text-indigo-600 animate-spin mb-4" />
+          <p className="text-gray-500 font-medium">Loading profile...</p>
         </div>
       </AppLayout>
     );
@@ -113,8 +113,8 @@ export default function Profile() {
   if (!profile) {
     return (
       <AppLayout>
-        <div className="flex items-center justify-center h-[400px]">
-          <p className="text-muted-foreground">Profile not found.</p>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <p className="text-gray-500">Profile not found.</p>
         </div>
       </AppLayout>
     );
@@ -142,42 +142,49 @@ export default function Profile() {
 
   return (
     <AppLayout>
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold tracking-tight mb-1">
-          User Profile
-        </h1>
-        <p className="text-muted-foreground mb-6">
-          View and manage your account information
-        </p>
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-gray-900">
+            User Profile
+          </h1>
+          <p className="text-gray-500">
+            View and manage your account information
+          </p>
+        </div>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-           
+        <Card className="shadow-sm border-gray-200">
+          <CardHeader className="bg-gradient-to-r from-gray-50 to-white border-b border-gray-100 pb-8">
+            <div className="flex items-center gap-5">
+                <div className="h-16 w-16 rounded-full bg-indigo-100 flex items-center justify-center border-2 border-white shadow-md">
+                    <User className="h-8 w-8 text-indigo-600" />
+                </div>
+                <div>
+                    <CardTitle className="text-2xl font-bold text-gray-900">{profile.name}</CardTitle>
+                    <div className="flex items-center gap-2 mt-1">
+                        <Mail className="h-4 w-4 text-gray-400" />
+                        <span className="text-sm text-gray-600 font-medium">{profile.email}</span>
+                    </div>
+                </div>
+            </div>
           </CardHeader>
 
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <CardContent className="pt-8 space-y-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
               
               <div className="space-y-2">
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+                  <Shield className="h-3.5 w-3.5 text-indigo-600" /> Role
+                </label>
                 <div>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase">
-                    Name
-                  </p>
-                  <p className="text-sm">{profile.name}</p>
-                </div>
-
-                <div>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase">
-                    Role
-                  </p>
                   <Badge
-                    variant={
-                      profile.role === "super_admin" || profile.role === "admin"
-                        ? "default"
-                        : profile.role === "client"
-                        ? "secondary"
-                        : "outline"
-                    }
+                    variant="outline"
+                    className={`
+                      px-3 py-1 text-sm font-medium
+                      ${profile.role === "super_admin" ? "bg-purple-50 text-purple-700 border-purple-200" : ""}
+                      ${profile.role === "admin" ? "bg-indigo-50 text-indigo-700 border-indigo-200" : ""}
+                      ${profile.role === "client" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : ""}
+                      ${profile.role === "auditor" ? "bg-blue-50 text-blue-700 border-blue-200" : ""}
+                    `}
                   >
                     {niceRoleLabel}
                   </Badge>
@@ -186,34 +193,37 @@ export default function Profile() {
 
               
               <div className="space-y-2">
-                <div>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase">
-                    Email
-                  </p>
-                  <p className="text-sm">{profile.email}</p>
-                </div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+                  <Building2 className="h-3.5 w-3.5 text-indigo-600" /> Assigned Company
+                </label>
+                <p className="text-sm text-gray-900 font-medium bg-gray-50 p-2.5 rounded-md border border-gray-100">
+                    {companyNames}
+                </p>
+              </div>
 
-                <div>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase">
-                    Company
-                  </p>
-                  <p className="text-sm">{companyNames}</p>
-                </div>
-
-                <div>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase">
-                    Locations
-                  </p>
-                  <p className="text-sm">{locationNames}</p>
-                </div>
+              
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+                  <MapPin className="h-3.5 w-3.5 text-indigo-600" /> Assigned Locations
+                </label>
+                <p className="text-sm text-gray-700 leading-relaxed bg-gray-50 p-3 rounded-md border border-gray-100">
+                    {locationNames}
+                </p>
               </div>
             </div>
 
-            <div className="pt-4 border-t">
-              <p className="text-xs font-semibold text-muted-foreground uppercase mb-1">
-                Access
-              </p>
-              <p className="text-sm text-muted-foreground">{accessText}</p>
+            <div className="rounded-lg bg-indigo-50 p-4 border border-indigo-100">
+                <div className="flex items-start gap-3">
+                    <div className="p-1 bg-indigo-100 rounded-full">
+                        <CheckCircle2 className="h-4 w-4 text-indigo-600" />
+                    </div>
+                    <div>
+                        <h4 className="text-sm font-semibold text-indigo-900">Access Level Permissions</h4>
+                        <p className="text-sm text-indigo-700 mt-1 leading-relaxed">
+                            {accessText}
+                        </p>
+                    </div>
+                </div>
             </div>
           </CardContent>
         </Card>

@@ -461,6 +461,7 @@ const UserManagement = () => {
             onChange={(e) =>
               setFormData({ ...formData, name: e.target.value })
             }
+            className="focus-visible:ring-indigo-600"
           />
         </div>
         <div className="space-y-2">
@@ -469,7 +470,7 @@ const UserManagement = () => {
             value={formData.role}
             onValueChange={(value: any) => handleRoleChange(value)}
           >
-            <SelectTrigger id="user-role">
+            <SelectTrigger id="user-role" className="focus:ring-indigo-600">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -489,10 +490,11 @@ const UserManagement = () => {
             id="user-email"
             type="email"
             value={formData.email}
-            disabled={!!selectedUser} // Disable email edit for existing users if desired
+            disabled={!!selectedUser} 
             onChange={(e) =>
               setFormData({ ...formData, email: e.target.value })
             }
+            className="focus-visible:ring-indigo-600"
           />
         </div>
         {!selectedUser && (
@@ -505,6 +507,7 @@ const UserManagement = () => {
               onChange={(e) =>
                 setFormData({ ...formData, password: e.target.value })
               }
+              className="focus-visible:ring-indigo-600"
             />
           </div>
         )}
@@ -513,16 +516,16 @@ const UserManagement = () => {
       {formData.role !== "super_admin" && (
         <div className="space-y-2">
           <Label className="flex items-center gap-2">
-            <Building2 className="h-4 w-4" />
+            <Building2 className="h-4 w-4 text-indigo-600" />
             Assign Companies *
           </Label>
-          <Card className="p-4 max-h-48 overflow-y-auto">
+          <Card className="p-4 max-h-48 overflow-y-auto border-gray-200 bg-gray-50/50">
             {loading && companies.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-gray-500">
                 Loading companies...
               </p>
             ) : companies.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-gray-500">
                 No companies available.
               </p>
             ) : (
@@ -538,10 +541,11 @@ const UserManagement = () => {
                         company.id
                       )}
                       onCheckedChange={() => toggleCompany(company.id)}
+                      className="data-[state=checked]:bg-indigo-600 data-[state=checked]:border-indigo-600 border-gray-300"
                     />
                     <label
                       htmlFor={`company-${company.id}`}
-                      className="text-sm cursor-pointer flex-1"
+                      className="text-sm cursor-pointer flex-1 font-medium text-gray-700"
                     >
                       {company.name}
                     </label>
@@ -556,13 +560,13 @@ const UserManagement = () => {
       {formData.role !== "super_admin" && (
       <div className="space-y-2">
         <Label className="flex items-center gap-2">
-          <MapPin className="h-4 w-4" />
+          <MapPin className="h-4 w-4 text-indigo-600" />
           Assign Locations {formData.role === 'admin' ? '(Auto-selected)' : '(Optional)'}
         </Label>
         
-        <Card className="p-4 max-h-60 overflow-y-auto">
+        <Card className="p-4 max-h-60 overflow-y-auto border-gray-200 bg-gray-50/50">
           {formData.assignedCompanies.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-20 text-muted-foreground text-sm">
+            <div className="flex flex-col items-center justify-center h-20 text-gray-500 text-sm">
               <AlertCircle className="h-5 w-5 mb-2 opacity-50" />
               Select a company above to view locations
             </div>
@@ -574,13 +578,13 @@ const UserManagement = () => {
                 const companyLocations = locations.filter(l => l.companyId === companyId);
 
                 return (
-                  <div key={companyId} className="border-b last:border-0 pb-3 last:pb-0">
-                    <h4 className="text-xs font-semibold text-muted-foreground uppercase mb-2 sticky top-0 bg-background/95 py-1">
+                  <div key={companyId} className="border-b last:border-0 pb-3 last:pb-0 border-gray-100">
+                    <h4 className="text-xs font-semibold text-indigo-600 uppercase mb-2 sticky top-0 bg-gray-50 py-1">
                       {companyName}
                     </h4>
                     
                     {companyLocations.length === 0 ? (
-                      <p className="text-xs text-muted-foreground italic pl-2">No locations available</p>
+                      <p className="text-xs text-gray-400 italic pl-2">No locations available</p>
                     ) : (
                       <div className="grid grid-cols-1 gap-2 pl-2">
                         {companyLocations.map((location) => (
@@ -593,10 +597,11 @@ const UserManagement = () => {
                               checked={formData.assignedLocations.includes(location.id)}
                               disabled={formData.role === 'admin'}
                               onCheckedChange={() => toggleLocation(location.id)}
+                              className="data-[state=checked]:bg-indigo-600 data-[state=checked]:border-indigo-600 border-gray-300 disabled:opacity-50"
                             />
                             <label
                               htmlFor={`location-${location.id}`}
-                              className="text-sm cursor-pointer flex-1"
+                              className="text-sm cursor-pointer flex-1 text-gray-700"
                             >
                               {location.name}
                             </label>
@@ -612,7 +617,7 @@ const UserManagement = () => {
         </Card>
         
         {formData.role === 'admin' && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-indigo-600/80">
             Admins are automatically assigned all locations for their companies.
           </p>
         )}
@@ -627,8 +632,8 @@ const UserManagement = () => {
         {/* Header with Filter and Add Button */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">User Management</h1>
-            <p className="text-muted-foreground">
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">User Management</h1>
+            <p className="text-gray-500">
               Manage user accounts, roles, and access permissions.
             </p>
           </div>
@@ -636,9 +641,9 @@ const UserManagement = () => {
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <div className="w-full sm:w-[200px]">
               <Select value={companyFilter} onValueChange={setCompanyFilter}>
-                <SelectTrigger>
+                <SelectTrigger className="border-gray-200 focus:ring-indigo-600">
                   <div className="flex items-center gap-2">
-                    <Filter className="h-4 w-4 text-muted-foreground" />
+                    <Filter className="h-4 w-4 text-gray-500" />
                     <SelectValue placeholder="Filter by Company" />
                   </div>
                 </SelectTrigger>
@@ -653,30 +658,30 @@ const UserManagement = () => {
               </Select>
             </div>
 
-            <Button onClick={openAddDialog} className="whitespace-nowrap">
+            <Button onClick={openAddDialog} className="whitespace-nowrap bg-indigo-600 hover:bg-indigo-700 text-white">
               <Plus className="mr-2 h-4 w-4" />
               Add User
             </Button>
           </div>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Users className="h-4 w-4" />
+        <Card className="shadow-sm border-gray-200">
+          <CardHeader className="border-b border-gray-100 bg-gray-50/50">
+            <CardTitle className="flex items-center gap-2 text-gray-900">
+              <Users className="h-4 w-4 text-indigo-600" />
               Users
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-0">
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Companies</TableHead>
-                  <TableHead>Locations</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                <TableRow className="bg-gray-50 hover:bg-gray-50">
+                  <TableHead className="font-semibold text-gray-700">Name</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Email</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Role</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Companies</TableHead>
+                  <TableHead className="font-semibold text-gray-700">Locations</TableHead>
+                  <TableHead className="text-right font-semibold text-gray-700">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -684,36 +689,36 @@ const UserManagement = () => {
                   <TableRow>
                     <TableCell
                       colSpan={6}
-                      className="text-center py-4 text-muted-foreground"
+                      className="text-center py-8 text-gray-500"
                     >
                       No users found.
                     </TableCell>
                   </TableRow>
                 ) : (
                   filteredUsers.map((user) => (
-                    <TableRow key={user.id}>
-                      <TableCell className="font-medium">{user.name}</TableCell>
-                      <TableCell>{user.email}</TableCell>
+                    <TableRow key={user.id} className="hover:bg-gray-50/50 transition-colors border-gray-100">
+                      <TableCell className="font-medium text-gray-900">{user.name}</TableCell>
+                      <TableCell className="text-gray-600">{user.email}</TableCell>
                       <TableCell>
                         <Badge
-                          variant={
-                            user.role === "super_admin"
-                              ? "default"
-                              : user.role === "admin"
-                              ? "secondary"
-                              : "outline"
-                          }
+                          variant="outline"
+                          className={`
+                            ${user.role === 'super_admin' ? 'bg-purple-100 text-purple-700 border-purple-200' : ''}
+                            ${user.role === 'admin' ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : ''}
+                            ${user.role === 'auditor' ? 'bg-blue-100 text-blue-700 border-blue-200' : ''}
+                            ${user.role === 'client' ? 'bg-green-100 text-green-700 border-green-200' : ''}
+                          `}
                         >
                           {user.role.replace('_', ' ')}
                         </Badge>
                       </TableCell>
                       <TableCell className="max-w-xs">
-                        <span className="line-clamp-2 text-sm text-muted-foreground">
+                        <span className="line-clamp-2 text-sm text-gray-600" title={getCompanyNames(user.assigned_companies)}>
                           {getCompanyNames(user.assigned_companies)}
                         </span>
                       </TableCell>
                       <TableCell className="max-w-xs">
-                        <span className="line-clamp-2 text-sm text-muted-foreground">
+                        <span className="line-clamp-2 text-sm text-gray-600" title={getLocationNames(user.assigned_locations)}>
                           {getLocationNames(user.assigned_locations)}
                         </span>
                       </TableCell>
@@ -723,6 +728,7 @@ const UserManagement = () => {
                           size="icon"
                           onClick={() => openEditDialog(user)}
                           disabled={!isSuperAdmin && (user.role === "super_admin" || user.role === "admin")}
+                          className="hover:bg-indigo-50 hover:text-indigo-600"
                         >
                           <Edit className="h-4 w-4" />
                         </Button>
@@ -731,8 +737,9 @@ const UserManagement = () => {
                           size="icon"
                           onClick={() => openDeleteDialog(user)}
                           disabled={!isSuperAdmin && (user.role === "super_admin" || user.role === "admin")}
+                          className="hover:bg-red-50 hover:text-red-600"
                         >
-                          <Trash className="h-4 w-4 text-red-600" />
+                          <Trash className="h-4 w-4 text-red-500" />
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -747,17 +754,17 @@ const UserManagement = () => {
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Add New User</DialogTitle>
-              <DialogDescription>
+              <DialogTitle className="text-gray-900">Add New User</DialogTitle>
+              <DialogDescription className="text-gray-500">
                 Create a new user account with company and location assignments.
               </DialogDescription>
             </DialogHeader>
             {renderFormContent()}
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} className="border-gray-200 text-gray-700">
                 Cancel
               </Button>
-              <Button onClick={handleAddUser}>
+              <Button onClick={handleAddUser} className="bg-indigo-600 hover:bg-indigo-700 text-white">
                 <Plus className="mr-2 h-4 w-4" />
                 Add User
               </Button>
@@ -765,21 +772,21 @@ const UserManagement = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Edit User Dialog */}
+       
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
           <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Edit User</DialogTitle>
-              <DialogDescription>
+              <DialogTitle className="text-gray-900">Edit User</DialogTitle>
+              <DialogDescription className="text-gray-500">
                 Update user information and assignments.
               </DialogDescription>
             </DialogHeader>
             {renderFormContent()}
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} className="border-gray-200 text-gray-700">
                 Cancel
               </Button>
-              <Button onClick={handleEditUser}>
+              <Button onClick={handleEditUser} className="bg-indigo-600 hover:bg-indigo-700 text-white">
                 <Edit className="mr-2 h-4 w-4" />
                 Save Changes
               </Button>
@@ -787,21 +794,21 @@ const UserManagement = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Delete Confirmation Dialog */}
+       
         <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Delete User</DialogTitle>
-              <DialogDescription>
+              <DialogTitle className="text-red-600">Delete User</DialogTitle>
+              <DialogDescription className="text-gray-500">
                 Are you sure you want to delete this user? This action cannot be
                 undone.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+              <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} className="border-gray-200 text-gray-700">
                 Cancel
               </Button>
-              <Button variant="destructive" onClick={handleDeleteUser}>
+              <Button variant="destructive" onClick={handleDeleteUser} className="bg-red-600 hover:bg-red-700 text-white">
                 Delete
               </Button>
             </DialogFooter>
