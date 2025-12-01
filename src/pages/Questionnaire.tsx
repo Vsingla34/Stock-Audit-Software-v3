@@ -33,18 +33,25 @@ const Questionnaire = () => {
     <AppLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight mb-2">Questionnaire</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-3xl font-bold tracking-tight mb-2 text-gray-900">Questionnaire</h1>
+          <p className="text-gray-500">
             Manage audit questionnaires and collect responses from different locations
           </p>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid grid-cols-2 w-[400px]">
-            <TabsTrigger value="management">
+          <TabsList className="grid grid-cols-2 w-[400px] bg-gray-100">
+            <TabsTrigger 
+              value="management" 
+              className="data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-sm"
+            >
               {canManageQuestions ? "Manage Questions" : "Answer Questions"}
             </TabsTrigger>
-            <TabsTrigger value="responses" disabled={!userRole || userRole === "client"}>
+            <TabsTrigger 
+              value="responses" 
+              disabled={!userRole || userRole === "client"}
+              className="data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-sm"
+            >
               View Responses
             </TabsTrigger>
           </TabsList>
@@ -60,7 +67,7 @@ const Questionnaire = () => {
                       locations={userLocations}
                       selectedLocation={selectedLocation}
                       onLocationChange={setSelectedLocation}
-                      placeholder="Select a location to audit" // Added placeholder
+                      placeholder="Select a location to audit"
                     />
                   )}
                 </div>
@@ -71,7 +78,7 @@ const Questionnaire = () => {
                     locationName={locationName}
                   />
                 ) : (
-                  <p className="text-muted-foreground">Please select a location to view and answer questions</p>
+                  <p className="text-gray-500">Please select a location to view and answer questions</p>
                 )}
               </div>
             )}
@@ -84,7 +91,7 @@ const Questionnaire = () => {
                   locations={canManageQuestions ? locations : userLocations}
                   selectedLocation={responseLocation}
                   onLocationChange={setResponseLocation}
-                  placeholder="Select a location to view" // Added placeholder
+                  placeholder="Select a location to view"
                 />
               </div>
               
@@ -94,7 +101,7 @@ const Questionnaire = () => {
                   locationName={responseLocationName || ""}
                 />
               ) : (
-                <p className="text-muted-foreground">Please select a location to view responses</p>
+                <p className="text-gray-500">Please select a location to view responses</p>
               )}
             </div>
           </TabsContent>

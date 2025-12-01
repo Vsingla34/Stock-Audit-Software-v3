@@ -115,16 +115,23 @@ export const QuestionList = () => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold flex items-center">
-          <ListCheck className="h-5 w-5 mr-2" />
+        <h2 className="text-xl font-bold flex items-center text-gray-900">
+          <ListCheck className="h-5 w-5 mr-2 text-indigo-600" />
           Audit Questionnaire
         </h2>
         <div className="flex gap-2">
-          <Button onClick={handleAddDefaults} variant="outline">
+          <Button 
+            onClick={handleAddDefaults} 
+            variant="outline"
+            className="border-gray-200 text-gray-700 hover:bg-indigo-50 hover:text-indigo-700"
+          >
             <Wand2 className="h-4 w-4 mr-2" />
             Add Default Questions
           </Button>
-          <Button onClick={handleAddClick}>
+          <Button 
+            onClick={handleAddClick}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white"
+          >
             <Plus className="h-4 w-4 mr-2" />
             Add Question
           </Button>
@@ -132,18 +139,25 @@ export const QuestionList = () => {
       </div>
 
       {questions.length === 0 ? (
-        <Card className="bg-muted/20">
+        <Card className="bg-gray-50 border-dashed border-gray-200">
           <CardContent className="p-6">
             <div className="text-center space-y-2">
-              <p className="text-muted-foreground">
+              <p className="text-gray-500">
                 No questions have been created yet.
               </p>
               <div className="flex justify-center gap-2 mt-4">
-                <Button onClick={handleAddDefaults} variant="outline">
+                <Button 
+                  onClick={handleAddDefaults} 
+                  variant="outline"
+                  className="border-gray-200 text-gray-700 hover:bg-indigo-50 hover:text-indigo-700"
+                >
                   <Wand2 className="h-4 w-4 mr-2" />
                   Add Defaults
                 </Button>
-                <Button onClick={handleAddClick}>
+                <Button 
+                  onClick={handleAddClick}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                >
                   <Plus className="h-4 w-4 mr-2" />
                   Create Question
                 </Button>
@@ -156,20 +170,20 @@ export const QuestionList = () => {
           {questions.map((question) => {
             const isAuto = isAutoItem(question.text);
             return (
-              <Card key={question.id} className="hover:bg-accent/5">
+              <Card key={question.id} className="hover:bg-gray-50/80 transition-colors border-gray-200">
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between">
                     <div className="space-y-1 flex-1">
                       <div className="flex items-center gap-2">
-                        <Badge variant="outline">{getQuestionTypeLabel(question.type)}</Badge>
-                        {question.required && <Badge>Required</Badge>}
-                        {isAuto && <Badge variant="secondary" className="bg-blue-100 text-blue-800">Auto-Filled</Badge>}
+                        <Badge variant="outline" className="border-gray-300 text-gray-600 font-normal">{getQuestionTypeLabel(question.type)}</Badge>
+                        {question.required && <Badge className="bg-gray-900 hover:bg-gray-800">Required</Badge>}
+                        {isAuto && <Badge variant="secondary" className="bg-indigo-100 text-indigo-800 hover:bg-indigo-200">Auto-Filled</Badge>}
                       </div>
-                      <p className="font-medium">{question.text}</p>
+                      <p className="font-medium text-gray-900">{question.text}</p>
 
                       {(question.type === "single_select" || question.type === "multi_select") && question.options && question.options.length > 0 && (
-                        <div className="mt-2 text-sm text-muted-foreground">
-                          <p className="mb-1">Options:</p>
+                        <div className="mt-2 text-sm text-gray-500">
+                          <p className="mb-1 text-xs uppercase tracking-wider font-semibold text-gray-400">Options:</p>
                           <ul className="list-disc list-inside space-y-0.5 pl-2">
                             {question.options.map((option) => (
                               <li key={option.id}>{option.text}</li>
@@ -180,10 +194,20 @@ export const QuestionList = () => {
                     </div>
 
                     <div className="flex gap-2 ml-4">
-                      <Button size="sm" variant="ghost" onClick={() => handleEditClick(question)}>
+                      <Button 
+                        size="sm" 
+                        variant="ghost" 
+                        onClick={() => handleEditClick(question)}
+                        className="hover:bg-indigo-50 hover:text-indigo-600"
+                      >
                         <Pencil className="h-4 w-4" />
                       </Button>
-                      <Button size="sm" variant="ghost" onClick={() => handleDeleteClick(question)}>
+                      <Button 
+                        size="sm" 
+                        variant="ghost" 
+                        onClick={() => handleDeleteClick(question)}
+                        className="hover:bg-red-50 hover:text-red-600"
+                      >
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
@@ -226,7 +250,7 @@ export const QuestionList = () => {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} className="border-gray-200">
               Cancel
             </Button>
             <Button variant="destructive" onClick={handleDeleteConfirm}>

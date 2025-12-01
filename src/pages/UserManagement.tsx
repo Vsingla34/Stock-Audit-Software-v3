@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { Users, Plus, Edit, Trash, Building2, MapPin, Filter } from "lucide-react";
+import { Users, Plus, Edit, Trash, Building2, MapPin, Filter, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useUser } from "@/context/UserContext";
@@ -64,7 +64,6 @@ const UserManagement = () => {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // ✅ New State for Filter
   const [companyFilter, setCompanyFilter] = useState<string>("all");
 
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -194,24 +193,55 @@ const UserManagement = () => {
     }));
   };
 
+  // ✅ UPDATED: Strict Logic for Company Selection
   const toggleCompany = (companyId: string) => {
-    setFormData((prev) => {
-      const newAssignedCompanies = prev.assignedCompanies.includes(companyId)
-        ? prev.assignedCompanies.filter((id) => id !== companyId)
-        : [...prev.assignedCompanies, companyId];
+    // 1. If we are REMOVING a company
+    if (formData.assignedCompanies.includes(companyId)) {
+      setFormData((prev) => {
+        const newAssignedCompanies = prev.assignedCompanies.filter((id) => id !== companyId);
+        
+        // Remove locations associated with the removed company
+        const newAssignedLocations = prev.assignedLocations.filter(locId => {
+           const loc = locations.find(l => l.id === locId);
+           return loc?.companyId !== companyId;
+        });
 
+        return {
+          ...prev,
+          assignedCompanies: newAssignedCompanies,
+          assignedLocations: newAssignedLocations,
+        };
+      });
+      return;
+    }
+
+    // 2. If we are ADDING a company
+    // Strict Rule: Check if ALL currently selected companies have at least one location selected
+    const companiesWithoutLocations = formData.assignedCompanies.filter(existingCompanyId => {
+      const hasLocation = formData.assignedLocations.some(locId => {
+        const loc = locations.find(l => l.id === locId);
+        return loc?.companyId === existingCompanyId;
+      });
+      return !hasLocation;
+    });
+
+    if (companiesWithoutLocations.length > 0 && formData.role !== 'admin') {
+      const missingCompanyName = companies.find(c => c.id === companiesWithoutLocations[0])?.name || "Selected Company";
+      toast.error(`Please select a location for "${missingCompanyName}" before adding another company.`, {
+        description: "Selecting one location is compulsory for selecting the second company."
+      });
+      return;
+    }
+
+    // If validation passes, add the new company
+    setFormData((prev) => {
+      const newAssignedCompanies = [...prev.assignedCompanies, companyId];
+      
       let newAssignedLocations = prev.assignedLocations;
 
+      // If role is admin, auto-select locations (bypass manual selection logic)
       if (prev.role === 'admin') {
         newAssignedLocations = getAllLocationsForCompanies(newAssignedCompanies);
-      } else {
-        const validLocationIds = locations
-          .filter((loc) => loc.companyId && newAssignedCompanies.includes(loc.companyId))
-          .map((loc) => loc.id);
-        
-        newAssignedLocations = prev.assignedLocations.filter((locId) =>
-          validLocationIds.includes(locId)
-        );
       }
 
       return {
@@ -232,15 +262,6 @@ const UserManagement = () => {
     });
   };
 
-  const filteredLocationsForForm: Location[] =
-    formData.assignedCompanies.length === 0
-      ? []
-      : locations.filter(
-          (loc) =>
-            !!loc.companyId &&
-            formData.assignedCompanies.includes(loc.companyId)
-        );
-
   const getCompanyNames = (companyIds: string[] | null) => {
     if (!companyIds || companyIds.length === 0) return "-";
     return companyIds.map(id => {
@@ -257,27 +278,17 @@ const UserManagement = () => {
     return names.length ? names.join(", ") : "-";
   };
 
-  // ✅ UPDATED: Correct Filtering Logic
   const filteredUsers = users.filter(user => {
-    // 1. Always hide Super Admins
     if (user.role === 'super_admin') return false;
 
-    // 2. Logic for Admins
     if (!isSuperAdmin) {
-      // Hide other Admins
       if (user.role === 'admin') return false;
-
-      // Hide users who are NOT in the Admin's assigned companies
       const myCompanies = currentUser?.assigned_companies || [];
       const userCompanies = user.assigned_companies || [];
-      
-      // Check intersection: Does user belong to any of my companies?
       const hasCommonCompany = userCompanies.some(id => myCompanies.includes(id));
-      
       if (!hasCommonCompany) return false;
     }
 
-    // 3. Apply Dropdown Filter
     if (companyFilter !== "all") {
       const userCompanies = user.assigned_companies || [];
       if (!userCompanies.includes(companyFilter)) return false;
@@ -286,16 +297,39 @@ const UserManagement = () => {
     return true;
   });
 
-  const handleAddUser = async () => {
-    if (!formData.email || !formData.password || !formData.name) {
+  const validateForm = () => {
+    if (!formData.email || (!selectedUser && !formData.password) || !formData.name) {
       toast.error("Please fill in all required fields");
-      return;
+      return false;
     }
 
-    if (formData.role !== "super_admin" && formData.assignedCompanies.length === 0) {
-      toast.error("Please assign at least one company");
-      return;
+    if (formData.role !== "super_admin") {
+      if (formData.assignedCompanies.length === 0) {
+        toast.error("Please assign at least one company");
+        return false;
+      }
+
+      // Check if every assigned company has at least one location assigned (unless role is admin who gets all)
+      if (formData.role !== 'admin') {
+        for (const companyId of formData.assignedCompanies) {
+          const hasLocation = formData.assignedLocations.some(locId => {
+            const loc = locations.find(l => l.id === locId);
+            return loc?.companyId === companyId;
+          });
+
+          if (!hasLocation) {
+            const cName = companies.find(c => c.id === companyId)?.name || "selected company";
+            toast.error(`Please select at least one location for ${cName}`);
+            return false;
+          }
+        }
+      }
     }
+    return true;
+  };
+
+  const handleAddUser = async () => {
+    if (!validateForm()) return;
 
     try {
       const tempSupabase = createClient(
@@ -360,16 +394,7 @@ const UserManagement = () => {
 
   const handleEditUser = async () => {
     if (!selectedUser) return;
-
-    if (!formData.name) {
-      toast.error("Name is required");
-      return;
-    }
-
-    if (formData.role !== "super_admin" && formData.assignedCompanies.length === 0) {
-      toast.error("Please assign at least one company");
-      return;
-    }
+    if (!validateForm()) return;
 
     try {
       const { error } = await supabase
@@ -424,6 +449,178 @@ const UserManagement = () => {
     }
   };
 
+  // Helper to render form content (shared between add and edit)
+  const renderFormContent = () => (
+    <div className="grid gap-4 py-4">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="user-name">Name *</Label>
+          <Input
+            id="user-name"
+            value={formData.name}
+            onChange={(e) =>
+              setFormData({ ...formData, name: e.target.value })
+            }
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="user-role">Role *</Label>
+          <Select
+            value={formData.role}
+            onValueChange={(value: any) => handleRoleChange(value)}
+          >
+            <SelectTrigger id="user-role">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {isSuperAdmin && <SelectItem value="super_admin">Super Admin</SelectItem>}
+              {isSuperAdmin && <SelectItem value="admin">Admin</SelectItem>}
+              <SelectItem value="auditor">Auditor</SelectItem>
+              <SelectItem value="client">Client</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="user-email">Email *</Label>
+          <Input
+            id="user-email"
+            type="email"
+            value={formData.email}
+            disabled={!!selectedUser} // Disable email edit for existing users if desired
+            onChange={(e) =>
+              setFormData({ ...formData, email: e.target.value })
+            }
+          />
+        </div>
+        {!selectedUser && (
+          <div className="space-y-2">
+            <Label htmlFor="user-password">Password *</Label>
+            <Input
+              id="user-password"
+              type="password"
+              value={formData.password}
+              onChange={(e) =>
+                setFormData({ ...formData, password: e.target.value })
+              }
+            />
+          </div>
+        )}
+      </div>
+
+      {formData.role !== "super_admin" && (
+        <div className="space-y-2">
+          <Label className="flex items-center gap-2">
+            <Building2 className="h-4 w-4" />
+            Assign Companies *
+          </Label>
+          <Card className="p-4 max-h-48 overflow-y-auto">
+            {loading && companies.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Loading companies...
+              </p>
+            ) : companies.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No companies available.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {companies.map((company) => (
+                  <div
+                    key={company.id}
+                    className="flex items-center space-x-2"
+                  >
+                    <Checkbox
+                      id={`company-${company.id}`}
+                      checked={formData.assignedCompanies.includes(
+                        company.id
+                      )}
+                      onCheckedChange={() => toggleCompany(company.id)}
+                    />
+                    <label
+                      htmlFor={`company-${company.id}`}
+                      className="text-sm cursor-pointer flex-1"
+                    >
+                      {company.name}
+                    </label>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {formData.role !== "super_admin" && (
+      <div className="space-y-2">
+        <Label className="flex items-center gap-2">
+          <MapPin className="h-4 w-4" />
+          Assign Locations {formData.role === 'admin' ? '(Auto-selected)' : '(Optional)'}
+        </Label>
+        
+        <Card className="p-4 max-h-60 overflow-y-auto">
+          {formData.assignedCompanies.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-20 text-muted-foreground text-sm">
+              <AlertCircle className="h-5 w-5 mb-2 opacity-50" />
+              Select a company above to view locations
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* ✅ Grouped Locations by Company for Better UX */}
+              {formData.assignedCompanies.map((companyId) => {
+                const companyName = companies.find(c => c.id === companyId)?.name || "Unknown Company";
+                const companyLocations = locations.filter(l => l.companyId === companyId);
+
+                return (
+                  <div key={companyId} className="border-b last:border-0 pb-3 last:pb-0">
+                    <h4 className="text-xs font-semibold text-muted-foreground uppercase mb-2 sticky top-0 bg-background/95 py-1">
+                      {companyName}
+                    </h4>
+                    
+                    {companyLocations.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic pl-2">No locations available</p>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-2 pl-2">
+                        {companyLocations.map((location) => (
+                          <div
+                            key={location.id}
+                            className="flex items-center space-x-2"
+                          >
+                            <Checkbox
+                              id={`location-${location.id}`}
+                              checked={formData.assignedLocations.includes(location.id)}
+                              disabled={formData.role === 'admin'}
+                              onCheckedChange={() => toggleLocation(location.id)}
+                            />
+                            <label
+                              htmlFor={`location-${location.id}`}
+                              className="text-sm cursor-pointer flex-1"
+                            >
+                              {location.name}
+                            </label>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+        
+        {formData.role === 'admin' && (
+          <p className="text-xs text-muted-foreground">
+            Admins are automatically assigned all locations for their companies.
+          </p>
+        )}
+      </div>
+      )}
+    </div>
+  );
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -437,7 +634,6 @@ const UserManagement = () => {
           </div>
           
           <div className="flex items-center gap-2 w-full sm:w-auto">
-            {/* ✅ Company Filter Dropdown */}
             <div className="w-full sm:w-[200px]">
               <Select value={companyFilter} onValueChange={setCompanyFilter}>
                 <SelectTrigger>
@@ -547,6 +743,7 @@ const UserManagement = () => {
           </CardContent>
         </Card>
 
+        {/* Add User Dialog */}
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
@@ -555,160 +752,9 @@ const UserManagement = () => {
                 Create a new user account with company and location assignments.
               </DialogDescription>
             </DialogHeader>
-
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="add-name">Name *</Label>
-                  <Input
-                    id="add-name"
-                    value={formData.name}
-                    onChange={(e) =>
-                      setFormData({ ...formData, name: e.target.value })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="add-role">Role *</Label>
-                  <Select
-                    value={formData.role}
-                    onValueChange={(value: any) => handleRoleChange(value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {isSuperAdmin && <SelectItem value="super_admin">Super Admin</SelectItem>}
-                      {isSuperAdmin && <SelectItem value="admin">Admin</SelectItem>}
-                      <SelectItem value="auditor">Auditor</SelectItem>
-                      <SelectItem value="client">Client</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="add-email">Email *</Label>
-                  <Input
-                    id="add-email"
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) =>
-                      setFormData({ ...formData, email: e.target.value })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="add-password">Password *</Label>
-                  <Input
-                    id="add-password"
-                    type="password"
-                    value={formData.password}
-                    onChange={(e) =>
-                      setFormData({ ...formData, password: e.target.value })
-                    }
-                  />
-                </div>
-              </div>
-
-              {formData.role !== "super_admin" && (
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-2">
-                    <Building2 className="h-4 w-4" />
-                    Assign Companies *
-                  </Label>
-                  <Card className="p-4 max-h-48 overflow-y-auto">
-                    {loading && companies.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">
-                        Loading companies...
-                      </p>
-                    ) : companies.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">
-                        No companies available.
-                      </p>
-                    ) : (
-                      <div className="space-y-2">
-                        {companies.map((company) => (
-                          <div
-                            key={company.id}
-                            className="flex items-center space-x-2"
-                          >
-                            <Checkbox
-                              id={`add-company-${company.id}`}
-                              checked={formData.assignedCompanies.includes(
-                                company.id
-                              )}
-                              onCheckedChange={() => toggleCompany(company.id)}
-                            />
-                            <label
-                              htmlFor={`add-company-${company.id}`}
-                              className="text-sm cursor-pointer flex-1"
-                            >
-                              {company.name}
-                            </label>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </Card>
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <Label className="flex items-center gap-2">
-                  <MapPin className="h-4 w-4" />
-                  Assign Locations {formData.role === 'admin' ? '(Auto-selected)' : '(Optional)'}
-                </Label>
-                <Card className="p-4 max-h-48 overflow-y-auto">
-                  {formData.role !== "super_admin" &&
-                  formData.assignedCompanies.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      Select at least one company to see its locations.
-                    </p>
-                  ) : filteredLocationsForForm.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      No locations available for the selected companies.
-                    </p>
-                  ) : (
-                    <div className="space-y-2">
-                      {filteredLocationsForForm.map((location) => (
-                        <div
-                          key={location.id}
-                          className="flex items-center space-x-2"
-                        >
-                          <Checkbox
-                            id={`add-location-${location.id}`}
-                            checked={formData.assignedLocations.includes(
-                              location.id
-                            )}
-                            disabled={formData.role === 'admin'}
-                            onCheckedChange={() => toggleLocation(location.id)}
-                          />
-                          <label
-                            htmlFor={`add-location-${location.id}`}
-                            className="text-sm cursor-pointer flex-1"
-                          >
-                            {location.name}
-                          </label>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </Card>
-                {formData.role === 'admin' && (
-                  <p className="text-xs text-muted-foreground">
-                    Admins are automatically assigned all locations for their companies.
-                  </p>
-                )}
-              </div>
-            </div>
-
+            {renderFormContent()}
             <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => setIsAddDialogOpen(false)}
-              >
+              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
                 Cancel
               </Button>
               <Button onClick={handleAddUser}>
@@ -719,6 +765,7 @@ const UserManagement = () => {
           </DialogContent>
         </Dialog>
 
+        {/* Edit User Dialog */}
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
           <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
@@ -727,135 +774,9 @@ const UserManagement = () => {
                 Update user information and assignments.
               </DialogDescription>
             </DialogHeader>
-
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-name">Name *</Label>
-                  <Input
-                    id="edit-name"
-                    value={formData.name}
-                    onChange={(e) =>
-                      setFormData({ ...formData, name: e.target.value })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-role">Role *</Label>
-                  <Select
-                    value={formData.role}
-                    onValueChange={(value: any) => handleRoleChange(value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {isSuperAdmin && <SelectItem value="super_admin">Super Admin</SelectItem>}
-                      {isSuperAdmin && <SelectItem value="admin">Admin</SelectItem>}
-                      <SelectItem value="auditor">Auditor</SelectItem>
-                      <SelectItem value="client">Client</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {formData.role !== "super_admin" && (
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-2">
-                    <Building2 className="h-4 w-4" />
-                    Assign Companies *
-                  </Label>
-                  <Card className="p-4 max-h-48 overflow-y-auto">
-                    {loading && companies.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">
-                        Loading companies...
-                      </p>
-                    ) : companies.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">
-                        No companies available.
-                      </p>
-                    ) : (
-                      <div className="space-y-2">
-                        {companies.map((company) => (
-                          <div
-                            key={company.id}
-                            className="flex items-center space-x-2"
-                          >
-                            <Checkbox
-                              id={`edit-company-${company.id}`}
-                              checked={formData.assignedCompanies.includes(
-                                company.id
-                              )}
-                              onCheckedChange={() => toggleCompany(company.id)}
-                            />
-                            <label
-                              htmlFor={`edit-company-${company.id}`}
-                              className="text-sm cursor-pointer flex-1"
-                            >
-                              {company.name}
-                            </label>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </Card>
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <Label className="flex items-center gap-2">
-                  <MapPin className="h-4 w-4" />
-                  Assign Locations {formData.role === 'admin' ? '(Auto-selected)' : '(Optional)'}
-                </Label>
-                <Card className="p-4 max-h-48 overflow-y-auto">
-                  {formData.role !== "super_admin" &&
-                  formData.assignedCompanies.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      Select at least one company to see its locations.
-                    </p>
-                  ) : filteredLocationsForForm.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      No locations available for the selected companies.
-                    </p>
-                  ) : (
-                    <div className="space-y-2">
-                      {filteredLocationsForForm.map((location) => (
-                        <div
-                          key={location.id}
-                          className="flex items-center space-x-2"
-                        >
-                          <Checkbox
-                            id={`edit-location-${location.id}`}
-                            checked={formData.assignedLocations.includes(
-                              location.id
-                            )}
-                            disabled={formData.role === 'admin'}
-                            onCheckedChange={() => toggleLocation(location.id)}
-                          />
-                          <label
-                            htmlFor={`edit-location-${location.id}`}
-                            className="text-sm cursor-pointer flex-1"
-                          >
-                            {location.name}
-                          </label>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </Card>
-                {formData.role === 'admin' && (
-                  <p className="text-xs text-muted-foreground">
-                    Admins are automatically assigned all locations for their companies.
-                  </p>
-                )}
-              </div>
-            </div>
-
+            {renderFormContent()}
             <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => setIsEditDialogOpen(false)}
-              >
+              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
                 Cancel
               </Button>
               <Button onClick={handleEditUser}>
@@ -866,6 +787,7 @@ const UserManagement = () => {
           </DialogContent>
         </Dialog>
 
+        {/* Delete Confirmation Dialog */}
         <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
           <DialogContent>
             <DialogHeader>
@@ -876,10 +798,7 @@ const UserManagement = () => {
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => setIsDeleteDialogOpen(false)}
-              >
+              <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
                 Cancel
               </Button>
               <Button variant="destructive" onClick={handleDeleteUser}>

@@ -1,9 +1,6 @@
-
-// src/components/layout/Sidebar.tsx
 import { useMemo, useState, useEffect, useCallback } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useUserAccess } from "@/hooks/useUserAccess";
-import logo from "../../../public/logo.png"
 import {
   BarChart3,
   FileSpreadsheet,
@@ -23,7 +20,7 @@ import { useUser } from "@/context/UserContext";
 import { Button } from "@/components/ui/button";
 import { useCompany } from "@/context/CompanyContext";
 import { supabase } from "@/integrations/supabase/client";
-
+import logo from "../../../public/logo.png"; 
 
 const companyNameCache: Record<string, string> = {};
 
@@ -43,14 +40,12 @@ export function Sidebar({
     null
   );
 
- 
   const fetchCompanyName = useCallback(async () => {
     if (!selectedCompanyId) {
       setCurrentCompanyName(null);
       return;
     }
 
-   
     const cached = companyNameCache[selectedCompanyId];
     if (cached) {
       setCurrentCompanyName(cached);
@@ -111,7 +106,6 @@ export function Sidebar({
       );
     }
     
-    
     if (userRole === "super_admin") {
       nav.push({ name: "Company", href: "/add-company", icon: Building2 });
     }
@@ -127,38 +121,41 @@ export function Sidebar({
   };
 
   return (
-    <aside className="flex h-full w-64 flex-col overflow-y-auto border-r border-r-accent bg-card px-5 py-8">
+    <aside className="flex h-full w-64 flex-col overflow-y-auto border-r border-slate-200 bg-white px-5 py-8">
       <div className="flex flex-col h-full">
         <div>
-          <div className="space-y-1">
-            <h2 className="mb-2 px-4 text-lg font-semibold tracking-tight">
-             <div className="relative"> <img src={logo} alt="Software Logo" className="h-10 w-auto relative -left-5"/></div>
-            </h2>
-            <div className="bg-accent/50 rounded-lg p-2 mb-4">
-              <p className="text-xs text-muted-foreground mb-1">
-                Logged in as:
-              </p>
-              <p className="font-medium text-sm truncate">{currentUser?.name}</p>
-              <p className="text-xs text-muted-foreground">
-                {userRoleDisplay()}
-              </p>
-
+          <div className="space-y-4">
+            <div className=" flex items-center gap-2">
+              <div className="relative">
+                 <img src={logo} alt="Software Logo" className="h-auto w-43" />
+              </div>
              
-              {currentCompanyName && (
-                <p className="text-xs text-muted-foreground mt-1 truncate">
-                  Company:{" "}
-                  <span className="font-medium">{currentCompanyName}</span>
+            </div>
+
+            <div className="bg-white rounded-lg p-2.5 shadow-sm ring-1 ring-slate-200 mx-1">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">
+                  Logged in as
                 </p>
+                <div className="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-700">
+                  {userRoleDisplay()}
+                </div>
+              </div>
+
+              {currentCompanyName && (
+                <div className="mt-1.5 pt-1.5 border-t border-slate-100">
+                  <p className="text-xs text-slate-500 truncate">
+                    Company: <span className="font-medium text-slate-700">{currentCompanyName}</span>
+                  </p>
+                </div>
               )}
 
               {userRole !== "super_admin" && accessibleLocations.length > 0 && (
-                <div className="mt-1 pt-1 border-t border-accent/50">
-                  <p className="text-xs text-muted-foreground mb-1">
-                    Assigned locations:
-                  </p>
-                  <div className="max-h-16 overflow-y-auto">
+                <div className="mt-1.5">
+                  <p className="text-[10px] text-slate-500 mb-1">Assigned locations:</p>
+                  <div className="max-h-20 overflow-y-auto pr-1 space-y-1">
                     {accessibleLocations.map((loc) => (
-                      <div key={loc.id} className="text-xs py-0.5 truncate">
+                      <div key={loc.id} className="text-[10px] py-0.5 px-2 bg-slate-50 rounded text-slate-600 truncate">
                         {loc.name}
                       </div>
                     ))}
@@ -168,7 +165,7 @@ export function Sidebar({
             </div>
           </div>
 
-          <nav className="flex flex-col space-y-1">
+          <nav className="flex flex-col space-y-1 mt-6">
             {navigation.map((item) => {
               const isActive = location.pathname === item.href;
               return (
@@ -176,13 +173,17 @@ export function Sidebar({
                   key={item.name}
                   to={item.href}
                   onClick={handleLinkClick}
-                  className={`flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                  className={`group flex items-center rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
                     isActive
-                      ? "bg-accent text-accent-foreground"
-                      : "text-muted-foreground hover:text-primary hover:bg-accent/50"
+                      ? "bg-indigo-50 text-indigo-700 shadow-sm"
+                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                   }`}
                 >
-                  <item.icon className="mr-3 h-4 w-4" />
+                  <item.icon
+                    className={`mr-3 h-5 w-5 transition-colors ${
+                      isActive ? "text-indigo-600" : "text-slate-400 group-hover:text-slate-600"
+                    }`}
+                  />
                   <span>{item.name}</span>
                 </Link>
               );
@@ -190,18 +191,18 @@ export function Sidebar({
           </nav>
         </div>
 
-        <div className="mt-auto pt-4">
+        <div className="mt-auto pt-6 border-t border-slate-100">
           <Button
-            variant="outline"
-            className="w-full justify-start"
+            variant="ghost"
+            className="w-full justify-start text-slate-600 hover:text-red-600 hover:bg-red-50 transition-colors"
             onClick={handleLogout}
           >
-            <LogOut className="mr-3 h-4 w-4" />
+            <LogOut className="mr-3 h-5 w-5" />
             <span>Log out</span>
           </Button>
           <div className="mt-4 px-2 text-center">
-            <p className="text-xs text-muted-foreground">
-              &copy; {new Date().getFullYear()} Inventory Audit System
+            <p className="text-xs text-slate-400 font-medium">
+              &copy; {new Date().getFullYear()} StockCheck360
             </p>
           </div>
         </div>

@@ -17,11 +17,9 @@ export const RecentActivity = ({ selectedLocation }: RecentActivityProps) => {
   const { accessibleLocations } = useUserAccess();
   const { selectedCompanyId } = useCompany();
 
- 
   const userAccessibleLocations = accessibleLocations();
   const accessibleLocationNames = userAccessibleLocations.map((loc) => loc.name);
 
-  
   const locationByName = useMemo(() => {
     const map = new Map<string, (typeof locations)[number]>();
     locations.forEach((loc) => {
@@ -30,29 +28,23 @@ export const RecentActivity = ({ selectedLocation }: RecentActivityProps) => {
     return map;
   }, [locations]);
 
- 
   const filteredItems = auditedItems.filter((item) => {
     const itemLocation = locationByName.get(item.location);
 
-   
     if (!itemLocation) return false;
 
-    
     if (selectedCompanyId && itemLocation.companyId !== selectedCompanyId) {
       return false;
     }
 
-    
     if (currentUser?.role === "admin") {
       if (selectedLocation && selectedLocation !== "all") {
         const locationObj = locations.find((loc) => loc.id === selectedLocation);
         return item.location === locationObj?.name;
       }
-      
       return true;
     }
 
-   
     if (selectedLocation && selectedLocation !== "all") {
       const locationObj = locations.find((loc) => loc.id === selectedLocation);
       return (
@@ -61,11 +53,9 @@ export const RecentActivity = ({ selectedLocation }: RecentActivityProps) => {
       );
     }
 
-    
     return accessibleLocationNames.includes(item.location);
   });
 
-  
   const recentItems = [...filteredItems]
     .sort((a, b) => {
       if (!a.lastAudited || !b.lastAudited) return 0;
@@ -77,9 +67,9 @@ export const RecentActivity = ({ selectedLocation }: RecentActivityProps) => {
 
   if (recentItems.length === 0) {
     return (
-      <Card>
+      <Card className="shadow-sm border-gray-200">
         <CardHeader>
-          <CardTitle>Recent Activity</CardTitle>
+          <CardTitle className="text-gray-900">Recent Activity</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="text-center text-muted-foreground py-8">
@@ -93,9 +83,9 @@ export const RecentActivity = ({ selectedLocation }: RecentActivityProps) => {
   }
 
   return (
-    <Card>
+    <Card className="shadow-sm border-gray-200">
       <CardHeader>
-        <CardTitle className="flex items-center justify-between">
+        <CardTitle className="flex items-center justify-between text-gray-900">
           <span>Recent Activity</span>
           {currentUser?.role !== "admin" && userAccessibleLocations.length > 0 && (
             <span className="text-xs font-normal text-muted-foreground">
@@ -109,7 +99,7 @@ export const RecentActivity = ({ selectedLocation }: RecentActivityProps) => {
           {recentItems.map((item, index) => (
             <div
               key={`${item.id}-${item.lastAudited}-${index}`}
-              className="flex items-start gap-3 pb-3 border-b last:border-0 last:pb-0"
+              className="flex items-start gap-3 pb-3 border-b border-gray-100 last:border-0 last:pb-0"
             >
               <div className="mt-1">
                 {item.status === "matched" ? (
@@ -124,8 +114,8 @@ export const RecentActivity = ({ selectedLocation }: RecentActivityProps) => {
               </div>
 
               <div className="flex-1 min-w-0">
-                <p className="font-medium truncate">{item.name}</p>
-                <p className="text-sm text-muted-foreground">
+                <p className="font-medium truncate text-gray-900">{item.name}</p>
+                <p className="text-sm text-gray-500">
                   {item.sku} - {item.location}
                 </p>
               </div>
@@ -140,7 +130,7 @@ export const RecentActivity = ({ selectedLocation }: RecentActivityProps) => {
                 >
                   {item.physicalQuantity} / {item.systemQuantity}
                 </p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-gray-400">
                   {item.lastAudited &&
                     format(new Date(item.lastAudited), "dd MMM, HH:mm")}
                 </p>
@@ -148,7 +138,7 @@ export const RecentActivity = ({ selectedLocation }: RecentActivityProps) => {
             </div>
           ))}
         </div>
-      </CardContent>
+      </CardContent>+
     </Card>
   );
 };

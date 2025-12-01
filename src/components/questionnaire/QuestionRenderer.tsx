@@ -47,7 +47,7 @@ export const QuestionRenderer = ({
   return (
     <div className="pt-1">
       {isError && (
-        <div className="flex items-center gap-2 text-sm text-red-600 mb-2">
+        <div className="flex items-center gap-2 text-sm text-red-600 mb-2 font-medium">
           <AlertCircle className="h-4 w-4" />
           This question requires an answer
         </div>
@@ -55,18 +55,17 @@ export const QuestionRenderer = ({
 
       {question.type === "text" && (
         isDisabled ? (
-           
            <Input 
              value={(answer as string) || ""}
              disabled
-             className="bg-muted text-muted-foreground opacity-100 font-medium"
+             className="bg-gray-100 text-gray-600 border-gray-200 opacity-100 font-medium"
            />
         ) : (
           <Textarea
             value={(answer as string) || ""}
             onChange={(e) => handleTextChange(e.target.value)}
             placeholder="Enter your answer..."
-            className={isError ? "border-red-500" : ""}
+            className={`${isError ? "border-red-500 focus-visible:ring-red-500" : "border-gray-200 focus-visible:ring-indigo-600"} min-h-[80px]`}
             disabled={isDisabled}
           />
         )
@@ -76,20 +75,27 @@ export const QuestionRenderer = ({
         <RadioGroup
           value={(answer as string) || ""}
           onValueChange={handleSingleSelectChange}
-          className="space-y-2"
+          className="space-y-3"
           disabled={isDisabled}
         >
           {question.options.map((option) => (
             <div key={option.id} className="flex items-center space-x-2">
-              <RadioGroupItem value={option.id} id={`${question.id}-${option.id}`} disabled={isDisabled} />
-              <Label htmlFor={`${question.id}-${option.id}`} className={isDisabled ? "opacity-70" : ""}>{option.text}</Label>
+              <RadioGroupItem 
+                value={option.id} 
+                id={`${question.id}-${option.id}`} 
+                disabled={isDisabled}
+                className="border-gray-300 text-indigo-600 focus-visible:ring-indigo-600 data-[state=checked]:border-indigo-600 data-[state=checked]:text-indigo-600"
+              />
+              <Label htmlFor={`${question.id}-${option.id}`} className={`font-normal ${isDisabled ? "opacity-70" : "text-gray-700"}`}>
+                {option.text}
+              </Label>
             </div>
           ))}
         </RadioGroup>
       )}
 
       {question.type === "multi_select" && question.options && (
-        <div className="space-y-2">
+        <div className="space-y-3">
           {question.options.map((option) => {
             const isChecked = Array.isArray(answer) &&
               (answer as string[]).includes(option.id);
@@ -103,8 +109,11 @@ export const QuestionRenderer = ({
                     handleMultiSelectChange(option.id, checked as boolean)
                   }
                   disabled={isDisabled}
+                  className="border-gray-300 data-[state=checked]:bg-indigo-600 data-[state=checked]:border-indigo-600 focus-visible:ring-indigo-600"
                 />
-                <Label htmlFor={`${question.id}-${option.id}`} className={isDisabled ? "opacity-70" : ""}>{option.text}</Label>
+                <Label htmlFor={`${question.id}-${option.id}`} className={`font-normal ${isDisabled ? "opacity-70" : "text-gray-700"}`}>
+                  {option.text}
+                </Label>
               </div>
             );
           })}
@@ -115,16 +124,26 @@ export const QuestionRenderer = ({
         <RadioGroup
           value={(answer as string) || ""}
           onValueChange={handleYesNoChange}
-          className="flex space-x-4"
+          className="flex space-x-6"
           disabled={isDisabled}
         >
           <div className="flex items-center space-x-2">
-            <RadioGroupItem value="yes" id={`${question.id}-yes`} disabled={isDisabled} />
-            <Label htmlFor={`${question.id}-yes`} className={isDisabled ? "opacity-70" : ""}>Yes</Label>
+            <RadioGroupItem 
+              value="yes" 
+              id={`${question.id}-yes`} 
+              disabled={isDisabled}
+              className="border-gray-300 text-indigo-600 focus-visible:ring-indigo-600 data-[state=checked]:border-indigo-600 data-[state=checked]:text-indigo-600"
+            />
+            <Label htmlFor={`${question.id}-yes`} className={isDisabled ? "opacity-70" : "text-gray-700"}>Yes</Label>
           </div>
           <div className="flex items-center space-x-2">
-            <RadioGroupItem value="no" id={`${question.id}-no`} disabled={isDisabled} />
-            <Label htmlFor={`${question.id}-no`} className={isDisabled ? "opacity-70" : ""}>No</Label>
+            <RadioGroupItem 
+              value="no" 
+              id={`${question.id}-no`} 
+              disabled={isDisabled} 
+              className="border-gray-300 text-indigo-600 focus-visible:ring-indigo-600 data-[state=checked]:border-indigo-600 data-[state=checked]:text-indigo-600"
+            />
+            <Label htmlFor={`${question.id}-no`} className={isDisabled ? "opacity-70" : "text-gray-700"}>No</Label>
           </div>
         </RadioGroup>
       )}

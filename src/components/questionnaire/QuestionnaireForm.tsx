@@ -154,11 +154,11 @@ export const QuestionnaireForm = ({ locationId, locationName, onComplete }: Ques
 
   if (questions.length === 0) {
     return (
-      <Card>
+      <Card className="shadow-sm border-gray-200">
         <CardContent className="p-6">
           <div className="text-center space-y-1">
-            <p>No questions have been created for this audit.</p>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-gray-900 font-medium">No questions have been created for this audit.</p>
+            <p className="text-sm text-gray-500">
               Ask an administrator to add questions to the questionnaire.
             </p>
           </div>
@@ -168,25 +168,29 @@ export const QuestionnaireForm = ({ locationId, locationName, onComplete }: Ques
   }
 
   return (
-    <Card className="w-full">
-      <CardHeader>
-        <CardTitle className="flex items-center">
-          <ClipboardList className="h-5 w-5 mr-2" />
-          Audit Questionnaire {locationName && `for ${locationName}`}
+    <Card className="w-full shadow-sm border-gray-200">
+      <CardHeader className="border-b border-gray-100 bg-gray-50/50">
+        <CardTitle className="flex items-center text-gray-900">
+          <ClipboardList className="h-5 w-5 mr-2 text-indigo-600" />
+          Audit Questionnaire {locationName && <span className="text-gray-500 font-normal ml-1">for {locationName}</span>}
         </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="pt-6">
         <div className="space-y-8">
           {questions.map((question) => {
             const isError = showErrors && question.required && !isQuestionAnswered(question);
             const isAutoFilled = getAutoFillType(question.text) !== null;
             
             return (
-              <div key={question.id} className={`space-y-2 ${isError ? 'p-2 border border-red-200 rounded-md bg-red-50' : ''}`}>
+              <div key={question.id} className={`space-y-2 rounded-lg p-3 transition-colors ${isError ? 'border border-red-200 bg-red-50' : 'hover:bg-gray-50 border border-transparent'}`}>
                 <div className="flex items-center gap-1">
-                  <span className="font-medium">{question.text}</span>
+                  <span className="font-medium text-gray-900">{question.text}</span>
                   {question.required && <span className="text-red-500">*</span>}
-                  {isAutoFilled && <span className="text-xs text-muted-foreground ml-2">(Auto-filled)</span>}
+                  {isAutoFilled && (
+                    <span className="text-xs font-medium text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded ml-2 border border-indigo-100">
+                      Auto-filled
+                    </span>
+                  )}
                 </div>
                 
                 <QuestionRenderer 
@@ -201,8 +205,8 @@ export const QuestionnaireForm = ({ locationId, locationName, onComplete }: Ques
           })}
         </div>
       </CardContent>
-      <CardFooter className="border-t p-6">
-        <Button onClick={handleSubmit} className="ml-auto">
+      <CardFooter className="border-t border-gray-100 p-6 bg-gray-50/50">
+        <Button onClick={handleSubmit} className="ml-auto bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-all">
           <Save className="h-4 w-4 mr-2" />
           Save Answers
         </Button>

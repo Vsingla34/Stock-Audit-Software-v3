@@ -13,41 +13,38 @@ import { LocationFilterDropdown } from "@/components/LocationFilterDropdown";
 const Index = () => {
   const { canUploadData, canPerformAudits } = useUserAccess();
   const { currentUser } = useUser();
-  
-  
-  const { 
+
+  const {
     selectedLocation,
-    setSelectedLocation, 
+    setSelectedLocation,
     availableLocations,
-    shouldShowLocationFilter 
+    shouldShowLocationFilter
   } = useLocationFilter();
-  
+
   return (
     <AppLayout>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-         
+          <h1 className="text-3xl font-bold tracking-tight text-gray-900">Dashboard</h1>
         </div>
 
         <InventoryOverview />
 
         <div className="grid gap-6 md:grid-cols-2">
-
           <RecentActivity selectedLocation={selectedLocation} />
           
           <div className="space-y-4">
-            <h2 className="text-lg font-medium">Quick Actions</h2>
+            <h2 className="text-lg font-medium text-gray-900">Quick Actions</h2>
             <div className="grid gap-4 grid-cols-2">
-              <Button asChild className="h-24 flex flex-col">
+              <Button asChild className="h-24 flex flex-col bg-indigo-600 hover:bg-indigo-700 text-white border-none shadow-md transition-all">
                 <Link to="/scanner">
                   <Barcode className="h-6 w-6 mb-2" />
                   <div>Scan Items</div>
                 </Link>
               </Button>
-              <Button asChild variant="secondary" className="h-24 flex flex-col">
+              <Button asChild variant="outline" className="h-24 flex flex-col bg-white hover:bg-indigo-50 border-gray-200 text-gray-700 hover:text-indigo-700 shadow-sm transition-all">
                 <Link to="/search">
-                  <Search className="h-6 w-6 mb-2" />
+                  <Search className="h-6 w-6 mb-2 text-indigo-600" />
                   <div>Search Inventory</div>
                 </Link>
               </Button>
@@ -55,17 +52,17 @@ const Index = () => {
             
             <div className="grid gap-4 grid-cols-2 mt-2">
               {canUploadData() && (
-                <Button asChild variant="outline" className="h-24 flex flex-col">
+                <Button asChild variant="outline" className="h-24 flex flex-col bg-white hover:bg-indigo-50 border-gray-200 text-gray-700 hover:text-indigo-700 shadow-sm transition-all">
                   <Link to="/upload">
-                    <Upload className="h-6 w-6 mb-2" />
+                    <Upload className="h-6 w-6 mb-2 text-indigo-600" />
                     <div>Upload Data</div>
                   </Link>
                 </Button>
               )}
               {canPerformAudits() && (
-                <Button asChild variant="outline" className="h-24 flex flex-col">
+                <Button asChild variant="outline" className="h-24 flex flex-col bg-white hover:bg-indigo-50 border-gray-200 text-gray-700 hover:text-indigo-700 shadow-sm transition-all">
                   <Link to="/questionnaire">
-                    <ClipboardList className="h-6 w-6 mb-2" />
+                    <ClipboardList className="h-6 w-6 mb-2 text-indigo-600" />
                     <div>Questionnaires</div>
                   </Link>
                 </Button>
@@ -76,8 +73,7 @@ const Index = () => {
 
         <div>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-medium">Inventory Status</h2>
-            
+            <h2 className="text-lg font-medium text-gray-900">Inventory Status</h2>
             
             {shouldShowLocationFilter && (
               <LocationFilterDropdown
@@ -88,7 +84,6 @@ const Index = () => {
               />
             )}
           </div>
-          
           
           <InventoryTable selectedLocation={selectedLocation} />
         </div>

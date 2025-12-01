@@ -106,25 +106,25 @@ export const QuestionForm = ({ question, onSave, onCancel }: QuestionFormProps) 
   return (
     <Card className="w-full border-0 shadow-none">
       <CardHeader className="px-0 pt-0">
-        <CardTitle>{question ? "Edit Question" : "Add New Question"}</CardTitle>
+        <CardTitle className="text-gray-900">{question ? "Edit Question" : "Add New Question"}</CardTitle>
       </CardHeader>
       <CardContent className="px-0">
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-2">
-            <Label htmlFor="question-text">Question Text</Label>
+            <Label htmlFor="question-text" className="text-gray-700">Question Text</Label>
             <Textarea
               id="question-text"
               placeholder="Enter your question here..."
               value={text}
               onChange={e => setText(e.target.value)}
-              className="min-h-20"
+              className="min-h-20 focus-visible:ring-indigo-600 border-gray-200"
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="question-type">Question Type</Label>
+            <Label htmlFor="question-type" className="text-gray-700">Question Type</Label>
             <Select value={type} onValueChange={(value) => setType(value as QuestionType)}>
-              <SelectTrigger>
+              <SelectTrigger className="focus:ring-indigo-600 border-gray-200">
                 <SelectValue placeholder="Select question type" />
               </SelectTrigger>
               <SelectContent>
@@ -137,17 +137,18 @@ export const QuestionForm = ({ question, onSave, onCancel }: QuestionFormProps) 
           </div>
 
           <div className="flex items-center gap-2">
-            <Label htmlFor="required">Required Question</Label>
+            <Label htmlFor="required" className="text-gray-700">Required Question</Label>
             <Switch
               id="required"
               checked={required}
               onCheckedChange={setRequired}
+              className="data-[state=checked]:bg-indigo-600"
             />
           </div>
 
           {(type === "single_select" || type === "multi_select") && (
             <div className="space-y-4">
-              <Label>Answer Options</Label>
+              <Label className="text-gray-700">Answer Options</Label>
               <div className="space-y-3">
                 {options.map((option, index) => (
                   <div key={option.id} className="flex items-center gap-2">
@@ -155,13 +156,14 @@ export const QuestionForm = ({ question, onSave, onCancel }: QuestionFormProps) 
                       placeholder={`Option ${index + 1}`}
                       value={option.text}
                       onChange={e => handleOptionChange(option.id, e.target.value)}
-                      className="flex-1"
+                      className="flex-1 focus-visible:ring-indigo-600 border-gray-200"
                     />
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon"
                       onClick={() => handleRemoveOption(option.id)}
+                      className="hover:text-red-600 hover:bg-red-50"
                     >
                       <X className="h-4 w-4" />
                     </Button>
@@ -171,7 +173,7 @@ export const QuestionForm = ({ question, onSave, onCancel }: QuestionFormProps) 
                   type="button"
                   variant="outline"
                   onClick={handleAddOption}
-                  className="w-full"
+                  className="w-full border-dashed border-gray-300 text-gray-500 hover:text-indigo-600 hover:border-indigo-600 hover:bg-indigo-50"
                 >
                   <Plus className="h-4 w-4 mr-2" /> Add Option
                 </Button>
@@ -181,10 +183,10 @@ export const QuestionForm = ({ question, onSave, onCancel }: QuestionFormProps) 
         </form>
       </CardContent>
       <CardFooter className="flex justify-end gap-2 px-0">
-        <Button variant="outline" onClick={onCancel}>
+        <Button variant="outline" onClick={onCancel} className="border-gray-200 hover:bg-gray-50 text-gray-700">
           Cancel
         </Button>
-        <Button onClick={handleSubmit}>
+        <Button onClick={handleSubmit} className="bg-indigo-600 hover:bg-indigo-700 text-white">
           <Save className="h-4 w-4 mr-2" />
           {question ? "Update" : "Save"}
         </Button>

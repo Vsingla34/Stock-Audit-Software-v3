@@ -156,9 +156,11 @@ export const QuestionnaireResponses = ({
 
       
       doc.setFontSize(18);
+      doc.setTextColor(40);
       doc.text(`Audit Questionnaire Responses: ${locationName}`, 14, 22);
 
       doc.setFontSize(12);
+      doc.setTextColor(100);
       doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 30);
 
       
@@ -193,12 +195,12 @@ export const QuestionnaireResponses = ({
         startY: 40, 
         theme: "grid",
         styles: {
-          cellPadding: 2,
+          cellPadding: 3,
           fontSize: 10,
           valign: 'middle', 
         },
         headStyles: {
-          fillColor: [41, 128, 185], 
+          fillColor: [79, 70, 229], // Updated to Indigo-600
           textColor: 255,
           fontStyle: 'bold',
         },
@@ -210,9 +212,10 @@ export const QuestionnaireResponses = ({
       });
 
       
-     
+      
       doc.addPage();
       doc.setFontSize(12);
+      doc.setTextColor(0);
       doc.text("Approval Sign-off", 14, 20);
 
       doc.setFontSize(11);
@@ -244,43 +247,48 @@ export const QuestionnaireResponses = ({
   );
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <FileText className="h-5 w-5" />
+    <Card className="shadow-sm border-gray-200">
+      <CardHeader className="bg-gray-50/50 border-b border-gray-100">
+        <CardTitle className="flex items-center gap-2 text-gray-900">
+          <FileText className="h-5 w-5 text-indigo-600" />
           Questionnaire Responses for {locationName}
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="space-y-6 pt-6">
         {questions.length > 0 ? (
           <div className="space-y-6">
             
             <div className="flex justify-end gap-2">
-              <Button onClick={generateExcel} variant="outline" className="border-green-600 text-green-700 hover:bg-green-50">
+              <Button 
+                onClick={generateExcel} 
+                variant="outline" 
+                className="bg-white hover:bg-green-50 text-green-700 border-green-200 shadow-sm"
+              >
                 <FileSpreadsheet className="h-4 w-4 mr-2" />
                 Export Excel
               </Button>
-              <Button onClick={generatePDF}>
+              <Button 
+                onClick={generatePDF}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
+              >
                 <Download className="h-4 w-4 mr-2" />
                 Export PDF
               </Button>
             </div>
 
-            <div className="space-y-6">
+            <div className="space-y-4">
               {questions.map((question) => {
                 const answer = filteredAnswers.find(
                   (a) => a.questionId === question.id
                 );
                 
-               
-                
                 return (
                   <div
                     key={question.id}
-                    className="border rounded-md p-4 space-y-2 bg-slate-50"
+                    className="border border-gray-200 rounded-lg p-4 space-y-2 bg-gray-50/30 hover:bg-gray-50 transition-colors"
                   >
-                    <div className="font-medium">{question.text}</div>
-                    <div className="text-sm text-muted-foreground mb-2">
+                    <div className="font-medium text-gray-900">{question.text}</div>
+                    <div className="text-xs font-medium text-indigo-600 uppercase tracking-wider mb-2">
                       {question.type === "text"
                         ? "Text response"
                         : question.type === "single_select"
@@ -290,13 +298,13 @@ export const QuestionnaireResponses = ({
                         : "Yes/No question"}
                     </div>
 
-                    <div className="bg-white p-3 rounded border">
-                      <p>{answer ? formatAnswerForDisplay(answer) : "-"}</p>
+                    <div className="bg-white p-3 rounded-md border border-gray-200 shadow-sm">
+                      <p className="text-gray-700">{answer ? formatAnswerForDisplay(answer) : "-"}</p>
                     </div>
 
                     {answer && (
-                      <div className="text-xs text-muted-foreground">
-                        {answer.answeredBy && <>Answered by {answer.answeredBy} on </>}
+                      <div className="text-xs text-gray-500 mt-2">
+                        {answer.answeredBy && <>Answered by <span className="font-medium">{answer.answeredBy}</span> on </>}
                         {new Date(answer.answeredOn).toLocaleString()}
                       </div>
                     )}
@@ -306,8 +314,8 @@ export const QuestionnaireResponses = ({
             </div>
           </div>
         ) : (
-          <Alert>
-            <AlertCircle className="h-4 w-4" />
+          <Alert className="bg-indigo-50 border-indigo-100 text-indigo-800">
+            <AlertCircle className="h-4 w-4 text-indigo-600" />
             <AlertTitle>No responses found</AlertTitle>
             <AlertDescription>
               There are no questionnaire responses for this location yet.

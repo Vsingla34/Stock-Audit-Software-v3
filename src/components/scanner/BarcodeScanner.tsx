@@ -10,7 +10,7 @@ import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { useUser } from "@/context/UserContext"; 
 import { useUserAccess } from "@/hooks/useUserAccess";
 import { LocationAuditSummary } from "@/components/locations/LocationAuditSummary";
-import { RecentActivity } from "@/components/dashboard/RecentActivity"; // ✅ Import RecentActivity
+import { RecentActivity } from "@/components/dashboard/RecentActivity";
 
 export const BarcodeScanner = () => {
     const [isScanning, setIsScanning] = useState(false);
@@ -25,15 +25,15 @@ export const BarcodeScanner = () => {
     const { currentUser } = useUser();
     const userAccessibleLocations = accessibleLocations();
     
-    const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
-    const hardwareScannerInputRef = useRef<HTMLInputElement>(null);
+    const html5QrCodeRef = useRef(null);
+    const hardwareScannerInputRef = useRef(null);
     const scannerElementId = "barcode-scanner-element";
 
     const scannedBufferRef = useRef('');
     const lastKeypressTime = useRef(0);
 
     // Handle item scanning with auditor tracking
-    const handleItemScan = async (barcode: string, locationId: string): Promise<boolean> => {
+    const handleItemScan = async (barcode, locationId) => {
         console.log("=== handleItemScan called ===");
         console.log("Barcode:", barcode);
         console.log("Location ID:", locationId);
@@ -51,7 +51,7 @@ export const BarcodeScanner = () => {
             
             if (!locationId || locationId === "") {
                  toast.error("Location Required", {
-                   description: "Please select a location from the dropdown before scanning.",
+                    description: "Please select a location from the dropdown before scanning.",
                  });
                  return false; 
             }
@@ -61,7 +61,7 @@ export const BarcodeScanner = () => {
             
             if (locationName === '') {
                  toast.error("Invalid Location", {
-                   description: "The selected location ID could not be matched to a location name.",
+                    description: "The selected location ID could not be matched to a location name.",
                  });
                  return false;
             }
@@ -96,7 +96,7 @@ export const BarcodeScanner = () => {
             const currentAuditorQuantity = currentAuditorEntry?.quantityFound || 0;
             const newAuditorQuantity = currentAuditorQuantity + 1;
 
-            const itemToUpdate: InventoryItem = {
+            const itemToUpdate = {
                 id: masterItem.id,
                 sku: masterItem.sku,
                 name: masterItem.name,
@@ -135,7 +135,7 @@ export const BarcodeScanner = () => {
             }
 
             return true;
-        } catch (error: any) {
+        } catch (error) {
             console.error("Scanning failed due to unhandled error:", error);
             toast.error("Scanning Error", {
                 description: error.message || "Failed to process the scanned item",
@@ -146,7 +146,7 @@ export const BarcodeScanner = () => {
 
     // Hardware scanner logic
     useEffect(() => {
-        const handleKeyDown = (event: KeyboardEvent) => {
+        const handleKeyDown = (event) => {
             if (!isHardwareScannerMode || !selectedLocation) {
                 return;
             }
@@ -224,7 +224,7 @@ export const BarcodeScanner = () => {
         };
     }, []);
 
-    const onScanSuccess = (decodedText: string, decodedResult: any) => {
+    const onScanSuccess = (decodedText, decodedResult) => {
         handleItemScan(decodedText, selectedLocation)
             .then(success => {
                 if (success) {
@@ -234,7 +234,7 @@ export const BarcodeScanner = () => {
             .catch(e => console.error("Camera scan error:", e));
     };
 
-    const onScanError = (errorMessage: string) => {
+    const onScanError = (errorMessage) => {
         // Suppress frequent scan errors
     };
 
@@ -255,7 +255,7 @@ export const BarcodeScanner = () => {
         });
         
         setTimeout(() => {
-            (document.activeElement as HTMLElement)?.blur();
+            (document.activeElement)?.blur();
             hardwareScannerInputRef.current?.focus();
         }, 100);
     };
@@ -305,7 +305,7 @@ export const BarcodeScanner = () => {
                 description: `Scanning as ${currentUser?.email || currentUser?.name}`
             });
 
-        } catch (err: any) {
+        } catch (err) {
             console.error("Error starting scanner:", err);
             
             try {
@@ -323,7 +323,7 @@ export const BarcodeScanner = () => {
                 toast.success("Camera scanner started", {
                     description: "Using front camera"
                 });
-            } catch (fallbackErr: any) {
+            } catch (fallbackErr) {
                 toast.error("Camera not available", {
                     description: "Try using hardware scanner mode or manual entry instead."
                 });
@@ -346,7 +346,7 @@ export const BarcodeScanner = () => {
         }
     };
 
-    const handleManualSubmit = (e: React.FormEvent) => {
+    const handleManualSubmit = (e) => {
         e.preventDefault();
         if (!selectedLocation) {
             toast.error("Location required", {
@@ -368,7 +368,7 @@ export const BarcodeScanner = () => {
     };
 
     useEffect(() => {
-        const handleEscKey = (event: KeyboardEvent) => {
+        const handleEscKey = (event) => {
             if (event.key === 'Escape' && isHardwareScannerMode) {
                 handleStopHardwareScanner();
             }
@@ -382,13 +382,13 @@ export const BarcodeScanner = () => {
 
     return (
         <div className="grid md:grid-cols-2 gap-6">
-            <Card>
+            <Card className="shadow-sm border-gray-200">
                 <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
+                    <CardTitle className="flex items-center gap-2 text-gray-900">
                         <Barcode className="h-5 w-5" />
                         <span>Barcode Scanner</span>
                         {currentUser && (
-                            <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full ml-2">
+                            <span className="text-xs bg-indigo-100 text-indigo-800 px-2 py-1 rounded-full ml-2">
                                 {currentUser.email || currentUser.name}
                             </span>
                         )}
@@ -397,9 +397,9 @@ export const BarcodeScanner = () => {
                 <CardContent>
                     <div className="space-y-4">
                         <div className="flex items-center gap-2">
-                            <MapPin className="h-4 w-4 text-muted-foreground" />
+                            <MapPin className="h-4 w-4 text-gray-500" />
                             <Select value={selectedLocation} onValueChange={setSelectedLocation}>
-                                <SelectTrigger className="flex-1">
+                                <SelectTrigger className="flex-1 focus:ring-indigo-600 focus:border-indigo-600">
                                     <SelectValue placeholder="Select location" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -429,20 +429,20 @@ export const BarcodeScanner = () => {
                         </div>
                         
                         {selectedLocation && (
-                            <div className="text-sm text-muted-foreground bg-gray-50 p-2 rounded">
+                            <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded border border-gray-100">
                                 <strong>Selected:</strong> {locations.find(l => l.id === selectedLocation)?.name || 'Error'}
                             </div>
                         )}
                         
                         {isHardwareScannerMode ? (
                             <div>
-                                <div className="w-full aspect-video relative bg-blue-50 rounded-lg overflow-hidden mb-4 flex items-center justify-center border-2 border-blue-200 border-dashed">
+                                <div className="w-full aspect-video relative bg-indigo-50 rounded-lg overflow-hidden mb-4 flex items-center justify-center border-2 border-indigo-200 border-dashed">
                                     <div className="text-center">
-                                        <Keyboard className="h-12 w-12 text-blue-500 mx-auto mb-2 animate-pulse" />
-                                        <p className="text-blue-700 font-medium">Hardware Scanner Active</p>
-                                        <p className="text-sm text-blue-600">Auditor: {currentUser?.email || currentUser?.name}</p>
+                                        <Keyboard className="h-12 w-12 text-indigo-500 mx-auto mb-2 animate-pulse" />
+                                        <p className="text-indigo-700 font-medium">Hardware Scanner Active</p>
+                                        <p className="text-sm text-indigo-600">Auditor: {currentUser?.email || currentUser?.name}</p>
                                         {scannedBarcode && (
-                                            <p className="text-xs text-blue-500 mt-2 font-mono bg-blue-100 px-2 py-1 rounded">
+                                            <p className="text-xs text-indigo-500 mt-2 font-mono bg-indigo-100 px-2 py-1 rounded">
                                                 Last: {scannedBarcode}
                                             </p>
                                         )}
@@ -458,7 +458,7 @@ export const BarcodeScanner = () => {
                             </div>
                         ) : isScanning ? (
                             <div>
-                                <div className="w-full aspect-video relative rounded-lg overflow-hidden mb-4 border">
+                                <div className="w-full aspect-video relative rounded-lg overflow-hidden mb-4 border border-gray-200">
                                     <div id={scannerElementId} className="w-full h-full" />
                                 </div>
                                 <Button 
@@ -471,8 +471,8 @@ export const BarcodeScanner = () => {
                             </div>
                         ) : (
                             <div>
-                                <div className="w-full aspect-video relative bg-gray-100 rounded-lg overflow-hidden mb-4 flex items-center justify-center">
-                                    <p className="text-center text-muted-foreground">
+                                <div className="w-full aspect-video relative bg-gray-100 rounded-lg overflow-hidden mb-4 flex items-center justify-center border border-gray-200">
+                                    <p className="text-center text-gray-500">
                                         Camera preview will appear here when scanning
                                     </p>
                                 </div>
@@ -480,7 +480,7 @@ export const BarcodeScanner = () => {
                                 <div className="grid grid-cols-2 gap-2">
                                     <Button 
                                         variant="default" 
-                                        className="w-full" 
+                                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white" 
                                         onClick={handleStartScanning}
                                         disabled={!selectedLocation}
                                     >
@@ -489,7 +489,7 @@ export const BarcodeScanner = () => {
                                     </Button>
                                     <Button 
                                         variant="secondary" 
-                                        className="w-full" 
+                                        className="w-full bg-white hover:bg-indigo-50 border border-gray-200 text-gray-700 hover:text-indigo-700 shadow-sm" 
                                         onClick={handleStartHardwareScanner}
                                         disabled={!selectedLocation}
                                     >
@@ -500,15 +500,20 @@ export const BarcodeScanner = () => {
                             </div>
                         )}
                         
-                        <div className="border-t pt-4">
+                        <div className="border-t border-gray-100 pt-4">
                             <form onSubmit={handleManualSubmit} className="flex gap-2">
                                 <Input
                                     placeholder="Enter barcode manually"
                                     value={manualBarcode}
                                     onChange={(e) => setManualBarcode(e.target.value)}
                                     disabled={!selectedLocation}
+                                    className="focus:ring-indigo-600 focus:border-indigo-600"
                                 />
-                                <Button type="submit" disabled={!selectedLocation || !manualBarcode.trim()}>
+                                <Button 
+                                    type="submit" 
+                                    disabled={!selectedLocation || !manualBarcode.trim()}
+                                    className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                                >
                                     <Check className="h-4 w-4" />
                                 </Button>
                             </form>
@@ -546,8 +551,8 @@ export const BarcodeScanner = () => {
                         <RecentActivity selectedLocation={selectedLocation} />
                     </>
                 ) : (
-                    <Card className="h-full flex items-center justify-center p-6">
-                        <div className="text-center text-muted-foreground">
+                    <Card className="h-full flex items-center justify-center p-6 shadow-sm border-gray-200">
+                        <div className="text-center text-gray-400">
                             <MapPin className="h-12 w-12 mx-auto mb-4 opacity-20" />
                             <p>Select a location from the dropdown on the left to view audit summary.</p>
                         </div>

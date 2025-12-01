@@ -16,7 +16,6 @@ export const SearchInventory = () => {
   const { searchItem, addItemToAudit } = useInventory();
   const { currentUser } = useUser();
   
-  
   const { 
     isAdmin, 
     userAccessibleLocations 
@@ -28,11 +27,9 @@ export const SearchInventory = () => {
     if (searchQuery.length >= 2) {
       const results = searchItem(searchQuery);
       
-      
       let filteredResults = results;
       
       if (!isAdmin) {
-        
         const accessibleLocationNames = userAccessibleLocations.map(loc => loc.name);
         filteredResults = results.filter(item => 
           accessibleLocationNames.includes(item.location)
@@ -40,7 +37,6 @@ export const SearchInventory = () => {
       }
       
       setSearchResults(filteredResults);
-      
       
       const newQuantities: Record<string, number> = {};
       filteredResults.forEach(item => {
@@ -75,7 +71,6 @@ export const SearchInventory = () => {
     const quantity = quantities[itemKey] || 0;
     
     try {
-      
       await addItemToAudit(
         item, 
         quantity,
@@ -93,7 +88,6 @@ export const SearchInventory = () => {
     }
   };
 
-  
   useEffect(() => {
     if (!isAdmin && userAccessibleLocations.length === 0) {
       setSearchResults([]);
@@ -103,16 +97,16 @@ export const SearchInventory = () => {
 
   if (!isAdmin && userAccessibleLocations.length === 0) {
     return (
-      <Card className="w-full">
+      <Card className="w-full shadow-sm border-gray-200">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+          <CardTitle className="flex items-center gap-2 text-gray-900">
             <Search className="h-5 w-5" />
             <span>Search Inventory</span>
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="text-center p-8 text-muted-foreground">
-            <h3 className="text-lg font-semibold mb-2">No Access</h3>
+          <div className="text-center p-8 text-gray-500">
+            <h3 className="text-lg font-semibold mb-2 text-gray-900">No Access</h3>
             <p>You don't have access to any locations for searching inventory.</p>
           </div>
         </CardContent>
@@ -121,26 +115,26 @@ export const SearchInventory = () => {
   }
 
   return (
-    <Card className="w-full">
+    <Card className="w-full shadow-sm border-gray-200">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
+        <CardTitle className="flex items-center gap-2 text-gray-900">
           <Search className="h-5 w-5" />
           <span>Search Inventory</span>
           {currentUser && (
-            <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full ml-2">
+            <span className="text-xs bg-indigo-100 text-indigo-800 px-2 py-1 rounded-full ml-2">
               Auditor: {currentUser.email || currentUser.name}
             </span>
           )}
           {!isAdmin && userAccessibleLocations.length > 0 && (
-            <span className="text-sm font-normal text-muted-foreground ml-2">
+            <span className="text-sm font-normal text-gray-500 ml-2">
               (Limited to: {userAccessibleLocations.map(loc => loc.name).join(", ")})
             </span>
           )}
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="mb-4 bg-blue-50 p-3 rounded-lg border border-blue-200">
-          <p className="text-sm text-blue-800">
+        <div className="mb-4 bg-indigo-50 p-3 rounded-lg border border-indigo-200">
+          <p className="text-sm text-indigo-800">
             <strong>Multi-Auditor Support:</strong> Your entries are tracked individually. 
             If multiple auditors audit the same item, all counts will be combined.
           </p>
@@ -151,50 +145,50 @@ export const SearchInventory = () => {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search by name, SKU, or ID..."
-            className="flex-1"
+            className="flex-1 focus:ring-indigo-600 focus:border-indigo-600"
           />
-          <Button type="submit">Search</Button>
+          <Button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white">
+            Search
+          </Button>
         </form>
 
         {searchResults.length > 0 ? (
-          <div className="border rounded-md">
-            <div className="grid grid-cols-[1fr_auto] gap-4 p-4 font-medium border-b">
+          <div className="border border-gray-200 rounded-md">
+            <div className="grid grid-cols-[1fr_auto] gap-4 p-4 font-medium border-b border-gray-200 bg-gray-50 text-gray-900">
               <div>Item Details</div>
               <div className="text-right">Quantity</div>
             </div>
             {searchResults.map((item) => {
               const itemKey = getItemKey(item);
               
-              
               const auditorEntries = item.auditorEntries || [];
               const currentUserEntry = auditorEntries.find(e => e.auditorId === currentUser?.id);
               
               return (
-                <div key={itemKey} className="grid grid-cols-[1fr_auto] gap-4 p-4 border-b last:border-0">
+                <div key={itemKey} className="grid grid-cols-[1fr_auto] gap-4 p-4 border-b border-gray-100 last:border-0">
                   <div>
-                    <h3 className="font-medium">{item.name}</h3>
-                    <div className="text-sm text-muted-foreground">SKU: {item.sku}</div>
-                    <div className="text-sm text-muted-foreground">Location: {item.location}</div>
-                    <div className="text-sm">System Quantity: {item.systemQuantity}</div>
-                    
+                    <h3 className="font-medium text-gray-900">{item.name}</h3>
+                    <div className="text-sm text-gray-500">SKU: {item.sku}</div>
+                    <div className="text-sm text-gray-500">Location: {item.location}</div>
+                    <div className="text-sm text-gray-900">System Quantity: {item.systemQuantity}</div>
                     
                     {auditorEntries.length > 0 && (
-                      <div className="mt-2 text-xs bg-gray-50 p-2 rounded border">
-                        <strong>Auditor Breakdown:</strong>
+                      <div className="mt-2 text-xs bg-gray-50 p-2 rounded border border-gray-200">
+                        <strong className="text-gray-900">Auditor Breakdown:</strong>
                         {auditorEntries.map((entry, idx) => (
-                          <div key={idx} className={entry.auditorId === currentUser?.id ? "text-blue-600 font-medium" : ""}>
+                          <div key={idx} className={entry.auditorId === currentUser?.id ? "text-indigo-600 font-medium" : "text-gray-600"}>
                             • {entry.auditorName}: {entry.quantityFound}
                             {entry.auditorId === currentUser?.id && " (You)"}
                           </div>
                         ))}
-                        <div className="mt-1 font-medium">
+                        <div className="mt-1 font-medium text-gray-900">
                           Total Physical: {item.physicalQuantity || 0}
                         </div>
                       </div>
                     )}
                     
                     {currentUserEntry && (
-                      <div className="mt-1 text-xs text-blue-600">
+                      <div className="mt-1 text-xs text-indigo-600">
                         Your current count: {currentUserEntry.quantityFound}
                       </div>
                     )}
@@ -204,18 +198,18 @@ export const SearchInventory = () => {
                       <Button 
                         variant="outline" 
                         size="icon" 
-                        className="h-8 w-8"
+                        className="h-8 w-8 hover:bg-indigo-50 hover:text-indigo-600 border-gray-200"
                         onClick={() => decrementQuantity(item)}
                       >
                         <Minus className="h-4 w-4" />
                       </Button>
-                      <span className="w-8 text-center font-medium">
+                      <span className="w-8 text-center font-medium text-gray-900">
                         {quantities[itemKey] || 0}
                       </span>
                       <Button 
                         variant="outline" 
                         size="icon" 
-                        className="h-8 w-8"
+                        className="h-8 w-8 hover:bg-indigo-50 hover:text-indigo-600 border-gray-200"
                         onClick={() => incrementQuantity(item)}
                       >
                         <Plus className="h-4 w-4" />
@@ -224,6 +218,7 @@ export const SearchInventory = () => {
                     <Button 
                       variant="secondary"
                       size="sm"
+                      className="bg-white hover:bg-indigo-50 border border-gray-200 text-gray-700 hover:text-indigo-700 shadow-sm"
                       onClick={() => handleAddToAudit(item)}
                       disabled={!(quantities[itemKey] > 0)}
                     >
@@ -235,7 +230,7 @@ export const SearchInventory = () => {
             })}
           </div>
         ) : searchQuery.length >= 2 ? (
-          <div className="text-center p-8 text-muted-foreground">
+          <div className="text-center p-8 text-gray-500">
             No results found for "{searchQuery}"
             {!isAdmin && (
               <div className="text-sm mt-1">
@@ -244,7 +239,7 @@ export const SearchInventory = () => {
             )}
           </div>
         ) : (
-          <div className="text-center p-8 text-muted-foreground">
+          <div className="text-center p-8 text-gray-500">
             Enter at least 2 characters to search
             {!isAdmin && userAccessibleLocations.length > 0 && (
               <div className="text-sm mt-2">

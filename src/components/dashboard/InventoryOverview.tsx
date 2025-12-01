@@ -31,7 +31,6 @@ const ZERO_SUMMARY: Summary = {
   pendingItems: 0,
 };
 
-
 const ALL_LOCATIONS_VALUE = "__ALL__";
 
 function normalizeSummary(raw: Partial<Summary>): Summary {
@@ -46,16 +45,16 @@ function normalizeSummary(raw: Partial<Summary>): Summary {
 export const InventoryOverview = () => {
   const { getInventorySummary, locations, getLocationSummary } = useInventory();
   const { currentUser } = useUser();
-  const { accessibleLocations, userRole } = useUserAccess();
+  const { accessibleLocations } = useUserAccess();
   const { selectedCompanyId } = useCompany();
 
-  const [selectedLocation, setSelectedLocation] = useState<string>(""); 
+  const [selectedLocation, setSelectedLocation] = useState<string>("");
   const [hasInitialized, setHasInitialized] = useState(false);
 
-  
+  const isAdminOrSuperAdmin = currentUser?.role === "admin" || currentUser?.role === "super_admin";
+
   const userLocations = useMemo(() => accessibleLocations(), [accessibleLocations]);
 
- 
   const companyUserLocations = useMemo(() => {
     if (!selectedCompanyId) return userLocations;
     return userLocations.filter((loc) => loc.companyId === selectedCompanyId);
@@ -63,20 +62,18 @@ export const InventoryOverview = () => {
 
   useEffect(() => {
     if (!hasInitialized && currentUser) {
-      if (currentUser.role !== "admin" && companyUserLocations.length > 0) {
+      if (!isAdminOrSuperAdmin && companyUserLocations.length > 0) {
         setSelectedLocation(companyUserLocations[0].id);
-      } else if (currentUser.role === "admin") {
-        setSelectedLocation(""); 
+      } else if (isAdminOrSuperAdmin) {
+        setSelectedLocation("");
       }
       setHasInitialized(true);
     }
-  }, [currentUser, companyUserLocations, hasInitialized]);
+  }, [currentUser, companyUserLocations, hasInitialized, isAdminOrSuperAdmin]);
 
-  
   useEffect(() => {
     if (!currentUser) return;
-    if (currentUser.role === "admin") {
-      
+    if (isAdminOrSuperAdmin) {
       if (
         selectedLocation &&
         !companyUserLocations.some((l) => l.id === selectedLocation)
@@ -84,7 +81,6 @@ export const InventoryOverview = () => {
         setSelectedLocation("");
       }
     } else {
-     
       if (
         !selectedLocation ||
         !companyUserLocations.some((l) => l.id === selectedLocation)
@@ -92,9 +88,8 @@ export const InventoryOverview = () => {
         setSelectedLocation(companyUserLocations[0]?.id ?? "");
       }
     }
-  }, [currentUser, companyUserLocations, selectedLocation]);
+  }, [currentUser, companyUserLocations, selectedLocation, isAdminOrSuperAdmin]);
 
- 
   const summary: Summary = useMemo(() => {
     if (!currentUser) return ZERO_SUMMARY;
 
@@ -108,8 +103,7 @@ export const InventoryOverview = () => {
       return normalizeSummary(getLocationSummary(locationObj.name));
     }
 
-    
-    if (currentUser.role === "admin") {
+    if (isAdminOrSuperAdmin) {
       if (!selectedCompanyId) {
         return normalizeSummary(getInventorySummary());
       }
@@ -152,6 +146,7 @@ export const InventoryOverview = () => {
     companyUserLocations,
     getInventorySummary,
     getLocationSummary,
+    isAdminOrSuperAdmin
   ]);
 
   const completionPercentage = useMemo(() => {
@@ -160,20 +155,19 @@ export const InventoryOverview = () => {
       : 0;
   }, [summary.auditedItems, summary.totalItems]);
 
-  
   const handleLocationChange = useCallback((value: string) => {
     setSelectedLocation(value === ALL_LOCATIONS_VALUE ? "" : value);
   }, []);
 
   const selectedLocationName = useMemo(() => {
-    if (currentUser?.role === "admin" && !selectedLocation) {
+    if (isAdminOrSuperAdmin && !selectedLocation) {
       return "All Locations";
     }
     const location = companyUserLocations.find((loc) => loc.id === selectedLocation);
     return location?.name || "Select Location";
-  }, [currentUser?.role, companyUserLocations, selectedLocation]);
+  }, [isAdminOrSuperAdmin, companyUserLocations, selectedLocation]);
 
-  if (userRole !== "admin" && companyUserLocations.length === 0) {
+  if (!isAdminOrSuperAdmin && companyUserLocations.length === 0) {
     return (
       <div className="flex items-center justify-center min-h-[200px]">
         <h1 className="text-black/50 font-semibold text-[1.2rem]">
@@ -186,17 +180,16 @@ export const InventoryOverview = () => {
   return (
     <>
       <Select
-       
         value={selectedLocation || ALL_LOCATIONS_VALUE}
         onValueChange={handleLocationChange}
-        disabled={currentUser?.role !== "admin" && companyUserLocations.length <= 1}
+        disabled={!isAdminOrSuperAdmin && companyUserLocations.length <= 1}
       >
-        <SelectTrigger>
+        <SelectTrigger className="border-gray-200 focus:ring-indigo-600 focus:border-indigo-600 w-[200px]">
           <SelectValue placeholder={selectedLocationName} />
         </SelectTrigger>
 
         <SelectContent>
-          {currentUser?.role === "admin" && (
+          {isAdminOrSuperAdmin && (
             <SelectItem value={ALL_LOCATIONS_VALUE}>All Locations</SelectItem>
           )}
           {companyUserLocations.map((location) => (
@@ -207,7 +200,7 @@ export const InventoryOverview = () => {
         </SelectContent>
       </Select>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mt-4">
         <StatCard
           title="Total Inventory Items"
           value={summary.totalItems}
@@ -219,7 +212,7 @@ export const InventoryOverview = () => {
           title="Audit Progress"
           value={`${completionPercentage}%`}
           description={`${summary.auditedItems} of ${summary.totalItems} items audited`}
-          icon={<BarChart className="h-4 w-4 text-muted-foreground" />}
+          icon={<BarChart className="h-4 w-4 text-indigo-600" />}
         />
 
         <StatCard
@@ -240,7 +233,7 @@ export const InventoryOverview = () => {
 
         <Card className="md:col-span-2 lg:col-span-4 p-4">
           <h3 className="text-lg font-medium mb-2">Audit Progress</h3>
-          <Progress value={completionPercentage} className="h-2" />
+          <Progress value={completionPercentage} className="h-2 [&>*]:bg-indigo-600" />
           <div className="flex justify-between mt-1 text-sm text-muted-foreground">
             <span>{summary.auditedItems} audited</span>
             <span>{summary.pendingItems} pending</span>

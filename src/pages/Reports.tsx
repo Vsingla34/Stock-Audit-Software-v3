@@ -390,7 +390,8 @@ const Reports = () => {
       ["Discrepancies", summary.discrepancies.toString()],
       ["Completion Rate", `${summary.totalItems > 0 ? Math.round((summary.auditedItems / summary.totalItems) * 100) : 0}%`],
     ];
-    autoTable(doc, { startY: 62, head: [["Metric", "Value"]], body: summaryTableBody, theme: "grid", headStyles: { fillColor: [139, 92, 246] } });
+    // Updated headStyles to Indigo-600 [79, 70, 229]
+    autoTable(doc, { startY: 62, head: [["Metric", "Value"]], body: summaryTableBody, theme: "grid", headStyles: { fillColor: [79, 70, 229] } });
 
     let currentY = (doc as any)["lastAutoTable"] ? (doc as any)["lastAutoTable"].finalY + 10 : 90;
     doc.setFontSize(14); doc.text("Observations", 14, currentY);
@@ -407,6 +408,7 @@ const Reports = () => {
     if (discrepancies.length > 0) {
       const discrepancyY = observationY + 10;
       doc.setFontSize(14); doc.text("Discrepancy Details with Auditor Breakdown", 14, discrepancyY);
+      // Discrepancy stays Orange [249, 115, 22] for visual alert
       autoTable(doc, { startY: discrepancyY + 5, head: [["SKU", "Name", "Location", "System", "Physical", "Variance"]], body: discrepancies, theme: "grid", headStyles: { fillColor: [249, 115, 22] }, styles: { fontSize: 8 }, columnStyles: { 6: { cellWidth: 40 } } });
     }
 
@@ -420,7 +422,8 @@ const Reports = () => {
                 const answer = questionnaireAnswers.find((a) => a.questionId === question.id && a.locationId === selectedLocation);
                 return [question.text, answer ? formatQuestionnaireAnswer(answer.answer, question) : "-", answer?.answeredBy || "-", answer ? new Date(answer.answeredOn).toLocaleDateString() : "-"];
             });
-            if (answerData.length > 0) { autoTable(doc, { startY: questionnaireY + 5, head: [["Question", "Response", "Answered By", "Date"]], body: answerData, theme: "grid", headStyles: { fillColor: [79, 70, 229] }, styles: { fontSize: 9 }, columnStyles: { 0: { cellWidth: 80 }, 1: { cellWidth: 60 } } }); }
+            // Updated to Indigo-700 [67, 56, 202]
+            if (answerData.length > 0) { autoTable(doc, { startY: questionnaireY + 5, head: [["Question", "Response", "Answered By", "Date"]], body: answerData, theme: "grid", headStyles: { fillColor: [67, 56, 202] }, styles: { fontSize: 9 }, columnStyles: { 0: { cellWidth: 80 }, 1: { cellWidth: 60 } } }); }
         }
 
         const lastPos = (doc as any)["lastAutoTable"] ? (doc as any)["lastAutoTable"].finalY + 20 : doc.internal.pageSize.height - 60;
@@ -464,7 +467,7 @@ const Reports = () => {
           <div className="space-y-6" ref={reportRef}>
             <div className="flex justify-between items-center">
               <div>
-                <h1 className="text-3xl font-bold tracking-tight">Reports</h1>
+                <h1 className="text-3xl font-bold tracking-tight text-gray-900">Reports</h1>
                 <p className="text-muted-foreground">Generate and download inventory audit reports with auditor tracking</p>
               </div>
               {shouldShowLocationFilter && (
@@ -478,50 +481,50 @@ const Reports = () => {
             </div>
 
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-              <Card className="bg-gradient-to-br from-indigo-50 to-white">
-                <CardHeader><CardTitle className="flex items-center gap-2"><FileSpreadsheet className="h-5 w-5 text-indigo-600" />Reconciliation Report</CardTitle></CardHeader>
-                <CardContent className="space-y-2"><p className="text-sm text-muted-foreground">Complete report with auditor breakdown showing who audited each item.</p><Button variant="outline" className="w-full border-indigo-200 hover:bg-indigo-50" onClick={downloadReconciliationReport}><Download className="mr-2 h-4 w-4" />Download CSV</Button></CardContent>
+              <Card className="bg-gradient-to-br from-indigo-50 to-white shadow-sm border-indigo-100">
+                <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><FileSpreadsheet className="h-5 w-5 text-indigo-600" />Reconciliation</CardTitle></CardHeader>
+                <CardContent className="space-y-2"><p className="text-sm text-gray-500">Complete report with auditor breakdown.</p><Button variant="outline" className="w-full bg-white hover:bg-indigo-50 border-indigo-200 text-indigo-700 hover:text-indigo-800" onClick={downloadReconciliationReport}><Download className="mr-2 h-4 w-4" />Download CSV</Button></CardContent>
               </Card>
-              <Card className="bg-gradient-to-br from-orange-50 to-white">
-                <CardHeader><CardTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-orange-600" />Discrepancy Report</CardTitle></CardHeader>
-                <CardContent className="space-y-2"><p className="text-sm text-muted-foreground">Filtered report showing discrepancies with auditor details.</p><Button variant="outline" className="w-full border-orange-200 hover:bg-orange-50" onClick={downloadDiscrepancyReport}><Download className="mr-2 h-4 w-4" />Download CSV</Button></CardContent>
+              <Card className="bg-gradient-to-br from-red-50 to-white shadow-sm border-red-100">
+                <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><FileText className="h-5 w-5 text-red-600" />Discrepancies</CardTitle></CardHeader>
+                <CardContent className="space-y-2"><p className="text-sm text-gray-500">Filtered report showing only variances.</p><Button variant="outline" className="w-full bg-white hover:bg-red-50 border-red-200 text-red-700 hover:text-red-800" onClick={downloadDiscrepancyReport}><Download className="mr-2 h-4 w-4" />Download CSV</Button></CardContent>
               </Card>
-              <Card className="bg-gradient-to-br from-green-50 to-white">
-                <CardHeader><CardTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-green-600" />Audit Summary</CardTitle></CardHeader>
-                <CardContent className="space-y-2"><p className="text-sm text-muted-foreground">High-level summary of the audit with key metrics.</p><Button variant="outline" className="w-full border-green-200 hover:bg-green-50" onClick={downloadSummaryReport}><Download className="mr-2 h-4 w-4" />Download CSV</Button></CardContent>
+              <Card className="bg-gradient-to-br from-green-50 to-white shadow-sm border-green-100">
+                <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><FileText className="h-5 w-5 text-green-600" />Audit Summary</CardTitle></CardHeader>
+                <CardContent className="space-y-2"><p className="text-sm text-gray-500">High-level summary of the audit metrics.</p><Button variant="outline" className="w-full bg-white hover:bg-green-50 border-green-200 text-green-700 hover:text-green-800" onClick={downloadSummaryReport}><Download className="mr-2 h-4 w-4" />Download CSV</Button></CardContent>
               </Card>
-              <Card className="bg-gradient-to-br from-blue-50 to-white">
-                <CardHeader><CardTitle className="flex items-center gap-2"><TableIcon className="h-5 w-5 text-blue-600" />Combined Excel</CardTitle></CardHeader>
-                <CardContent className="space-y-2"><p className="text-sm text-muted-foreground">Reconciliation, Discrepancy & Summary in one Excel file.</p><Button variant="outline" className="w-full border-blue-200 hover:bg-blue-50" onClick={downloadCombinedExcelReport}><Download className="mr-2 h-4 w-4" />Download XLSX</Button></CardContent>
+              <Card className="bg-gradient-to-br from-slate-50 to-white shadow-sm border-slate-100">
+                <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><TableIcon className="h-5 w-5 text-slate-600" />Combined Excel</CardTitle></CardHeader>
+                <CardContent className="space-y-2"><p className="text-sm text-gray-500">All reports combined in one Excel file.</p><Button variant="outline" className="w-full bg-white hover:bg-indigo-50 border-slate-200 text-slate-700 hover:text-indigo-700" onClick={downloadCombinedExcelReport}><Download className="mr-2 h-4 w-4" />Download XLSX</Button></CardContent>
               </Card>
-              <Card className="bg-gradient-to-br from-purple-50 to-white">
-                <CardHeader><CardTitle className="flex items-center gap-2"><FileType className="h-5 w-5 text-purple-600" />Complete PDF Report</CardTitle></CardHeader>
-                <CardContent className="space-y-2"><p className="text-sm text-muted-foreground">Complete audit report with auditor breakdown in PDF format.</p><Button variant="outline" className="w-full border-purple-200 hover:bg-purple-50" onClick={generatePDFReport}><Download className="mr-2 h-4 w-4" />Download PDF</Button></CardContent>
+              <Card className="bg-gradient-to-br from-violet-50 to-white shadow-sm border-violet-100">
+                <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><FileType className="h-5 w-5 text-violet-600" />Complete PDF</CardTitle></CardHeader>
+                <CardContent className="space-y-2"><p className="text-sm text-gray-500">Formal printable audit report.</p><Button variant="outline" className="w-full bg-white hover:bg-violet-50 border-violet-200 text-violet-700 hover:text-violet-800" onClick={generatePDFReport}><Download className="mr-2 h-4 w-4" />Download PDF</Button></CardContent>
               </Card>
             </div>
 
-            <Card className="bg-white">
-              <CardHeader><CardTitle>Audit Statistics</CardTitle></CardHeader>
+            <Card className="bg-white shadow-sm border-gray-200">
+              <CardHeader><CardTitle className="text-gray-900">Audit Statistics</CardTitle></CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div><p className="text-sm text-muted-foreground">Total Items</p><p className="text-2xl font-bold text-gray-800">{summary.totalItems}</p></div>
-                  <div><p className="text-sm text-muted-foreground">Items Audited</p><p className="text-2xl font-bold text-blue-600">{summary.auditedItems}</p></div>
-                  <div><p className="text-sm text-muted-foreground">Matched Items</p><p className="text-2xl font-bold text-green-600">{summary.matched}</p></div>
-                  <div><p className="text-sm text-muted-foreground">Discrepancies</p><p className="text-2xl font-bold text-red-600">{summary.discrepancies}</p></div>
+                  <div><p className="text-sm text-gray-500">Total Items</p><p className="text-2xl font-bold text-gray-800">{summary.totalItems}</p></div>
+                  <div><p className="text-sm text-gray-500">Items Audited</p><p className="text-2xl font-bold text-indigo-600">{summary.auditedItems}</p></div>
+                  <div><p className="text-sm text-gray-500">Matched Items</p><p className="text-2xl font-bold text-green-600">{summary.matched}</p></div>
+                  <div><p className="text-sm text-gray-500">Discrepancies</p><p className="text-2xl font-bold text-red-600">{summary.discrepancies}</p></div>
                 </div>
-                <div className="mt-6"><div className="flex justify-between mb-2"><span className="text-sm text-muted-foreground">Audit Completion</span><span className="text-sm font-medium">{summary.totalItems > 0 ? Math.round((summary.auditedItems / summary.totalItems) * 100) : 0}%</span></div><div className="w-full bg-gray-200 rounded-full h-2.5"><div className="bg-blue-600 h-2.5 rounded-full" style={{ width: `${summary.totalItems > 0 ? Math.round((summary.auditedItems / summary.totalItems) * 100) : 0}%` }}></div></div></div>
+                <div className="mt-6"><div className="flex justify-between mb-2"><span className="text-sm text-gray-500">Audit Completion</span><span className="text-sm font-medium text-indigo-900">{summary.totalItems > 0 ? Math.round((summary.auditedItems / summary.totalItems) * 100) : 0}%</span></div><div className="w-full bg-gray-100 rounded-full h-2.5"><div className="bg-indigo-600 h-2.5 rounded-full transition-all duration-500" style={{ width: `${summary.totalItems > 0 ? Math.round((summary.auditedItems / summary.totalItems) * 100) : 0}%` }}></div></div></div>
               </CardContent>
             </Card>
 
-            <Card className="bg-white">
+            <Card className="bg-white shadow-sm border-gray-200">
               <CardHeader>
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                  <CardTitle>Detailed Report with Filters</CardTitle>
+                  <CardTitle className="text-gray-900">Detailed Report with Filters</CardTitle>
                   <div className="flex flex-wrap items-center gap-2">
                     
                     <div className="w-[150px]">
                       <Select value={statusFilter} onValueChange={setStatusFilter}>
-                        <SelectTrigger><div className="flex items-center gap-2"><Filter className="h-4 w-4" /><SelectValue placeholder="Status" /></div></SelectTrigger>
+                        <SelectTrigger className="focus:ring-indigo-600 border-gray-200"><div className="flex items-center gap-2"><Filter className="h-4 w-4" /><SelectValue placeholder="Status" /></div></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="all">All Statuses</SelectItem>
                           <SelectItem value="matched">Matched</SelectItem>
@@ -533,7 +536,7 @@ const Reports = () => {
 
                     <div className="w-[180px]">
                       <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                        <SelectTrigger><div className="flex items-center gap-2"><Filter className="h-4 w-4" /><SelectValue placeholder="Category" /></div></SelectTrigger>
+                        <SelectTrigger className="focus:ring-indigo-600 border-gray-200"><div className="flex items-center gap-2"><Filter className="h-4 w-4" /><SelectValue placeholder="Category" /></div></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="all">All Categories</SelectItem>
                           {uniqueCategories.map(cat => (
@@ -543,7 +546,7 @@ const Reports = () => {
                       </Select>
                     </div>
 
-                    <Button variant="outline" onClick={downloadFilteredReport}>
+                    <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={downloadFilteredReport}>
                       <Download className="mr-2 h-4 w-4" />
                       Export Filtered
                     </Button>
@@ -551,15 +554,15 @@ const Reports = () => {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="flex items-center justify-between mb-2 text-sm text-muted-foreground">
-                  <span>Showing <span className="font-medium">{visibleTableData.length}</span> of <span className="font-medium">{filteredTableData.length}</span> items</span>
-                  {filteredTableData.length > 0 && !showingAll && (<div className="flex gap-2"><Button size="sm" variant="outline" onClick={handleShowMore}>Show next 100</Button><Button size="sm" variant="ghost" onClick={handleShowAll}>Show all</Button></div>)}
+                <div className="flex items-center justify-between mb-2 text-sm text-gray-500">
+                  <span>Showing <span className="font-medium text-gray-900">{visibleTableData.length}</span> of <span className="font-medium text-gray-900">{filteredTableData.length}</span> items</span>
+                  {filteredTableData.length > 0 && !showingAll && (<div className="flex gap-2"><Button size="sm" variant="outline" className="hover:text-indigo-600" onClick={handleShowMore}>Show next 100</Button><Button size="sm" variant="ghost" className="hover:text-indigo-600" onClick={handleShowAll}>Show all</Button></div>)}
                 </div>
 
-                <div className="rounded-md border">
+                <div className="rounded-md border border-gray-200">
                   <Table>
                     <TableHeader>
-                      <TableRow>
+                      <TableRow className="bg-gray-50">
                         <TableHead>SKU</TableHead>
                         <TableHead>Name</TableHead>
                         <TableHead>Location</TableHead>
@@ -574,13 +577,13 @@ const Reports = () => {
                       {visibleTableData.length > 0 ? (
                         visibleTableData.map((item) => (
                           <TableRow key={`${item.id}-${item.location}`}>
-                            <TableCell>{item.sku}</TableCell>
+                            <TableCell className="font-medium text-gray-900">{item.sku}</TableCell>
                             <TableCell>{item.name}</TableCell>
                             <TableCell>{item.location}</TableCell>
                             <TableCell>{item.category}</TableCell>
                             <TableCell>{item.systemQuantity}</TableCell>
                             <TableCell>{item.physicalQuantity}</TableCell>
-                            <TableCell className={item.variance !== 0 ? "text-red-600 font-medium" : ""}>{item.variance}</TableCell>
+                            <TableCell className={item.variance !== 0 ? "text-red-600 font-bold" : ""}>{item.variance}</TableCell>
                             <TableCell>
                               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${item.status === "matched" ? "bg-green-100 text-green-800" : item.status === "discrepancy" ? "bg-red-100 text-red-800" : "bg-gray-100 text-gray-800"}`}>
                                 {item.status === "matched" ? "Matched" : item.status === "discrepancy" ? "Discrepancy" : "Pending"}
@@ -589,7 +592,7 @@ const Reports = () => {
                           </TableRow>
                         ))
                       ) : (
-                        <TableRow><TableCell colSpan={8} className="text-center py-4">No data available matching filters</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={8} className="text-center py-4 text-gray-500">No data available matching filters</TableCell></TableRow>
                       )}
                     </TableBody>
                   </Table>
@@ -598,7 +601,7 @@ const Reports = () => {
             </Card>
           </div>
         ) : (
-          <div className="absolute top-2/4 left-2/4 translate-2/4"><h1 className="text-black/50 font-semibold text-[1.2rem]">Currently You Don't have access</h1></div>
+          <div className="flex items-center justify-center min-h-[50vh]"><h1 className="text-gray-400 font-semibold text-xl">Currently You Don't have access</h1></div>
         )}
       </div>
     </AppLayout>
