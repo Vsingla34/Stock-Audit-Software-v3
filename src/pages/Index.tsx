@@ -6,20 +6,16 @@ import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { Barcode, Search, ClipboardList, Upload } from "lucide-react";
 import { useUserAccess } from "@/hooks/useUserAccess";
-import { useUser } from "@/context/UserContext";
 import { useLocationFilter } from "@/hooks/useLocationFilter";
-import { LocationFilterDropdown } from "@/components/LocationFilterDropdown";
 
 const Index = () => {
   const { canUploadData, canPerformAudits } = useUserAccess();
-  const { currentUser } = useUser();
 
   const {
     selectedLocation,
     setSelectedLocation,
     availableLocations,
-    shouldShowLocationFilter,
-    isAdmin // FIX: Get the corrected boolean from the hook
+    isAdmin
   } = useLocationFilter();
 
   return (
@@ -29,7 +25,13 @@ const Index = () => {
           <h1 className="text-3xl font-bold tracking-tight text-gray-900">Dashboard</h1>
         </div>
 
-        <InventoryOverview />
+        {/* The single dropdown is now inside InventoryOverview */}
+        <InventoryOverview 
+          selectedLocation={selectedLocation}
+          onLocationChange={setSelectedLocation}
+          availableLocations={availableLocations}
+          isAdmin={isAdmin}
+        />
 
         <div className="grid gap-6 md:grid-cols-2">
           <RecentActivity selectedLocation={selectedLocation} />
@@ -76,14 +78,6 @@ const Index = () => {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-medium text-gray-900">Inventory Status</h2>
             
-            {shouldShowLocationFilter && (
-              <LocationFilterDropdown
-                selectedLocation={selectedLocation}
-                onLocationChange={setSelectedLocation}
-                availableLocations={availableLocations}
-                showAllOption={isAdmin} 
-              />
-            )}
           </div>
           
           <InventoryTable selectedLocation={selectedLocation} />

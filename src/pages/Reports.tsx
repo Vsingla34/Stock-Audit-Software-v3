@@ -374,15 +374,55 @@ const Reports = () => {
 
   const generatePDFReport = useCallback(() => {
     const doc = new jsPDF();
-    doc.setFontSize(20); doc.setTextColor(40); doc.text("Inventory Audit Report", 14, 20);
-    doc.setFontSize(11); doc.setTextColor(100);
-    doc.text(`Company: ${companyName || "N/A"}`, 14, 30);
+    
+    // --- Header Section ---
+    let currentY = 20;
+    doc.setFontSize(20); 
+    doc.setTextColor(40); 
+    doc.text("Inventory Audit Report", 14, currentY);
+    
+    currentY += 10;
+    doc.setFontSize(11); 
+    doc.setTextColor(100);
+    doc.text(`Company: ${companyName || "N/A"}`, 14, currentY);
+    
+    currentY += 7;
     const locationName = getLocationName(selectedLocation);
     const locationText = locationName ? `Location: ${locationName}` : "Location: All Locations";
-    doc.text(locationText, 14, 37);
-    doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 44);
+    doc.text(locationText, 14, currentY);
+    
+    currentY += 7;
+    doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, currentY);
 
-    doc.setFontSize(14); doc.setTextColor(0); doc.text("Audit Summary", 14, 58);
+    // Fetch and display specific details only if a specific location is selected (not "all")
+    if (selectedLocation && selectedLocation !== "all") {
+        const questionsForLoc = getQuestionsForLocation(selectedLocation);
+        
+        const getAnswerText = (questionText: string) => {
+            const q = questionsForLoc.find(xq => xq.text.trim().toLowerCase() === questionText.toLowerCase());
+            if (!q) return "N/A";
+            const ans = questionnaireAnswers.find(a => a.questionId === q.id && a.locationId === selectedLocation);
+            return ans ? formatQuestionnaireAnswer(ans.answer, q) : "N/A";
+        };
+
+        const locManager = getAnswerText("Location Manager");
+        const audName = getAnswerText("Auditor Name");
+        const phone = getAnswerText("Phone No.");
+
+        currentY += 7;
+        doc.text(`Location Manager: ${locManager}`, 14, currentY);
+        currentY += 7;
+        doc.text(`Auditor: ${audName}`, 14, currentY);
+        currentY += 7;
+        doc.text(`Phone: ${phone}`, 14, currentY);
+    }
+
+    // --- Audit Summary Table ---
+    currentY += 14;
+    doc.setFontSize(14); 
+    doc.setTextColor(0); 
+    doc.text("Audit Summary", 14, currentY);
+    
     const summaryTableBody = [
       ["Total Items", summary.totalItems.toString()],
       ["Audited Items", summary.auditedItems.toString()],
@@ -390,40 +430,61 @@ const Reports = () => {
       ["Discrepancies", summary.discrepancies.toString()],
       ["Completion Rate", `${summary.totalItems > 0 ? Math.round((summary.auditedItems / summary.totalItems) * 100) : 0}%`],
     ];
-    // Updated headStyles to Indigo-600 [79, 70, 229]
-    autoTable(doc, { startY: 62, head: [["Metric", "Value"]], body: summaryTableBody, theme: "grid", headStyles: { fillColor: [79, 70, 229] } });
+    
+    autoTable(doc, { 
+        startY: currentY + 4, 
+        head: [["Metric", "Value"]], 
+        body: summaryTableBody, 
+        theme: "grid", 
+        headStyles: { fillColor: [79, 70, 229] } 
+    });
 
-    let currentY = (doc as any)["lastAutoTable"] ? (doc as any)["lastAutoTable"].finalY + 10 : 90;
-    doc.setFontSize(14); doc.text("Observations", 14, currentY);
+    // Update currentY based on table end
+    currentY = (doc as any)["lastAutoTable"] ? (doc as any)["lastAutoTable"].finalY + 10 : currentY + 60;
+
+    // --- Observations ---
+    doc.setFontSize(14); 
+    doc.text("Observations", 14, currentY);
+    
     const observations: string[] = [];
     if (summary.discrepancies > 0) { observations.push(`There are ${summary.discrepancies} items with quantity discrepancies.`); } else { observations.push("All audited items match their expected quantities."); }
     if (summary.pendingItems > 0) { observations.push(`${summary.pendingItems} items (${Math.round((summary.pendingItems / summary.totalItems) * 100)}%) are still pending audit.`); } else { observations.push("All items have been audited."); }
+    
     let observationY = currentY + 10;
     observations.forEach((obs) => { doc.setFontSize(11); doc.text(`• ${obs}`, 16, observationY); observationY += 7; });
 
+    // --- Discrepancy Table ---
     const discrepancies = baseTableData.filter((item) => item.status === "discrepancy").map((item) => {
         return [item.sku, item.name, item.location, item.systemQuantity.toString(), item.physicalQuantity.toString(), item.variance.toString()];
     });
 
     if (discrepancies.length > 0) {
       const discrepancyY = observationY + 10;
-      doc.setFontSize(14); doc.text("Discrepancy Details with Auditor Breakdown", 14, discrepancyY);
-      // Discrepancy stays Orange [249, 115, 22] for visual alert
+      doc.setFontSize(14); doc.text("Discrepancy Details", 14, discrepancyY);
       autoTable(doc, { startY: discrepancyY + 5, head: [["SKU", "Name", "Location", "System", "Physical", "Variance"]], body: discrepancies, theme: "grid", headStyles: { fillColor: [249, 115, 22] }, styles: { fontSize: 8 }, columnStyles: { 6: { cellWidth: 40 } } });
     }
 
-    if (selectedLocation) {
+    // --- Questionnaire Table ---
+    // Only show if a specific location is selected (not "all")
+    if (selectedLocation && selectedLocation !== "all") {
         const validQuestions = getQuestionsForLocation(selectedLocation);
-        if (validQuestions.length > 0) {
+        
+        // Filter out default/header questions so they don't appear in the table
+        const hiddenQuestions = ["company", "location", "location manager", "auditor name", "phone no."];
+        const displayQuestions = validQuestions.filter(q => !hiddenQuestions.includes(q.text.trim().toLowerCase()));
+
+        if (displayQuestions.length > 0) {
             let questionnaireY = (doc as any)["lastAutoTable"] ? (doc as any)["lastAutoTable"].finalY + 15 : observationY + 15;
             if (questionnaireY > doc.internal.pageSize.height - 40) { doc.addPage(); questionnaireY = 20; }
+            
             doc.setFontSize(14); doc.text("Audit Questionnaire Responses", 14, questionnaireY);
-            const answerData = validQuestions.map((question) => {
+            
+            const answerData = displayQuestions.map((question) => {
                 const answer = questionnaireAnswers.find((a) => a.questionId === question.id && a.locationId === selectedLocation);
                 return [question.text, answer ? formatQuestionnaireAnswer(answer.answer, question) : "-", answer?.answeredBy || "-", answer ? new Date(answer.answeredOn).toLocaleDateString() : "-"];
             });
-            // Updated to Indigo-700 [67, 56, 202]
-            if (answerData.length > 0) { autoTable(doc, { startY: questionnaireY + 5, head: [["Question", "Response", "Answered By", "Date"]], body: answerData, theme: "grid", headStyles: { fillColor: [67, 56, 202] }, styles: { fontSize: 9 }, columnStyles: { 0: { cellWidth: 80 }, 1: { cellWidth: 60 } } }); }
+            
+            autoTable(doc, { startY: questionnaireY + 5, head: [["Question", "Response", "Answered By", "Date"]], body: answerData, theme: "grid", headStyles: { fillColor: [67, 56, 202] }, styles: { fontSize: 9 }, columnStyles: { 0: { cellWidth: 80 }, 1: { cellWidth: 60 } } });
         }
 
         const lastPos = (doc as any)["lastAutoTable"] ? (doc as any)["lastAutoTable"].finalY + 20 : doc.internal.pageSize.height - 60;

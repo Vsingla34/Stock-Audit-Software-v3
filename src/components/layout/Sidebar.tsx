@@ -99,11 +99,13 @@ export function Sidebar({
     }
     nav.push({ name: "Locations", href: "/locations", icon: Building });
     
-    if (userRole === "super_admin" || userRole === "admin") {
-      nav.push(
-        { name: "Admin Overview", href: "/admin-overview", icon: Settings },
-        { name: "User Management", href: "/users", icon: Users }
-      );
+    // Updated: Split Admin Overview and User Management logic
+    if (["super_admin", "admin", "client"].includes(userRole)) {
+      nav.push({ name: "Admin Overview", href: "/admin-overview", icon: Settings });
+    }
+    
+    if (["super_admin", "admin"].includes(userRole)) {
+      nav.push({ name: "User Management", href: "/users", icon: Users });
     }
     
     if (userRole === "super_admin") {

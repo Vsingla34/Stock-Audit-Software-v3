@@ -1,4 +1,3 @@
-
 import React from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useUser } from "@/context/UserContext";
@@ -31,7 +30,7 @@ const ProtectedRoute = ({
 }: {
   children: React.ReactNode;
   requiredPermission?: string | null;
-  
+  // If allowedRoles is provided, user must have one of these roles
   allowedRoles?: Role[];
 }) => {
   const { isAuthenticated, currentUser } = useUser();
@@ -39,19 +38,19 @@ const ProtectedRoute = ({
   const { selectedCompanyId } = useCompany();
   const location = useLocation();
 
-  
+  // 1. Check Authentication
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
 
-  
+  // 2. Check Company Selection (except for specific routes)
   const isCompanySelectionRoute = location.pathname === "/company-selection";
   const isAddCompanyRoute = location.pathname === "/add-company";
   if (!selectedCompanyId && !isCompanySelectionRoute && !isAddCompanyRoute) {
     return <Navigate to="/company-selection" replace />;
   }
 
-  
+  // 3. Check Role
   if (allowedRoles && allowedRoles.length > 0) {
     const role = currentUser?.role as Role | undefined;
     if (!role || !allowedRoles.includes(role)) {
@@ -59,7 +58,7 @@ const ProtectedRoute = ({
     }
   }
 
-  
+  // 4. Check Permission (if specified)
   if (requiredPermission && !hasPermission(requiredPermission)) {
     return <Navigate to="/" replace />;
   }
@@ -76,7 +75,7 @@ function App() {
 
   return (
     <Routes>
-      
+      {/* Public Routes */}
       <Route
         path="/login"
         element={
@@ -88,7 +87,7 @@ function App() {
         }
       />
 
-      
+      {/* Protected Routes */}
       <Route
         path="/"
         element={
@@ -98,10 +97,10 @@ function App() {
         }
       />
 
-      
+      {/* Company Selection */}
       <Route path="/company-selection" element={<CompanySelection />} />
 
-      
+      {/* Feature Routes */}
       <Route
         path="/scanner"
         element={
@@ -135,7 +134,7 @@ function App() {
         }
       />
 
-      
+      {/* Analytics */}
       <Route
         path="/analytics"
         element={
@@ -153,10 +152,13 @@ function App() {
           </ProtectedRoute>
         }
       />
+      
+      {/* Admin Routes */}
       <Route
         path="/admin-overview"
         element={
-          <ProtectedRoute allowedRoles={["super_admin", "admin"]} requiredPermission="manageUsers">
+          // Updated: Added "client" to allowedRoles and removed requiredPermission="manageUsers"
+          <ProtectedRoute allowedRoles={["super_admin", "admin", "client"]}>
             <AdminOverview />
           </ProtectedRoute>
         }
@@ -170,7 +172,7 @@ function App() {
         }
       />
       
-      
+      {/* Super Admin Only */}
       <Route
         path="/add-company"
         element={
@@ -179,6 +181,8 @@ function App() {
           </ProtectedRoute>
         }
       />
+      
+      {/* Questionnaire */}
       <Route
         path="/questionnaire"
         element={
@@ -187,6 +191,7 @@ function App() {
           </ProtectedRoute>
         }
       />
+      
       <Route
         path="/profile"
         element={

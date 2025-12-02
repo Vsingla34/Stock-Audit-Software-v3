@@ -1,11 +1,9 @@
-import { useInventory } from "@/context/InventoryContext";
+import { useInventory, Location } from "@/context/InventoryContext";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { BarChart, FileText, CheckCheck, AlertCircle } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { useUserAccess } from "@/hooks/useUserAccess";
-import { useUser } from "@/context/UserContext";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useMemo } from "react";
 import {
   Select,
   SelectContent,
@@ -13,7 +11,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useCompany } from "@/context/CompanyContext";
 
 type Summary = {
   totalItems: number;
@@ -31,8 +28,6 @@ const ZERO_SUMMARY: Summary = {
   pendingItems: 0,
 };
 
-const ALL_LOCATIONS_VALUE = "__ALL__";
-
 function normalizeSummary(raw: Partial<Summary>): Summary {
   const totalItems = raw.totalItems ?? 0;
   const auditedItems = raw.auditedItems ?? 0;
@@ -42,112 +37,52 @@ function normalizeSummary(raw: Partial<Summary>): Summary {
   return { totalItems, auditedItems, matched, discrepancies, pendingItems };
 }
 
-export const InventoryOverview = () => {
-  const { getInventorySummary, locations, getLocationSummary } = useInventory();
-  const { currentUser } = useUser();
-  const { accessibleLocations } = useUserAccess();
-  const { selectedCompanyId } = useCompany();
+interface InventoryOverviewProps {
+  selectedLocation: string;
+  onLocationChange: (value: string) => void;
+  availableLocations: Location[];
+  isAdmin: boolean;
+}
 
-  const [selectedLocation, setSelectedLocation] = useState<string>("");
-  const [hasInitialized, setHasInitialized] = useState(false);
-
-  const isAdminOrSuperAdmin = currentUser?.role === "admin" || currentUser?.role === "super_admin";
-
-  const userLocations = useMemo(() => accessibleLocations(), [accessibleLocations]);
-
-  const companyUserLocations = useMemo(() => {
-    if (!selectedCompanyId) return userLocations;
-    return userLocations.filter((loc) => loc.companyId === selectedCompanyId);
-  }, [userLocations, selectedCompanyId]);
-
-  useEffect(() => {
-    if (!hasInitialized && currentUser) {
-      if (!isAdminOrSuperAdmin && companyUserLocations.length > 0) {
-        setSelectedLocation(companyUserLocations[0].id);
-      } else if (isAdminOrSuperAdmin) {
-        setSelectedLocation("");
-      }
-      setHasInitialized(true);
-    }
-  }, [currentUser, companyUserLocations, hasInitialized, isAdminOrSuperAdmin]);
-
-  useEffect(() => {
-    if (!currentUser) return;
-    if (isAdminOrSuperAdmin) {
-      if (
-        selectedLocation &&
-        !companyUserLocations.some((l) => l.id === selectedLocation)
-      ) {
-        setSelectedLocation("");
-      }
-    } else {
-      if (
-        !selectedLocation ||
-        !companyUserLocations.some((l) => l.id === selectedLocation)
-      ) {
-        setSelectedLocation(companyUserLocations[0]?.id ?? "");
-      }
-    }
-  }, [currentUser, companyUserLocations, selectedLocation, isAdminOrSuperAdmin]);
+export const InventoryOverview = ({
+  selectedLocation,
+  onLocationChange,
+  availableLocations,
+  isAdmin
+}: InventoryOverviewProps) => {
+  const { getLocationSummary } = useInventory();
 
   const summary: Summary = useMemo(() => {
-    if (!currentUser) return ZERO_SUMMARY;
-
-    if (selectedLocation) {
-      const locationObj = locations.find(
-        (loc) =>
-          loc.id === selectedLocation &&
-          (!selectedCompanyId || loc.companyId === selectedCompanyId)
+    // 1. Specific Location Selected
+    if (selectedLocation && selectedLocation !== "all") {
+      const locationObj = availableLocations.find(
+        (loc) => loc.id === selectedLocation
       );
       if (!locationObj) return ZERO_SUMMARY;
       return normalizeSummary(getLocationSummary(locationObj.name));
     }
 
-    if (isAdminOrSuperAdmin) {
-      if (!selectedCompanyId) {
-        return normalizeSummary(getInventorySummary());
-      }
+    // 2. "All Locations" Selected (Aggregate data from all available locations)
+    if (availableLocations.length === 0) return ZERO_SUMMARY;
 
-      const companyLocations = locations.filter(
-        (loc) => loc.companyId === selectedCompanyId
-      );
-      if (companyLocations.length === 0) return ZERO_SUMMARY;
+    const aggregated = availableLocations.reduce<Summary>(
+      (acc, loc) => {
+        const s = normalizeSummary(getLocationSummary(loc.name));
+        acc.totalItems += s.totalItems;
+        acc.auditedItems += s.auditedItems;
+        acc.matched += s.matched;
+        acc.discrepancies += s.discrepancies;
+        return acc;
+      },
+      { ...ZERO_SUMMARY }
+    );
 
-      const aggregated = companyLocations.reduce<Summary>(
-        (acc, loc) => {
-          const s = normalizeSummary(getLocationSummary(loc.name));
-          acc.totalItems += s.totalItems;
-          acc.auditedItems += s.auditedItems;
-          acc.matched += s.matched;
-          acc.discrepancies += s.discrepancies;
-          return acc;
-        },
-        { ...ZERO_SUMMARY }
-      );
-
-      aggregated.pendingItems = Math.max(
-        aggregated.totalItems - aggregated.auditedItems,
-        0
-      );
-      return aggregated;
-    }
-
-    if (companyUserLocations.length > 0) {
-      const firstLocation = companyUserLocations[0];
-      return normalizeSummary(getLocationSummary(firstLocation.name));
-    }
-
-    return ZERO_SUMMARY;
-  }, [
-    currentUser,
-    selectedLocation,
-    locations,
-    selectedCompanyId,
-    companyUserLocations,
-    getInventorySummary,
-    getLocationSummary,
-    isAdminOrSuperAdmin
-  ]);
+    aggregated.pendingItems = Math.max(
+      aggregated.totalItems - aggregated.auditedItems,
+      0
+    );
+    return aggregated;
+  }, [selectedLocation, availableLocations, getLocationSummary]);
 
   const completionPercentage = useMemo(() => {
     return summary.totalItems > 0
@@ -155,19 +90,16 @@ export const InventoryOverview = () => {
       : 0;
   }, [summary.auditedItems, summary.totalItems]);
 
-  const handleLocationChange = useCallback((value: string) => {
-    setSelectedLocation(value === ALL_LOCATIONS_VALUE ? "" : value);
-  }, []);
-
   const selectedLocationName = useMemo(() => {
-    if (isAdminOrSuperAdmin && !selectedLocation) {
+    if (selectedLocation === "all") {
       return "All Locations";
     }
-    const location = companyUserLocations.find((loc) => loc.id === selectedLocation);
+    const location = availableLocations.find((loc) => loc.id === selectedLocation);
     return location?.name || "Select Location";
-  }, [isAdminOrSuperAdmin, companyUserLocations, selectedLocation]);
+  }, [selectedLocation, availableLocations]);
 
-  if (!isAdminOrSuperAdmin && companyUserLocations.length === 0) {
+  // If not admin and no locations, show access message
+  if (!isAdmin && availableLocations.length === 0) {
     return (
       <div className="flex items-center justify-center min-h-[200px]">
         <h1 className="text-black/50 font-semibold text-[1.2rem]">
@@ -177,22 +109,29 @@ export const InventoryOverview = () => {
     );
   }
 
+  // Determine if "All Locations" option should be visible
+  // Visible if: User is Admin OR User has > 1 accessible location
+  const showAllOption = isAdmin || availableLocations.length > 1;
+
+  // Disable dropdown if: Not Admin AND only 1 location (forced selection)
+  const isDropdownDisabled = !isAdmin && availableLocations.length <= 1;
+
   return (
     <>
       <Select
-        value={selectedLocation || ALL_LOCATIONS_VALUE}
-        onValueChange={handleLocationChange}
-        disabled={!isAdminOrSuperAdmin && companyUserLocations.length <= 1}
+        value={selectedLocation}
+        onValueChange={onLocationChange}
+        disabled={isDropdownDisabled}
       >
         <SelectTrigger className="border-gray-200 focus:ring-indigo-600 focus:border-indigo-600 w-[200px]">
           <SelectValue placeholder={selectedLocationName} />
         </SelectTrigger>
 
         <SelectContent>
-          {isAdminOrSuperAdmin && (
-            <SelectItem value={ALL_LOCATIONS_VALUE}>All Locations</SelectItem>
+          {showAllOption && (
+            <SelectItem value="all">All Locations</SelectItem>
           )}
-          {companyUserLocations.map((location) => (
+          {availableLocations.map((location) => (
             <SelectItem key={location.id} value={location.id}>
               {location.name}
             </SelectItem>
