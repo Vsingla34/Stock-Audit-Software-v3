@@ -3,7 +3,7 @@ import { useInventory, Question } from "@/context/InventoryContext";
 import { useCompany } from "@/context/CompanyContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Download, FileText, FileType, FileSpreadsheet, Filter, Table as TableIcon } from "lucide-react";
+import { Download, FileText, FileType, FileSpreadsheet, Filter, Table as TableIcon, ArrowUpDown } from "lucide-react";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
 import { autoTable } from "jspdf-autotable";
@@ -58,6 +58,7 @@ const Reports = () => {
 
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [sortOrder, setSortOrder] = useState<string>("default");
 
   const reportRef = useRef(null);
   const [visibleCount, setVisibleCount] = useState(100);
@@ -85,13 +86,7 @@ const Reports = () => {
   const { filteredAuditedItems, filteredItemMaster, summary } = useMemo(() => {
     const locationName = getLocationName(selectedLocation);
 
-    if (isAdmin && !locationName) {
-      return {
-        filteredAuditedItems: auditedItems,
-        filteredItemMaster: itemMaster,
-        summary: getInventorySummary(),
-      };
-    } else if (locationName) {
+    if (locationName) {
       return {
         filteredAuditedItems: auditedItems.filter(
           (item) => item.location === locationName
@@ -103,19 +98,35 @@ const Reports = () => {
       };
     }
 
+    if (isAdmin) {
+      return {
+        filteredAuditedItems: auditedItems,
+        filteredItemMaster: itemMaster,
+        summary: getInventorySummary(),
+      };
+    }
+
+    const accessibleNames = availableLocations.map(l => l.name);
+    
+    const clientAudited = auditedItems.filter(i => accessibleNames.includes(i.location));
+    const clientMaster = itemMaster.filter(i => accessibleNames.includes(i.location));
+    
+    const clientSummary = availableLocations.reduce((acc, loc) => {
+        const s = getLocationSummary(loc.name);
+        acc.totalItems += s.totalItems;
+        acc.auditedItems += s.auditedItems;
+        acc.matched += s.matched;
+        acc.discrepancies += s.discrepancies;
+        acc.pendingItems += s.pendingItems;
+        return acc;
+    }, { totalItems: 0, auditedItems: 0, matched: 0, discrepancies: 0, pendingItems: 0 });
+
     return {
-      filteredAuditedItems: isAdmin ? auditedItems : [],
-      filteredItemMaster: isAdmin ? itemMaster : [],
-      summary: isAdmin
-        ? getInventorySummary()
-        : {
-            totalItems: 0,
-            auditedItems: 0,
-            matched: 0,
-            discrepancies: 0,
-            pendingItems: 0,
-          },
+      filteredAuditedItems: clientAudited,
+      filteredItemMaster: clientMaster,
+      summary: clientSummary
     };
+
   }, [
     selectedLocation,
     auditedItems,
@@ -124,6 +135,7 @@ const Reports = () => {
     getLocationName,
     getInventorySummary,
     getLocationSummary,
+    availableLocations
   ]);
 
   const baseTableData = useMemo(() => {
@@ -150,7 +162,7 @@ const Reports = () => {
   }, [filteredItemMaster, filteredAuditedItems]);
 
   const filteredTableData = useMemo(() => {
-    return baseTableData.filter((item) => {
+    let data = baseTableData.filter((item) => {
       if (statusFilter !== "all" && item.status !== statusFilter) {
         return false;
       }
@@ -159,7 +171,15 @@ const Reports = () => {
       }
       return true;
     });
-  }, [baseTableData, statusFilter, categoryFilter]);
+
+    if (sortOrder === "variance-asc") {
+      data = [...data].sort((a, b) => a.variance - b.variance);
+    } else if (sortOrder === "variance-desc") {
+      data = [...data].sort((a, b) => b.variance - a.variance);
+    }
+
+    return data;
+  }, [baseTableData, statusFilter, categoryFilter, sortOrder]);
 
   const uniqueCategories = useMemo(() => {
     const cats = new Set(baseTableData.map(i => i.category).filter(Boolean));
@@ -220,12 +240,13 @@ const Reports = () => {
     const locationTag = selectedLocation ? `_${getLocationName(selectedLocation)}` : "";
     const statusTag = statusFilter !== 'all' ? `_${statusFilter}` : "";
     const categoryTag = categoryFilter !== 'all' ? `_${categoryFilter}` : "";
+    const sortTag = sortOrder !== 'default' ? `_${sortOrder}` : "";
 
     generateCSV(
       reportData,
-      `filtered_inventory_report${locationTag}${statusTag}${categoryTag}.csv`
+      `filtered_inventory_report${locationTag}${statusTag}${categoryTag}${sortTag}.csv`
     );
-  }, [filteredTableData, selectedLocation, getLocationName, statusFilter, categoryFilter, generateCSV]);
+  }, [filteredTableData, selectedLocation, getLocationName, statusFilter, categoryFilter, sortOrder, generateCSV]);
 
   const downloadReconciliationReport = useCallback(() => {
     const allAuditors = new Set<string>();
@@ -394,7 +415,7 @@ const Reports = () => {
     currentY += 7;
     doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, currentY);
 
-    // Fetch and display specific details only if a specific location is selected (not "all")
+    // Fetch and display specific details if a location is selected (and not "all")
     if (selectedLocation && selectedLocation !== "all") {
         const questionsForLoc = getQuestionsForLocation(selectedLocation);
         
@@ -465,7 +486,6 @@ const Reports = () => {
     }
 
     // --- Questionnaire Table ---
-    // Only show if a specific location is selected (not "all")
     if (selectedLocation && selectedLocation !== "all") {
         const validQuestions = getQuestionsForLocation(selectedLocation);
         
@@ -536,7 +556,8 @@ const Reports = () => {
                   selectedLocation={selectedLocation}
                   onLocationChange={(value) => { setSelectedLocation(value); setVisibleCount(100); }}
                   availableLocations={availableLocations}
-                  showAllOption={isAdmin}
+                  // Updated: Allow "All Locations" if user has access to > 1 location (for clients/admins)
+                  showAllOption={isAdmin || availableLocations.length > 1}
                 />
               )}
             </div>
@@ -565,26 +586,17 @@ const Reports = () => {
             </div>
 
             <Card className="bg-white shadow-sm border-gray-200">
-              <CardHeader><CardTitle className="text-gray-900">Audit Statistics</CardTitle></CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div><p className="text-sm text-gray-500">Total Items</p><p className="text-2xl font-bold text-gray-800">{summary.totalItems}</p></div>
-                  <div><p className="text-sm text-gray-500">Items Audited</p><p className="text-2xl font-bold text-indigo-600">{summary.auditedItems}</p></div>
-                  <div><p className="text-sm text-gray-500">Matched Items</p><p className="text-2xl font-bold text-green-600">{summary.matched}</p></div>
-                  <div><p className="text-sm text-gray-500">Discrepancies</p><p className="text-2xl font-bold text-red-600">{summary.discrepancies}</p></div>
-                </div>
-                <div className="mt-6"><div className="flex justify-between mb-2"><span className="text-sm text-gray-500">Audit Completion</span><span className="text-sm font-medium text-indigo-900">{summary.totalItems > 0 ? Math.round((summary.auditedItems / summary.totalItems) * 100) : 0}%</span></div><div className="w-full bg-gray-100 rounded-full h-2.5"><div className="bg-indigo-600 h-2.5 rounded-full transition-all duration-500" style={{ width: `${summary.totalItems > 0 ? Math.round((summary.auditedItems / summary.totalItems) * 100) : 0}%` }}></div></div></div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-white shadow-sm border-gray-200">
               <CardHeader>
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                   <CardTitle className="text-gray-900">Detailed Report with Filters</CardTitle>
                   <div className="flex flex-wrap items-center gap-2">
                     
                     <div className="w-[150px]">
-                      <Select value={statusFilter} onValueChange={setStatusFilter}>
+                      <Select value={statusFilter} onValueChange={(val) => {
+                        setStatusFilter(val);
+                        // Reset sort if we switch away from discrepancy
+                        if (val !== "discrepancy") setSortOrder("default");
+                      }}>
                         <SelectTrigger className="focus:ring-indigo-600 border-gray-200"><div className="flex items-center gap-2"><Filter className="h-4 w-4" /><SelectValue placeholder="Status" /></div></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="all">All Statuses</SelectItem>
@@ -606,6 +618,24 @@ const Reports = () => {
                         </SelectContent>
                       </Select>
                     </div>
+
+                    {statusFilter === "discrepancy" && (
+                      <div className="w-[180px]">
+                        <Select value={sortOrder} onValueChange={setSortOrder}>
+                          <SelectTrigger className="focus:ring-indigo-600 border-gray-200">
+                            <div className="flex items-center gap-2">
+                              <ArrowUpDown className="h-4 w-4" />
+                              <SelectValue placeholder="Sort Variance" />
+                            </div>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="default">Default Sort</SelectItem>
+                            <SelectItem value="variance-asc">Variance (Low ↑)</SelectItem>
+                            <SelectItem value="variance-desc">Variance (High ↓)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
 
                     <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={downloadFilteredReport}>
                       <Download className="mr-2 h-4 w-4" />
