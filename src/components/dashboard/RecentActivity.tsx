@@ -138,7 +138,7 @@ export const RecentActivity = ({ selectedLocation }: RecentActivityProps) => {
             </div>
           ))}
         </div>
-      </CardContent>+
+      </CardContent>
     </Card>
   );
 };
