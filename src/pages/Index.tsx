@@ -7,9 +7,11 @@ import { Link } from "react-router-dom";
 import { Barcode, Search, ClipboardList, Upload } from "lucide-react";
 import { useUserAccess } from "@/hooks/useUserAccess";
 import { useLocationFilter } from "@/hooks/useLocationFilter";
+import { useUser } from "@/context/UserContext";
 
 const Index = () => {
   const { canUploadData, canPerformAudits } = useUserAccess();
+  const { currentUser } = useUser();
 
   const {
     selectedLocation,
@@ -21,11 +23,15 @@ const Index = () => {
   return (
     <AppLayout>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900">Dashboard</h1>
+        <div className="flex flex-col gap-1">
+          <h1 className="text-3xl font-bold tracking-tight text-gray-900">
+            Welcome back, <span className="text-indigo-600">{currentUser?.name}</span>
+          </h1>
+          <p className="text-lg text-muted-foreground">
+            Dashboard
+          </p>
         </div>
 
-        {/* The single dropdown is now inside InventoryOverview */}
         <InventoryOverview 
           selectedLocation={selectedLocation}
           onLocationChange={setSelectedLocation}
@@ -77,7 +83,6 @@ const Index = () => {
         <div>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-medium text-gray-900">Inventory Status</h2>
-            
           </div>
           
           <InventoryTable selectedLocation={selectedLocation} />
