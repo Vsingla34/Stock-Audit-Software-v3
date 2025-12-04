@@ -110,7 +110,6 @@ export const InventoryOverview = ({
   }
 
   // Determine if "All Locations" option should be visible
-  // Visible if: User is Admin OR User has > 1 accessible location
   const showAllOption = isAdmin || availableLocations.length > 1;
 
   // Disable dropdown if: Not Admin AND only 1 location (forced selection)
@@ -118,26 +117,28 @@ export const InventoryOverview = ({
 
   return (
     <>
-      <Select
-        value={selectedLocation}
-        onValueChange={onLocationChange}
-        disabled={isDropdownDisabled}
-      >
-        <SelectTrigger className="border-gray-200 focus:ring-indigo-600 focus:border-indigo-600 w-[200px]">
-          <SelectValue placeholder={selectedLocationName} />
-        </SelectTrigger>
+      <div className="w-full">
+        <Select
+          value={selectedLocation}
+          onValueChange={onLocationChange}
+          disabled={isDropdownDisabled}
+        >
+          <SelectTrigger className="border-gray-200 focus:ring-indigo-600 focus:border-indigo-600 w-[200px]">
+            <SelectValue placeholder={selectedLocationName} />
+          </SelectTrigger>
 
-        <SelectContent>
-          {showAllOption && (
-            <SelectItem value="all">All Locations</SelectItem>
-          )}
-          {availableLocations.map((location) => (
-            <SelectItem key={location.id} value={location.id}>
-              {location.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+          <SelectContent>
+            {showAllOption && (
+              <SelectItem value="all">All Locations</SelectItem>
+            )}
+            {availableLocations.map((location) => (
+              <SelectItem key={location.id} value={location.id}>
+                {location.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mt-4">
         <StatCard

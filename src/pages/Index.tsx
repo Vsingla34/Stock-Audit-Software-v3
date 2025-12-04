@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { InventoryOverview } from "@/components/dashboard/InventoryOverview";
 import { RecentActivity } from "@/components/dashboard/RecentActivity";
@@ -8,10 +9,34 @@ import { Barcode, Search, ClipboardList, Upload, FileSpreadsheet } from "lucide-
 import { useUserAccess } from "@/hooks/useUserAccess";
 import { useLocationFilter } from "@/hooks/useLocationFilter";
 import { useUser } from "@/context/UserContext";
+import { useCompany } from "@/context/CompanyContext";
+import { supabase } from "@/integrations/supabase/client";
 
 const Index = () => {
   const { canUploadData, canPerformAudits, isClientUser } = useUserAccess();
   const { currentUser } = useUser();
+  const { selectedCompanyId } = useCompany();
+  const [companyName, setCompanyName] = useState<string>("");
+
+  useEffect(() => {
+    const fetchCompanyName = async () => {
+      if (!selectedCompanyId) return;
+      try {
+        const { data, error } = await supabase
+          .from("companies")
+          .select("name")
+          .eq("id", selectedCompanyId)
+          .single();
+        
+        if (data && !error) {
+          setCompanyName(data.name);
+        }
+      } catch (err) {
+        console.error("Error fetching company name:", err);
+      }
+    };
+    fetchCompanyName();
+  }, [selectedCompanyId]);
 
   const {
     selectedLocation,
@@ -25,13 +50,21 @@ const Index = () => {
   return (
     <AppLayout>
       <div className="space-y-6">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900">
-            Welcome back, <span className="text-indigo-600">{currentUser?.name}</span>
-          </h1>
-          <p className="text-lg text-muted-foreground">
-            Dashboard
-          </p>
+        <div className="flex flex-col md:flex-row justify-between items-start gap-4">
+          <div className="flex flex-col gap-1">
+            <h1 className="text-3xl font-bold tracking-tight text-gray-900">
+              Welcome back, <span className="text-indigo-600">{currentUser?.name}</span>
+            </h1>
+            <p className="text-lg text-muted-foreground">
+              Dashboard
+            </p>
+          </div>
+
+          {companyName && (
+            <h2 className="text-2xl font-bold tracking-tight text-gray-900 hidden md:block">
+              {companyName}
+            </h2>
+          )}
         </div>
 
         <InventoryOverview 

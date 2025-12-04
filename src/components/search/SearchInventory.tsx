@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useInventory, InventoryItem } from "@/context/InventoryContext";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Search, Plus, Minus } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Search, Plus, Minus, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import { useLocationFilter } from "@/hooks/useLocationFilter";
 import { useUser } from "@/context/UserContext";
@@ -18,32 +19,66 @@ export const SearchInventory = () => {
   
   const { 
     isAdmin, 
-    userAccessibleLocations 
+    availableLocations,
+    selectedLocation,
+    setSelectedLocation,
+    getLocationName
   } = useLocationFilter();
+
+  const performSearch = useCallback((query: string) => {
+    // Clear results if query is empty or too short
+    if (!query || query.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+
+    const results = searchItem(query);
+    let filteredResults = results;
+    
+    // 1. Filter by Specific Location if selected
+    if (selectedLocation && selectedLocation !== "all") {
+      const locationName = getLocationName(selectedLocation);
+      if (locationName) {
+        filteredResults = results.filter(item => item.location === locationName);
+      }
+    } 
+    // 2. Filter by Access Rights (if "All Locations" or default)
+    else if (!isAdmin) {
+      const accessibleNames = availableLocations.map(loc => loc.name);
+      filteredResults = results.filter(item => 
+        accessibleNames.includes(item.location)
+      );
+    }
+    
+    setSearchResults(filteredResults);
+    
+    // Preserve existing quantity inputs for items that are still in the results
+    const newQuantities: Record<string, number> = {};
+    filteredResults.forEach(item => {
+      const key = `${item.id}-${item.location}`;
+      newQuantities[key] = quantities[key] || 0;
+    });
+    setQuantities(newQuantities);
+
+  }, [selectedLocation, isAdmin, availableLocations, searchItem, getLocationName, quantities]);
+
+  // Auto-search effect with debounce
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(() => {
+      performSearch(searchQuery);
+    }, 300); // Wait 300ms after user stops typing
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchQuery, performSearch]);
+
+  // Re-run search immediately when location filter changes
+  useEffect(() => {
+    performSearch(searchQuery);
+  }, [selectedLocation]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (searchQuery.length >= 2) {
-      const results = searchItem(searchQuery);
-      
-      let filteredResults = results;
-      
-      if (!isAdmin) {
-        const accessibleLocationNames = userAccessibleLocations.map(loc => loc.name);
-        filteredResults = results.filter(item => 
-          accessibleLocationNames.includes(item.location)
-        );
-      }
-      
-      setSearchResults(filteredResults);
-      
-      const newQuantities: Record<string, number> = {};
-      filteredResults.forEach(item => {
-        newQuantities[`${item.id}-${item.location}`] = quantities[`${item.id}-${item.location}`] || 0;
-      });
-      setQuantities(newQuantities);
-    }
+    performSearch(searchQuery);
   };
 
   const getItemKey = (item: InventoryItem) => `${item.id}-${item.location}`;
@@ -88,14 +123,13 @@ export const SearchInventory = () => {
     }
   };
 
-  useEffect(() => {
-    if (!isAdmin && userAccessibleLocations.length === 0) {
-      setSearchResults([]);
-      setSearchQuery("");
-    }
-  }, [isAdmin, userAccessibleLocations]);
+  // Determine if "All Locations" option should be visible
+  const showAllOption = isAdmin || availableLocations.length > 1;
 
-  if (!isAdmin && userAccessibleLocations.length === 0) {
+  // Disable dropdown if: Not Admin AND only 1 location (forced selection)
+  const isDropdownDisabled = !isAdmin && availableLocations.length <= 1;
+
+  if (!isAdmin && availableLocations.length === 0) {
     return (
       <Card className="w-full shadow-sm border-gray-200">
         <CardHeader>
@@ -125,11 +159,6 @@ export const SearchInventory = () => {
               Auditor: {currentUser.email || currentUser.name}
             </span>
           )}
-          {!isAdmin && userAccessibleLocations.length > 0 && (
-            <span className="text-sm font-normal text-gray-500 ml-2">
-              (Limited to: {userAccessibleLocations.map(loc => loc.name).join(", ")})
-            </span>
-          )}
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -140,16 +169,38 @@ export const SearchInventory = () => {
           </p>
         </div>
 
-        <form onSubmit={handleSearch} className="flex gap-2 mb-6">
+        {/* Location Dropdown */}
+        <div className="flex items-center gap-2 mb-4">
+          <MapPin className="h-4 w-4 text-gray-500" />
+          <Select 
+            value={selectedLocation} 
+            onValueChange={setSelectedLocation}
+            disabled={isDropdownDisabled}
+          >
+            <SelectTrigger className="flex-1 focus:ring-indigo-600 focus:border-indigo-600">
+              <SelectValue placeholder="Select location" />
+            </SelectTrigger>
+            <SelectContent>
+              {showAllOption && (
+                <SelectItem value="all">All Locations</SelectItem>
+              )}
+              {availableLocations.map((location) => (
+                <SelectItem key={location.id} value={location.id}>
+                  {location.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <form onSubmit={handleSearch} className="mb-6 relative">
+          <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
           <Input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by name, SKU, or ID..."
-            className="flex-1 focus:ring-indigo-600 focus:border-indigo-600"
+            placeholder="Start typing to search (Name, SKU, or ID)..."
+            className="w-full pl-9 focus:ring-indigo-600 focus:border-indigo-600"
           />
-          <Button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white">
-            Search
-          </Button>
         </form>
 
         {searchResults.length > 0 ? (
@@ -232,18 +283,18 @@ export const SearchInventory = () => {
         ) : searchQuery.length >= 2 ? (
           <div className="text-center p-8 text-gray-500">
             No results found for "{searchQuery}"
-            {!isAdmin && (
-              <div className="text-sm mt-1">
-                (Search limited to your assigned locations)
-              </div>
+            {selectedLocation && selectedLocation !== "all" ? (
+               <div className="text-sm mt-1">in {getLocationName(selectedLocation)}</div>
+            ) : (
+               !isAdmin && <div className="text-sm mt-1">(Search limited to your assigned locations)</div>
             )}
           </div>
         ) : (
           <div className="text-center p-8 text-gray-500">
             Enter at least 2 characters to search
-            {!isAdmin && userAccessibleLocations.length > 0 && (
+            {!isAdmin && availableLocations.length > 0 && (
               <div className="text-sm mt-2">
-                You can search items from: {userAccessibleLocations.map(loc => loc.name).join(", ")}
+                You can search items from: {availableLocations.map(loc => loc.name).join(", ")}
               </div>
             )}
           </div>

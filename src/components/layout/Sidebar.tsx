@@ -20,7 +20,7 @@ import { useUser } from "@/context/UserContext";
 import { Button } from "@/components/ui/button";
 import { useCompany } from "@/context/CompanyContext";
 import { supabase } from "@/integrations/supabase/client";
-import logo from "../../../public/logo.png"; 
+import logo from "../../../public/logo.png";
 
 const companyNameCache: Record<string, string> = {};
 
@@ -99,7 +99,6 @@ export function Sidebar({
     }
     nav.push({ name: "Locations", href: "/locations", icon: Building });
     
-    // Updated: Split Admin Overview and User Management logic
     if (["super_admin", "admin", "client"].includes(userRole)) {
       nav.push({ name: "Admin Overview", href: "/admin-overview", icon: Settings });
     }
@@ -123,41 +122,40 @@ export function Sidebar({
   };
 
   return (
-    <aside className="flex h-full w-64 flex-col overflow-y-auto border-r border-slate-200 bg-white px-5 py-8">
+    <aside className="flex h-full w-64 flex-col overflow-y-auto border-r border-indigo-500 bg-indigo-600 px-5 py-8 text-white">
       <div className="flex flex-col h-full">
         <div>
           <div className="space-y-4">
-            <div className=" flex items-center gap-2">
-              <div className="relative">
-                 <img src={logo} alt="Software Logo" className="h-auto w-43" />
+            <div className="flex items-center gap-2">
+              <div className="relative p-2 bg-white rounded-lg w-full flex justify-center shadow-sm">
+                 <img src={logo} alt="Software Logo" className="h-auto w-32 object-contain" />
               </div>
-             
             </div>
 
-            <div className="bg-white rounded-lg p-2.5 shadow-sm ring-1 ring-slate-200 mx-1">
+            <div className="bg-indigo-700 rounded-lg p-2.5 shadow-sm ring-1 ring-indigo-500 mx-1">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">
+                <p className="text-[10px] font-medium text-indigo-200 uppercase tracking-wider">
                   Logged in as
                 </p>
-                <div className="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-700">
+                <div className="inline-flex items-center rounded-full border border-indigo-400 bg-indigo-800 px-2 py-0.5 text-[10px] font-medium text-white">
                   {userRoleDisplay()}
                 </div>
               </div>
 
               {currentCompanyName && (
-                <div className="mt-1.5 pt-1.5 border-t border-slate-100">
-                  <p className="text-xs text-slate-500 truncate">
-                    Company: <span className="font-medium text-slate-700">{currentCompanyName}</span>
+                <div className="mt-1.5 pt-1.5 border-t border-indigo-500">
+                  <p className="text-xs text-indigo-200 truncate">
+                    Company: <span className="font-medium text-white">{currentCompanyName}</span>
                   </p>
                 </div>
               )}
 
               {userRole !== "super_admin" && accessibleLocations.length > 0 && (
                 <div className="mt-1.5">
-                  <p className="text-[10px] text-slate-500 mb-1">Assigned locations:</p>
+                  <p className="text-[10px] text-indigo-300 mb-1">Assigned locations:</p>
                   <div className="max-h-20 overflow-y-auto pr-1 space-y-1">
                     {accessibleLocations.map((loc) => (
-                      <div key={loc.id} className="text-[10px] py-0.5 px-2 bg-slate-50 rounded text-slate-600 truncate">
+                      <div key={loc.id} className="text-[10px] py-0.5 px-2 bg-indigo-800 rounded text-indigo-100 truncate">
                         {loc.name}
                       </div>
                     ))}
@@ -177,13 +175,13 @@ export function Sidebar({
                   onClick={handleLinkClick}
                   className={`group flex items-center rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
                     isActive
-                      ? "bg-indigo-50 text-indigo-700 shadow-sm"
-                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                      ? "bg-white text-indigo-600 shadow-md"
+                      : "text-indigo-100 hover:bg-indigo-700 hover:text-white"
                   }`}
                 >
                   <item.icon
                     className={`mr-3 h-5 w-5 transition-colors ${
-                      isActive ? "text-indigo-600" : "text-slate-400 group-hover:text-slate-600"
+                      isActive ? "text-indigo-600" : "text-indigo-300 group-hover:text-white"
                     }`}
                   />
                   <span>{item.name}</span>
@@ -193,17 +191,17 @@ export function Sidebar({
           </nav>
         </div>
 
-        <div className="mt-auto pt-6 border-t border-slate-100">
+        <div className="mt-auto pt-6 border-t border-indigo-500">
           <Button
             variant="ghost"
-            className="w-full justify-start text-slate-600 hover:text-red-600 hover:bg-red-50 transition-colors"
+            className="w-full justify-start text-indigo-100 hover:bg-indigo-700 hover:text-white transition-colors"
             onClick={handleLogout}
           >
             <LogOut className="mr-3 h-5 w-5" />
             <span>Log out</span>
           </Button>
           <div className="mt-4 px-2 text-center">
-            <p className="text-xs text-slate-400 font-medium">
+            <p className="text-xs text-indigo-300 font-medium">
               &copy; {new Date().getFullYear()} StockCheck360
             </p>
           </div>
