@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { Barcode, Search, ClipboardList, Upload, FileSpreadsheet } from "lucide-react";
 import { useUserAccess } from "@/hooks/useUserAccess";
-import { useLocationFilter } from "@/hooks/useLocationFilter";
 import { useUser } from "@/context/UserContext";
 import { useCompany } from "@/context/CompanyContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -38,13 +37,6 @@ const Index = () => {
     fetchCompanyName();
   }, [selectedCompanyId]);
 
-  const {
-    selectedLocation,
-    setSelectedLocation,
-    availableLocations,
-    isAdmin
-  } = useLocationFilter();
-
   const isClient = isClientUser();
 
   return (
@@ -67,23 +59,16 @@ const Index = () => {
           )}
         </div>
 
-        <InventoryOverview 
-          selectedLocation={selectedLocation}
-          onLocationChange={setSelectedLocation}
-          availableLocations={availableLocations}
-          isAdmin={isAdmin}
-        />
+        <InventoryOverview />
 
         <div className="grid gap-6 md:grid-cols-2">
-          <RecentActivity selectedLocation={selectedLocation} />
+          <RecentActivity />
           
           <div className="space-y-4">
             <h2 className="text-lg font-medium text-gray-900">Quick Actions</h2>
             
-            {/* Row 1: Context-sensitive actions */}
             <div className="grid gap-4 grid-cols-2">
               {isClient ? (
-                // Client Actions
                 <>
                   <Button asChild className="h-24 flex flex-col bg-indigo-600 hover:bg-indigo-700 text-white border-none shadow-md transition-all">
                     <Link to="/reports">
@@ -99,7 +84,6 @@ const Index = () => {
                   </Button>
                 </>
               ) : (
-                // Admin/Auditor Actions
                 <>
                   <Button asChild className="h-24 flex flex-col bg-indigo-600 hover:bg-indigo-700 text-white border-none shadow-md transition-all">
                     <Link to="/scanner">
@@ -117,7 +101,6 @@ const Index = () => {
               )}
             </div>
             
-            {/* Row 2: Additional Actions (Upload / Audit) - Hidden for clients if they don't have permissions */}
             {(canUploadData() || canPerformAudits()) && !isClient && (
               <div className="grid gap-4 grid-cols-2 mt-2">
                 {canUploadData() && (
@@ -146,7 +129,7 @@ const Index = () => {
             <h2 className="text-lg font-medium text-gray-900">Inventory Status</h2>
           </div>
           
-          <InventoryTable selectedLocation={selectedLocation} />
+          <InventoryTable />
         </div>
       </div>
     </AppLayout>

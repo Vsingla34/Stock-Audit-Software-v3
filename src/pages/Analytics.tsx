@@ -1,5 +1,6 @@
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useInventory } from "@/context/InventoryContext";
+import { useLocationFilter } from "@/hooks/useLocationFilter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   BarChart,
@@ -21,13 +22,58 @@ import { format, parseISO } from "date-fns";
 
 const Analytics = () => {
   const { auditedItems, itemMaster, getInventorySummary } = useInventory();
-  const summary = getInventorySummary();
+  const { selectedLocation, getLocationName } = useLocationFilter();
+  
+  // Filter data based on selected location
+  const filteredItemMaster = useMemo(() => {
+    if (!selectedLocation || selectedLocation === 'all') return itemMaster;
+    const locationName = getLocationName(selectedLocation);
+    return itemMaster.filter(item => item.location === locationName);
+  }, [itemMaster, selectedLocation, getLocationName]);
+
+  const filteredAuditedItems = useMemo(() => {
+    if (!selectedLocation || selectedLocation === 'all') return auditedItems;
+    const locationName = getLocationName(selectedLocation);
+    return auditedItems.filter(item => item.location === locationName);
+  }, [auditedItems, selectedLocation, getLocationName]);
+
+  // Recalculate summary based on filtered data if needed, or use getInventorySummary for global
+  const summary = useMemo(() => {
+    if (!selectedLocation || selectedLocation === 'all') {
+        return getInventorySummary();
+    }
+    
+    // Manual summary calculation for specific location
+    const totalItems = filteredItemMaster.length;
+    const locationAuditedItems = filteredAuditedItems;
+    const auditedItemsCount = locationAuditedItems.length;
+    let matched = 0;
+    let discrepancies = 0;
+    
+    filteredItemMaster.forEach(masterItem => {
+        const audited = locationAuditedItems.find(
+            a => a.sku === masterItem.sku && a.location === masterItem.location
+        );
+        if (audited) {
+            if (audited.status === 'matched') matched++;
+            else if (audited.status === 'discrepancy') discrepancies++;
+        }
+    });
+
+    return {
+        totalItems,
+        auditedItems: auditedItemsCount,
+        pendingItems: totalItems - auditedItemsCount,
+        matched,
+        discrepancies
+    };
+  }, [filteredItemMaster, filteredAuditedItems, selectedLocation, getInventorySummary]);
 
   // 1. Existing: Category Progress Data
   const categoryData = useMemo(() => {
     const categories: Record<string, { name: string, total: number, audited: number }> = {};
     
-    itemMaster.forEach(item => {
+    filteredItemMaster.forEach(item => {
       const cat = item.category || "Uncategorized";
       if (!categories[cat]) {
         categories[cat] = {
@@ -39,7 +85,7 @@ const Analytics = () => {
       categories[cat].total += 1;
     });
     
-    auditedItems.forEach(item => {
+    filteredAuditedItems.forEach(item => {
       const cat = item.category || "Uncategorized";
       if (categories[cat]) {
         categories[cat].audited += 1;
@@ -47,7 +93,7 @@ const Analytics = () => {
     });
     
     return Object.values(categories);
-  }, [itemMaster, auditedItems]);
+  }, [filteredItemMaster, filteredAuditedItems]);
 
   // 2. Existing: Status Data
   const statusData = useMemo(() => [
@@ -56,11 +102,13 @@ const Analytics = () => {
     { name: "Pending", value: summary.pendingItems, color: "#cbd5e1" },  // Slate-300
   ], [summary]);
 
-  // 3. Existing: Location Data
+  // 3. Existing: Location Data (Only show if ALL locations selected)
   const locationData = useMemo(() => {
+    if (selectedLocation && selectedLocation !== 'all') return [];
+
     const locations: Record<string, { name: string, system: number, physical: number }> = {};
     
-    itemMaster.forEach(item => {
+    filteredItemMaster.forEach(item => {
       if (!locations[item.location]) {
         locations[item.location] = {
           name: item.location,
@@ -71,20 +119,20 @@ const Analytics = () => {
       locations[item.location].system += item.systemQuantity;
     });
     
-    auditedItems.forEach(item => {
+    filteredAuditedItems.forEach(item => {
       if (locations[item.location]) {
         locations[item.location].physical += (item.physicalQuantity || 0);
       }
     });
     
     return Object.values(locations);
-  }, [itemMaster, auditedItems]);
+  }, [filteredItemMaster, filteredAuditedItems, selectedLocation]);
 
   // 4. Existing: Audit Activity Trend (Daily Speed)
   const auditTrendData = useMemo(() => {
     const trendMap: Record<string, number> = {};
 
-    auditedItems.forEach(item => {
+    filteredAuditedItems.forEach(item => {
       if (!item.lastAudited) return;
       try {
         const dateKey = format(parseISO(item.lastAudited), 'yyyy-MM-dd');
@@ -97,11 +145,11 @@ const Analytics = () => {
     return Object.entries(trendMap)
       .map(([date, count]) => ({ date, count }))
       .sort((a, b) => a.date.localeCompare(b.date));
-  }, [auditedItems]);
+  }, [filteredAuditedItems]);
 
   // 5. Existing: Top Discrepancies (Absolute Variance)
   const topDiscrepanciesData = useMemo(() => {
-    const discrepancies = auditedItems
+    const discrepancies = filteredAuditedItems
       .filter(item => {
          const variance = Math.abs((item.physicalQuantity || 0) - item.systemQuantity);
          return variance > 0;
@@ -114,13 +162,13 @@ const Analytics = () => {
     return discrepancies
       .sort((a, b) => b.variance - a.variance)
       .slice(0, 5);
-  }, [auditedItems]);
+  }, [filteredAuditedItems]);
 
   // 6. NEW: Auditor Performance Leaderboard
   const auditorPerformanceData = useMemo(() => {
     const counts: Record<string, number> = {};
 
-    auditedItems.forEach(item => {
+    filteredAuditedItems.forEach(item => {
       if (item.auditorEntries && item.auditorEntries.length > 0) {
         // Count unique items touched by each auditor
         item.auditorEntries.forEach(entry => {
@@ -137,13 +185,13 @@ const Analytics = () => {
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 10); // Top 10 auditors
-  }, [auditedItems]);
+  }, [filteredAuditedItems]);
 
   // 7. NEW: Discrepancy Rate by Category
   const categoryDiscrepancyRateData = useMemo(() => {
     const stats: Record<string, { total: number; discrepant: number }> = {};
 
-    auditedItems.forEach(item => {
+    filteredAuditedItems.forEach(item => {
       const cat = item.category || "Uncategorized";
       if (!stats[cat]) {
         stats[cat] = { total: 0, discrepant: 0 };
@@ -162,14 +210,18 @@ const Analytics = () => {
       }))
       .filter(item => item.total > 0)
       .sort((a, b) => b.rate - a.rate);
-  }, [auditedItems]);
+  }, [filteredAuditedItems]);
+
+  const locationTitle = selectedLocation && selectedLocation !== 'all' 
+    ? `Analytics for ${getLocationName(selectedLocation)}`
+    : "Analytics Overview";
 
   return (
     <AppLayout>
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-gray-900">Analytics</h1>
-          <p className="text-muted-foreground">Visual insights into your inventory audit</p>
+          <p className="text-muted-foreground">{locationTitle}</p>
         </div>
         
         <div className="grid gap-6 md:grid-cols-2">
@@ -369,28 +421,30 @@ const Analytics = () => {
             </CardContent>
           </Card>
 
-          {/* 6. Inventory by Location */}
-          <Card className="shadow-sm border-gray-200">
-            <CardHeader>
-              <CardTitle className="text-gray-900">Inventory by Location</CardTitle>
-            </CardHeader>
-            <CardContent className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={locationData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                  <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                  <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                  <Tooltip 
-                    cursor={{ fill: '#f1f5f9' }}
-                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                  />
-                  <Legend />
-                  <Bar dataKey="system" name="System Qty" fill="#4f46e5" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="physical" name="Physical Qty" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
+          {/* 6. Inventory by Location (Only show if Global Filter is 'All') */}
+          {(!selectedLocation || selectedLocation === 'all') && (
+            <Card className="shadow-sm border-gray-200">
+                <CardHeader>
+                <CardTitle className="text-gray-900">Inventory by Location</CardTitle>
+                </CardHeader>
+                <CardContent className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={locationData}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                    <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                    <Tooltip 
+                        cursor={{ fill: '#f1f5f9' }}
+                        contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                    />
+                    <Legend />
+                    <Bar dataKey="system" name="System Qty" fill="#4f46e5" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="physical" name="Physical Qty" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                </ResponsiveContainer>
+                </CardContent>
+            </Card>
+          )}
 
         </div>
       </div>

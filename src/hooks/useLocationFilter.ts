@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import { useUser } from "@/context/UserContext";
 import { useUserAccess } from "@/hooks/useUserAccess";
 import { useInventory } from "@/context/InventoryContext";
@@ -6,12 +6,10 @@ import { useInventory } from "@/context/InventoryContext";
 export const useLocationFilter = () => {
   const { currentUser } = useUser();
   const { accessibleLocations } = useUserAccess();
-  const { locations } = useInventory();
-  const [selectedLocation, setSelectedLocation] = useState<string>("all");
+  const { locations, selectedLocationFilter, setSelectedLocationFilter } = useInventory();
 
   const userAccessibleLocations = accessibleLocations();
 
-  // FIX: Explicitly include super_admin in the admin check
   const isSuperOrAdmin = currentUser?.role === "admin" || currentUser?.role === "super_admin";
 
   const availableLocations = isSuperOrAdmin 
@@ -19,11 +17,10 @@ export const useLocationFilter = () => {
     : userAccessibleLocations;
 
   useEffect(() => {
-    // FIX: Use the combined check here
     if (!isSuperOrAdmin && userAccessibleLocations.length === 1) {
-      setSelectedLocation(userAccessibleLocations[0].id);
+      setSelectedLocationFilter(userAccessibleLocations[0].id);
     }
-  }, [isSuperOrAdmin, userAccessibleLocations]);
+  }, [isSuperOrAdmin, userAccessibleLocations, setSelectedLocationFilter]);
 
   const shouldShowLocationFilter = 
     isSuperOrAdmin || userAccessibleLocations.length > 1;
@@ -34,12 +31,12 @@ export const useLocationFilter = () => {
   };
 
   return {
-    selectedLocation,
-    setSelectedLocation,
+    selectedLocation: selectedLocationFilter,
+    setSelectedLocation: setSelectedLocationFilter,
     availableLocations,
     shouldShowLocationFilter,
     getLocationName,
-    isAdmin: isSuperOrAdmin, // FIX: Return the combined boolean
+    isAdmin: isSuperOrAdmin,
     userAccessibleLocations,
   };
 };

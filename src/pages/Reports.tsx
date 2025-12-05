@@ -396,7 +396,6 @@ const Reports = () => {
   const generatePDFReport = useCallback(() => {
     const doc = new jsPDF();
     
-    // --- Header Section ---
     let currentY = 20;
     doc.setFontSize(20); 
     doc.setTextColor(40); 
@@ -415,7 +414,6 @@ const Reports = () => {
     currentY += 7;
     doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, currentY);
 
-    // Fetch and display specific details if a location is selected (and not "all")
     if (selectedLocation && selectedLocation !== "all") {
         const questionsForLoc = getQuestionsForLocation(selectedLocation);
         
@@ -438,7 +436,6 @@ const Reports = () => {
         doc.text(`Phone: ${phone}`, 14, currentY);
     }
 
-    // --- Audit Summary Table ---
     currentY += 14;
     doc.setFontSize(14); 
     doc.setTextColor(0); 
@@ -460,10 +457,8 @@ const Reports = () => {
         headStyles: { fillColor: [79, 70, 229] } 
     });
 
-    // Update currentY based on table end
     currentY = (doc as any)["lastAutoTable"] ? (doc as any)["lastAutoTable"].finalY + 10 : currentY + 60;
 
-    // --- Observations ---
     doc.setFontSize(14); 
     doc.text("Observations", 14, currentY);
     
@@ -474,7 +469,6 @@ const Reports = () => {
     let observationY = currentY + 10;
     observations.forEach((obs) => { doc.setFontSize(11); doc.text(`• ${obs}`, 16, observationY); observationY += 7; });
 
-    // --- Discrepancy Table ---
     const discrepancies = baseTableData.filter((item) => item.status === "discrepancy").map((item) => {
         return [item.sku, item.name, item.location, item.systemQuantity.toString(), item.physicalQuantity.toString(), item.variance.toString()];
     });
@@ -485,11 +479,9 @@ const Reports = () => {
       autoTable(doc, { startY: discrepancyY + 5, head: [["SKU", "Name", "Location", "System", "Physical", "Variance"]], body: discrepancies, theme: "grid", headStyles: { fillColor: [249, 115, 22] }, styles: { fontSize: 8 }, columnStyles: { 6: { cellWidth: 40 } } });
     }
 
-    // --- Questionnaire Table ---
     if (selectedLocation && selectedLocation !== "all") {
         const validQuestions = getQuestionsForLocation(selectedLocation);
         
-        // Filter out default/header questions so they don't appear in the table
         const hiddenQuestions = ["company", "location", "location manager", "auditor name", "phone no."];
         const displayQuestions = validQuestions.filter(q => !hiddenQuestions.includes(q.text.trim().toLowerCase()));
 
@@ -556,7 +548,6 @@ const Reports = () => {
                   selectedLocation={selectedLocation}
                   onLocationChange={(value) => { setSelectedLocation(value); setVisibleCount(100); }}
                   availableLocations={availableLocations}
-                  // Updated: Allow "All Locations" if user has access to > 1 location (for clients/admins)
                   showAllOption={isAdmin || availableLocations.length > 1}
                 />
               )}
@@ -594,7 +585,6 @@ const Reports = () => {
                     <div className="w-[150px]">
                       <Select value={statusFilter} onValueChange={(val) => {
                         setStatusFilter(val);
-                        // Reset sort if we switch away from discrepancy
                         if (val !== "discrepancy") setSortOrder("default");
                       }}>
                         <SelectTrigger className="focus:ring-indigo-600 border-gray-200"><div className="flex items-center gap-2"><Filter className="h-4 w-4" /><SelectValue placeholder="Status" /></div></SelectTrigger>

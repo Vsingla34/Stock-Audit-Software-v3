@@ -1,4 +1,5 @@
 import { useInventory } from "@/context/InventoryContext";
+import { useLocationFilter } from "@/hooks/useLocationFilter";
 import {
   Table,
   TableBody,
@@ -23,16 +24,13 @@ import { useMemo, useCallback, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-interface InventoryTableProps {
-  selectedLocation?: string;
-}
-
 const ROW_LIMIT = 100;
 
-export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
+export const InventoryTable = () => {
   const { itemMaster, auditedItems, locations } = useInventory();
   const { currentUser } = useUser();
   const { accessibleLocations } = useUserAccess();
+  const { selectedLocation } = useLocationFilter();
 
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -41,7 +39,6 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
     [accessibleLocations]
   );
 
-  // Combine itemMaster with auditedItems to get current status
   const allTableData = useMemo(() => {
     return itemMaster
       .filter((item) => item.location !== "")
@@ -67,18 +64,13 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
       });
   }, [itemMaster, auditedItems]);
 
-  // Filter data based on selected location and user role
   const locationFilteredData = useMemo(() => {
-    // 1. Determine if "All Locations" is selected (or no selection made)
     const isAllLocations = !selectedLocation || selectedLocation === "all";
 
-    // 2. Handle "All Locations" view
     if (isAllLocations) {
-      // Admins and Super Admins see everything
       if (currentUser?.role === "admin" || currentUser?.role === "super_admin") {
         return allTableData;
       } 
-      // Other roles (Auditors/Clients) only see what they are assigned to
       else {
         const accessibleLocationNames = userLocations.map((loc) => loc.name);
         return allTableData.filter((item) =>
@@ -87,8 +79,6 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
       }
     } 
     
-    // 3. Handle Specific Location view
-    // If we are here, selectedLocation is a specific ID (not "all")
     const locationObj = locations.find((loc) => loc.id === selectedLocation);
     if (locationObj) {
       return allTableData.filter(
@@ -96,7 +86,6 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
       );
     }
 
-    // 4. Fallback if location ID is invalid
     return [];
   }, [
     allTableData,
@@ -106,7 +95,6 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
     userLocations,
   ]);
 
-  // Filter based on search query
   const filteredData = useMemo(() => {
     if (!searchQuery.trim()) return locationFilteredData;
 
@@ -119,7 +107,6 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
     );
   }, [locationFilteredData, searchQuery]);
 
-  // Pagination / Infinite Scroll simulation
   const [visibleCount, setVisibleCount] = useState(ROW_LIMIT);
 
   useEffect(() => {
@@ -143,7 +130,6 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
     setVisibleCount(filteredData.length);
   };
 
-  // Render helpers
   const renderStatus = useCallback(
     (status: string | undefined, systemQty: number, physicalQty: number) => {
       switch (status) {
@@ -228,7 +214,6 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
 
   return (
     <div className="space-y-4">
-      {/* Search Bar */}
       <div className="flex items-center gap-2">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -406,18 +391,6 @@ export const InventoryTable = ({ selectedLocation }: InventoryTableProps) => {
             <span>
               <strong>Pending:</strong> Item not yet scanned/audited
             </span>
-          </div>
-        </div>
-        <div className="mt-2 text-xs text-gray-600">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1">
-              <TrendingUp className="h-3 w-3 text-orange-600" />
-              <span>Over count (more physical than system)</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <TrendingDown className="h-3 w-3 text-red-600" />
-              <span>Under count (less physical than system)</span>
-            </div>
           </div>
         </div>
       </div>

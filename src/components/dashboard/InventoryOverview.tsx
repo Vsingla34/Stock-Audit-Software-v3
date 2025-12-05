@@ -1,4 +1,5 @@
-import { useInventory, Location } from "@/context/InventoryContext";
+import { useInventory } from "@/context/InventoryContext";
+import { useLocationFilter } from "@/hooks/useLocationFilter";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { BarChart, FileText, CheckCheck, AlertCircle } from "lucide-react";
 import { Card } from "@/components/ui/card";
@@ -37,23 +38,16 @@ function normalizeSummary(raw: Partial<Summary>): Summary {
   return { totalItems, auditedItems, matched, discrepancies, pendingItems };
 }
 
-interface InventoryOverviewProps {
-  selectedLocation: string;
-  onLocationChange: (value: string) => void;
-  availableLocations: Location[];
-  isAdmin: boolean;
-}
-
-export const InventoryOverview = ({
-  selectedLocation,
-  onLocationChange,
-  availableLocations,
-  isAdmin
-}: InventoryOverviewProps) => {
+export const InventoryOverview = () => {
   const { getLocationSummary } = useInventory();
+  const { 
+    selectedLocation, 
+    setSelectedLocation, 
+    availableLocations, 
+    isAdmin 
+  } = useLocationFilter();
 
   const summary: Summary = useMemo(() => {
-    // 1. Specific Location Selected
     if (selectedLocation && selectedLocation !== "all") {
       const locationObj = availableLocations.find(
         (loc) => loc.id === selectedLocation
@@ -62,7 +56,6 @@ export const InventoryOverview = ({
       return normalizeSummary(getLocationSummary(locationObj.name));
     }
 
-    // 2. "All Locations" Selected (Aggregate data from all available locations)
     if (availableLocations.length === 0) return ZERO_SUMMARY;
 
     const aggregated = availableLocations.reduce<Summary>(
@@ -98,7 +91,6 @@ export const InventoryOverview = ({
     return location?.name || "Select Location";
   }, [selectedLocation, availableLocations]);
 
-  // If not admin and no locations, show access message
   if (!isAdmin && availableLocations.length === 0) {
     return (
       <div className="flex items-center justify-center min-h-[200px]">
@@ -109,10 +101,7 @@ export const InventoryOverview = ({
     );
   }
 
-  // Determine if "All Locations" option should be visible
   const showAllOption = isAdmin || availableLocations.length > 1;
-
-  // Disable dropdown if: Not Admin AND only 1 location (forced selection)
   const isDropdownDisabled = !isAdmin && availableLocations.length <= 1;
 
   return (
@@ -120,7 +109,7 @@ export const InventoryOverview = ({
       <div className="w-full">
         <Select
           value={selectedLocation}
-          onValueChange={onLocationChange}
+          onValueChange={setSelectedLocation}
           disabled={isDropdownDisabled}
         >
           <SelectTrigger className="border-gray-200 focus:ring-indigo-600 focus:border-indigo-600 w-[200px]">

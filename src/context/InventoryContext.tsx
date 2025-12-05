@@ -1,4 +1,3 @@
-// src/context/InventoryContext.tsx
 import React, {
   createContext,
   useContext,
@@ -8,7 +7,6 @@ import React, {
 import SupabaseDataService from "@/services/SupabaseDataService";
 import { useCompany } from "@/context/CompanyContext";
 import { useUser } from "@/context/UserContext";
-
 
 export interface AuditorEntry {
   auditorId: string;
@@ -73,6 +71,8 @@ interface InventoryContextType {
   locations: Location[];
   questions: Question[];
   questionnaireAnswers: QuestionnaireAnswer[];
+  selectedLocationFilter: string;
+  setSelectedLocationFilter: (locationId: string) => void;
   setItemMaster: (
     items: Omit<InventoryItem, "id">[],
     companyId: string | null
@@ -134,6 +134,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
   const [auditedItems, setAuditedItemsState] = useState<InventoryItem[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
+  const [selectedLocationFilter, setSelectedLocationFilter] = useState<string>("all");
   const { currentUser } = useUser();   
   const [questionnaireAnswers, setQuestionnaireAnswers] = useState<
     QuestionnaireAnswer[]
@@ -141,42 +142,29 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const { selectedCompanyId } = useCompany();
 
-  
   useEffect(() => {
     const loadData = async () => {
       try {
         console.log("Loading inventory data for company:", selectedCompanyId);
 
-        
         const dbItems = await SupabaseDataService.getItemMaster(
           selectedCompanyId || undefined
         );
-        console.log("Loaded items:", dbItems.length);
         setItemMasterState(dbItems);
 
-        
         const audited = await SupabaseDataService.getAuditedItems(
           selectedCompanyId || undefined
         );
-        console.log("Loaded audited items:", audited.length);
         setAuditedItemsState(audited);
 
-        
         const locs = await SupabaseDataService.getLocations();
         const filteredLocs = selectedCompanyId
           ? locs.filter((l) => l.companyId === selectedCompanyId)
           : locs;
-        console.log("Loaded locations:", filteredLocs.length);
         setLocations(filteredLocs);
 
-        
         const qs = await SupabaseDataService.getQuestions(
           selectedCompanyId || undefined
-        );
-        console.log(
-          "Loaded questions for company:",
-          selectedCompanyId,
-          qs?.length || 0
         );
 
         setQuestions(
@@ -190,14 +178,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
           }))
         );
 
-        
         const answers = await SupabaseDataService.getQuestionnaireAnswers(
           selectedCompanyId || undefined
         );
-        console.log("Loaded answers:", answers?.length || 0);
         setQuestionnaireAnswers(answers || []);
 
-        console.log("All data loaded successfully");
       } catch (error) {
         console.error("Error loading inventory data:", error);
       }
@@ -205,7 +190,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
     loadData();
   }, [selectedCompanyId]);
-
 
   const setItemMaster = async (
     items: Omit<InventoryItem, "id">[],
@@ -226,7 +210,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     setItemMasterState(dbItems);
   };
 
-  
   const setClosingStock = async (
     items: Partial<InventoryItem>[],
     companyId: string | null
@@ -389,8 +372,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const addLocation = async (location: Omit<Location, "id">) => {
     try {
-      console.log("Adding location:", location);
-
       const companyIdFromPayload = location.companyId;
       const companyIdFromSession =
         typeof window !== "undefined"
@@ -420,14 +401,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         cleanLocation.description = location.description.trim();
       }
 
-      console.log(
-        "Calling SupabaseDataService.addLocation with:",
-        cleanLocation
-      );
-
       await SupabaseDataService.addLocation(cleanLocation);
-
-      console.log("Location saved, reloading locations...");
 
       const updatedLocations = await SupabaseDataService.getLocations();
       const filteredLocs = selectedCompanyId
@@ -435,7 +409,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         : updatedLocations;
       setLocations(filteredLocs);
 
-      console.log("Locations reloaded:", filteredLocs.length);
     } catch (error) {
       console.error("Error in addLocation:", error);
       throw error;
@@ -627,11 +600,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     );
   };
 
- 
  const saveQuestionnaireAnswer = async (
   answer: Omit<QuestionnaireAnswer, "answeredOn" | "answeredBy">
 ) => {
-  
   const answeredBy =
     (currentUser as any)?.name ||
     (currentUser as any)?.fullName ||
@@ -639,7 +610,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     currentUser?.email ||
     undefined;
 
-  
   const location = locations.find(loc => loc.id === answer.locationId);
   const companyId = location?.companyId;
 
@@ -664,10 +634,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     return [...prev, newAnswer];
   });
 
-
   await SupabaseDataService.upsertQuestionnaireAnswer(newAnswer);
 };
-
 
   const getLocationQuestionnaireAnswers = (
     locationId: string
@@ -677,7 +645,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     );
   };
 
-  
   const getQuestionsForLocation = (locationId: string): Question[] => {
     const loc = locations.find((l) => l.id === locationId);
     const companyId = loc?.companyId ?? selectedCompanyId;
@@ -695,14 +662,12 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     return questions.find((q) => q.id === questionId);
   };
 
-  
   const clearAllData = async () => {
     if (!selectedCompanyId) {
       throw new Error("No company selected. Cannot clear data.");
     }
     
     await SupabaseDataService.clearInventoryData(selectedCompanyId);
-    
 
     setItemMasterState([]);
     setAuditedItemsState([]);
@@ -718,6 +683,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         locations,
         questions,
         questionnaireAnswers,
+        selectedLocationFilter,
+        setSelectedLocationFilter,
         setItemMaster,
         setClosingStock,
         updateAuditedItem,

@@ -6,16 +6,14 @@ import { format } from "date-fns";
 import { useUser } from "@/context/UserContext";
 import { useUserAccess } from "@/hooks/useUserAccess";
 import { useCompany } from "@/context/CompanyContext";
+import { useLocationFilter } from "@/hooks/useLocationFilter";
 
-interface RecentActivityProps {
-  selectedLocation?: string;
-}
-
-export const RecentActivity = ({ selectedLocation }: RecentActivityProps) => {
+export const RecentActivity = () => {
   const { auditedItems, locations } = useInventory();
   const { currentUser } = useUser();
   const { accessibleLocations } = useUserAccess();
   const { selectedCompanyId } = useCompany();
+  const { selectedLocation } = useLocationFilter();
 
   const userAccessibleLocations = accessibleLocations();
   const accessibleLocationNames = userAccessibleLocations.map((loc) => loc.name);
