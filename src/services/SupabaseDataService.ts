@@ -383,6 +383,7 @@ class SupabaseDataService {
         report_data,
         company_id,
         finalized_by,
+        assignment_id,
         locations ( name ),
         assignments ( scheduled_date, auditor_ids )
       `)
@@ -439,9 +440,10 @@ class SupabaseDataService {
 
       return {
         id: report.id,
+        assignment_id: report.assignment_id, // ADDED THIS
         finalized_at: report.created_at,
         finalized_by_name: finalizerName, 
-        auditor_name: auditorName, // Resolved Auditor Name(s)
+        auditor_name: auditorName, 
         report_data: report.report_data,
         locations: { name: locName },
         assignments: { scheduled_date: dateStr }
