@@ -19,11 +19,13 @@ import {
   ArrowRight,
   PlusCircle,
   CheckCircle2,
-  Briefcase
+  Briefcase,
+  LogOut 
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useCompany } from "@/context/CompanyContext";
+import { useUser } from "@/context/UserContext"; 
 import { CompanyForm } from "@/components/company/CompanyForm"; 
 
 interface Company {
@@ -36,6 +38,7 @@ interface Company {
 const CompanySelection = () => {
   const navigate = useNavigate();
   const { setSelectedCompanyId } = useCompany();
+  const { logout } = useUser(); 
 
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,9 +52,7 @@ const CompanySelection = () => {
 
   const fetchInitialData = async () => {
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const { data: { user } } = await supabase.auth.getUser();
 
       if (!user) {
         navigate("/login");
@@ -104,7 +105,7 @@ const CompanySelection = () => {
     } catch {
       // Ignore storage errors
     }
-    navigate("/");
+    navigate("/assignment-selection");
   };
 
   const handleCompanyCreated = () => {
@@ -112,11 +113,22 @@ const CompanySelection = () => {
     fetchInitialData(); 
   };
 
+  const handleLogout = async () => {
+    await logout();
+    navigate('/login');
+  };
+
   const isSuperAdmin = userRole === "super_admin";
 
   if (!loading && companies.length === 0 && !isSuperAdmin) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4">
+        <div className="absolute top-4 right-4">
+          <Button variant="ghost" onClick={handleLogout} className="text-gray-500">
+            <LogOut className="h-4 w-4 mr-2" /> Log out
+          </Button>
+        </div>
+
         <div className="mb-8 flex items-center gap-2">
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-200">
             <CheckCircle2 className="h-6 w-6" />
@@ -146,12 +158,11 @@ const CompanySelection = () => {
     <div className="min-h-screen bg-gray-50 p-4 md:p-8">
       <div className="max-w-6xl mx-auto space-y-8">
         
-        {/* Header Section */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-gray-200">
           <div className="space-y-1">
             <h2 className="text-3xl font-bold tracking-tight text-gray-900">Select Company</h2>
             <p className="text-gray-500 text-lg">
-              Choose a workspace to access your dashboard and inventory data.
+              Choose a workspace to proceed to assignment selection.
             </p>
           </div>
 
@@ -165,10 +176,18 @@ const CompanySelection = () => {
                   Add Company
                 </Button>
               )}
+
+             <Button 
+               variant="ghost" 
+               onClick={handleLogout}
+               className="text-gray-500 hover:text-red-600 hover:bg-red-50"
+             >
+               <LogOut className="h-4 w-4 mr-2" />
+               Log out
+             </Button>
           </div>
         </div>
 
-        {/* Grid */}
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {companies.map((company) => (
             <Card
@@ -198,22 +217,6 @@ const CompanySelection = () => {
               </CardHeader>
             </Card>
           ))}
-
-          {!loading && companies.length === 0 && (
-            <Card className="sm:col-span-2 lg:col-span-3 border-dashed border-2 border-gray-200 bg-gray-50/50 shadow-none">
-              <CardHeader className="text-center py-12">
-                <div className="mx-auto bg-white p-4 rounded-full shadow-sm ring-1 ring-gray-900/5 mb-4">
-                  <Building2 className="h-8 w-8 text-gray-400" />
-                </div>
-                <CardTitle className="text-gray-900">No companies found</CardTitle>
-                <CardDescription className="mt-2 max-w-sm mx-auto text-gray-500">
-                  {isSuperAdmin
-                    ? "Get started by creating your first company workspace using the button above."
-                    : "You don't have access to any companies yet. Please contact your administrator."}
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          )}
         </div>
 
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>

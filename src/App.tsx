@@ -20,6 +20,9 @@ import NotFound from "./pages/NotFound";
 import Questionnaire from "./pages/Questionnaire";
 import AddCompany from "./pages/AddCompany";
 import CompanySelection from "./pages/CompanySelection";
+import AssignmentSelection from "./pages/AssignmentSelection"; 
+import Assignment from "./pages/Assignment.tsx";
+import History from "./pages/History"; 
 
 type Role = "super_admin" | "admin" | "client" | "auditor" | string;
 
@@ -30,27 +33,41 @@ const ProtectedRoute = ({
 }: {
   children: React.ReactNode;
   requiredPermission?: string | null;
-  // If allowedRoles is provided, user must have one of these roles
   allowedRoles?: Role[];
 }) => {
   const { isAuthenticated, currentUser } = useUser();
   const { hasPermission } = useUserAccess();
-  const { selectedCompanyId } = useCompany();
+  const { selectedCompanyId, selectedAssignmentId } = useCompany();
   const location = useLocation();
 
-  // 1. Check Authentication
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
 
-  // 2. Check Company Selection (except for specific routes)
   const isCompanySelectionRoute = location.pathname === "/company-selection";
+  const isAssignmentSelectionRoute = location.pathname === "/assignment-selection";
   const isAddCompanyRoute = location.pathname === "/add-company";
-  if (!selectedCompanyId && !isCompanySelectionRoute && !isAddCompanyRoute) {
+  
+  const isAuditor = currentUser?.role === "auditor"; 
+  
+  // FIX: Allow Auditors to stay on Company Selection (removed the forced redirect)
+  
+  // If user is auditor, they must select an assignment to have context
+  // BUT we must allow them to be on Company Selection or Assignment Selection pages
+  if (isAuditor && !selectedAssignmentId && !isAssignmentSelectionRoute && !isCompanySelectionRoute) {
+     return <Navigate to="/assignment-selection" replace />;
+  }
+
+  // If user is admin/super_admin/client, they must select a company (unless on special pages)
+  const canAccessAssignmentsWithoutCompany = 
+    location.pathname === "/assignments" && 
+    ["super_admin", "admin"].includes(currentUser?.role || "");
+
+  // Logic applies to everyone now, including auditors
+  if (!selectedCompanyId && !isCompanySelectionRoute && !isAddCompanyRoute && !canAccessAssignmentsWithoutCompany) {
     return <Navigate to="/company-selection" replace />;
   }
 
-  // 3. Check Role
   if (allowedRoles && allowedRoles.length > 0) {
     const role = currentUser?.role as Role | undefined;
     if (!role || !allowedRoles.includes(role)) {
@@ -58,7 +75,6 @@ const ProtectedRoute = ({
     }
   }
 
-  // 4. Check Permission (if specified)
   if (requiredPermission && !hasPermission(requiredPermission)) {
     return <Navigate to="/" replace />;
   }
@@ -67,27 +83,31 @@ const ProtectedRoute = ({
 };
 
 function App() {
-  const { loading, isAuthenticated } = useUser();
+  const { loading, isAuthenticated, currentUser } = useUser();
 
   if (loading) {
     return <FullPageLoader />;
   }
 
+  // Determine landing page based on role
+  const getHomeRedirect = () => {
+     // FIX: Everyone goes to Company Selection first now
+     return "/company-selection";
+  };
+
   return (
     <Routes>
-      {/* Public Routes */}
       <Route
         path="/login"
         element={
           isAuthenticated ? (
-            <Navigate to="/company-selection" replace />
+            <Navigate to={getHomeRedirect()} replace />
           ) : (
             <Login />
           )
         }
       />
 
-      {/* Protected Routes */}
       <Route
         path="/"
         element={
@@ -97,10 +117,26 @@ function App() {
         }
       />
 
-      {/* Company Selection */}
-      <Route path="/company-selection" element={<CompanySelection />} />
+      {/* FIX: Added 'auditor' to allowedRoles */}
+      <Route 
+        path="/company-selection" 
+        element={
+          <ProtectedRoute allowedRoles={['super_admin', 'admin', 'client', 'auditor']}>
+            <CompanySelection />
+          </ProtectedRoute>
+        } 
+      />
+      
+      {/* Wrapped in ProtectedRoute to ensure auth */}
+      <Route 
+        path="/assignment-selection" 
+        element={
+          <ProtectedRoute>
+            <AssignmentSelection />
+          </ProtectedRoute>
+        } 
+      />
 
-      {/* Feature Routes */}
       <Route
         path="/scanner"
         element={
@@ -133,8 +169,16 @@ function App() {
           </ProtectedRoute>
         }
       />
+      
+      <Route
+        path="/history"
+        element={
+          <ProtectedRoute>
+            <History />
+          </ProtectedRoute>
+        }
+      />
 
-      {/* Analytics */}
       <Route
         path="/analytics"
         element={
@@ -153,11 +197,9 @@ function App() {
         }
       />
       
-      {/* Admin Routes */}
       <Route
         path="/admin-overview"
         element={
-          // Updated: Added "client" to allowedRoles and removed requiredPermission="manageUsers"
           <ProtectedRoute allowedRoles={["super_admin", "admin", "client"]}>
             <AdminOverview />
           </ProtectedRoute>
@@ -172,7 +214,6 @@ function App() {
         }
       />
       
-      {/* Super Admin Only */}
       <Route
         path="/add-company"
         element={
@@ -182,7 +223,6 @@ function App() {
         }
       />
       
-      {/* Questionnaire */}
       <Route
         path="/questionnaire"
         element={
@@ -191,6 +231,17 @@ function App() {
           </ProtectedRoute>
         }
       />
+
+      <Route
+        path="/assignments"
+        element={
+          <ProtectedRoute allowedRoles={["super_admin", "admin"]}>
+            <Assignment />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route path="/audit-history" element={<Navigate to="/history" replace />} />
       
       <Route
         path="/profile"

@@ -1,17 +1,17 @@
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useInventory, Question } from "@/context/InventoryContext";
 import { useCompany } from "@/context/CompanyContext";
+import { useUser } from "@/context/UserContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Download, FileText, FileType, FileSpreadsheet, Filter, Table as TableIcon, ArrowUpDown } from "lucide-react";
+import { Download, FileText, FileType, FileSpreadsheet, Filter, Table as TableIcon, ArrowUpDown, MessageSquare, CheckCheck, Loader2, Send } from "lucide-react";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
 import { autoTable } from "jspdf-autotable";
 import * as XLSX from "xlsx";
 import { useRef, useMemo, useCallback, useState, useEffect } from "react";
-import { useLocationFilter } from "@/hooks/useLocationFilter";
-import { LocationFilterDropdown } from "@/components/LocationFilterDropdown";
 import { supabase } from "@/integrations/supabase/client";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -21,12 +21,22 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useNavigate } from "react-router-dom";
+import { Label } from "@/components/ui/label";
 
 declare module "jspdf" {
   interface jsPDF {
@@ -35,6 +45,7 @@ declare module "jspdf" {
 }
 
 const Reports = () => {
+  const navigate = useNavigate();
   const {
     auditedItems,
     itemMaster,
@@ -42,26 +53,44 @@ const Reports = () => {
     getLocationSummary,
     questionnaireAnswers,
     getQuestionsForLocation,
+    locations,
+    updateItemRemark,
+    assignments,
+    finalizeAudit,
+    sendFinalizationOtp,
+    submitAudit 
   } = useInventory();
 
-  const {
-    selectedLocation,
-    setSelectedLocation,
-    availableLocations,
-    shouldShowLocationFilter,
-    isAdmin,
-    getLocationName,
-  } = useLocationFilter();
-
-  const { selectedCompanyId } = useCompany();
+  const { currentUser } = useUser();
+  const { selectedCompanyId, selectedAssignmentId } = useCompany();
   const [companyName, setCompanyName] = useState<string>("");
 
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [sortOrder, setSortOrder] = useState<string>("default");
 
+  const [editingRemark, setEditingRemark] = useState<string | null>(null);
+  const [tempRemark, setTempRemark] = useState("");
+
   const reportRef = useRef(null);
   const [visibleCount, setVisibleCount] = useState(100);
+  
+  // OTP States
+  const [isOtpDialogOpen, setIsOtpDialogOpen] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // AUTO-DETECT LOCATION FROM ASSIGNMENT
+  const currentAssignment = assignments.find(a => a.id === selectedAssignmentId);
+  const selectedLocation = currentAssignment?.locationId || "";
+  const locationName = locations.find(l => l.id === selectedLocation)?.name || "";
+
+  // Helper to get names for exports
+  const getLocationName = (id: string) => {
+     return locations.find(l => l.id === id)?.name || "";
+  };
 
   useEffect(() => {
     const fetchCompanyName = async () => {
@@ -83,60 +112,126 @@ const Reports = () => {
     fetchCompanyName();
   }, [selectedCompanyId]);
 
+  // --- PERMISSION LOGIC ---
+  const isAuditor = currentUser?.role === 'auditor';
+  const isClient = currentUser?.role === 'client';
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+
+  // Auditor can SUBMIT if active
+  const canSubmit = currentAssignment?.status === 'active' && (isAuditor || isAdmin);
+
+  // Client can FINALIZE if submitted
+  const canFinalize = currentAssignment?.status === 'submitted' && (isClient || isAdmin);
+
+  const handleSubmitClick = async () => {
+    if (!selectedAssignmentId) return;
+    if (confirm("Are you sure you want to submit this audit report? You will not be able to edit scans after submission.")) {
+       setIsSubmitting(true);
+       try {
+         await submitAudit(selectedAssignmentId);
+         toast.success("Audit submitted to client for review.");
+       } catch (e: any) {
+         toast.error(e.message || "Failed to submit audit.");
+       } finally {
+         setIsSubmitting(false);
+       }
+    }
+  };
+
+  const handleFinalizeClick = () => {
+    setIsOtpDialogOpen(true);
+  };
+  
+  const handleSendOtp = async () => {
+    if (!selectedAssignmentId) return;
+    setIsSendingOtp(true);
+    try {
+      const message = await sendFinalizationOtp(selectedAssignmentId);
+      // FIXED: Only show message, NOT the code.
+      toast.success(message);
+    } catch (e) {
+      toast.error("Failed to send OTP");
+    } finally {
+      setIsSendingOtp(false);
+    }
+  };
+  
+  const handleVerifyAndFinalize = async () => {
+    if (!selectedAssignmentId) return;
+    if (!otpCode) {
+      toast.error("Please enter the verification code");
+      return;
+    }
+    
+    setIsVerifyingOtp(true);
+    try {
+      await finalizeAudit(selectedAssignmentId, otpCode);
+      toast.success("Audit Finalized Successfully");
+      setIsOtpDialogOpen(false);
+      navigate("/history");
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e.message || "Invalid OTP or Failed to finalize");
+    } finally {
+      setIsVerifyingOtp(false);
+    }
+  };
+
+  const isItemActive = (systemQty: number, physicalQty: number) => {
+    return systemQty > 0 || physicalQty > 0;
+  };
+
+  // ... (Rest of the component remains the same: useMemo, exports, rendering) ...
   const { filteredAuditedItems, filteredItemMaster, summary } = useMemo(() => {
-    const locationName = getLocationName(selectedLocation);
+    let relevantAuditedItems = auditedItems.filter(item => item.location === locationName);
+    let relevantItemMaster = itemMaster.filter(item => item.location === locationName);
 
-    if (locationName) {
-      return {
-        filteredAuditedItems: auditedItems.filter(
-          (item) => item.location === locationName
-        ),
-        filteredItemMaster: itemMaster.filter(
-          (item) => item.location === locationName
-        ),
-        summary: getLocationSummary(locationName),
-      };
-    }
+    const activeItemMaster = relevantItemMaster.filter(masterItem => {
+        const auditedItem = relevantAuditedItems.find(
+            a => a.id === masterItem.id && a.location === masterItem.location
+        );
+        const physicalQty = auditedItem?.physicalQuantity || 0;
+        return isItemActive(masterItem.systemQuantity, physicalQty);
+    });
 
-    if (isAdmin) {
-      return {
-        filteredAuditedItems: auditedItems,
-        filteredItemMaster: itemMaster,
-        summary: getInventorySummary(),
-      };
-    }
-
-    const accessibleNames = availableLocations.map(l => l.name);
+    const totalItems = activeItemMaster.length;
     
-    const clientAudited = auditedItems.filter(i => accessibleNames.includes(i.location));
-    const clientMaster = itemMaster.filter(i => accessibleNames.includes(i.location));
-    
-    const clientSummary = availableLocations.reduce((acc, loc) => {
-        const s = getLocationSummary(loc.name);
-        acc.totalItems += s.totalItems;
-        acc.auditedItems += s.auditedItems;
-        acc.matched += s.matched;
-        acc.discrepancies += s.discrepancies;
-        acc.pendingItems += s.pendingItems;
-        return acc;
-    }, { totalItems: 0, auditedItems: 0, matched: 0, discrepancies: 0, pendingItems: 0 });
+    const auditedCount = activeItemMaster.filter(masterItem => {
+        const auditedItem = relevantAuditedItems.find(
+            a => a.id === masterItem.id && a.location === masterItem.location
+        );
+        return auditedItem && auditedItem.status !== 'pending';
+    }).length;
 
-    return {
-      filteredAuditedItems: clientAudited,
-      filteredItemMaster: clientMaster,
-      summary: clientSummary
+    let matched = 0;
+    let discrepancies = 0;
+
+    activeItemMaster.forEach(masterItem => {
+        const audited = relevantAuditedItems.find(
+            a => a.id === masterItem.id && a.location === masterItem.location
+        );
+        
+        if (audited && audited.status !== 'pending') {
+            if (audited.status === 'matched') matched++;
+            else if (audited.status === 'discrepancy') discrepancies++;
+        }
+    });
+
+    const calculatedSummary = {
+        totalItems,
+        auditedItems: auditedCount,
+        matched,
+        discrepancies,
+        pendingItems: Math.max(0, totalItems - auditedCount)
     };
 
-  }, [
-    selectedLocation,
-    auditedItems,
-    itemMaster,
-    isAdmin,
-    getLocationName,
-    getInventorySummary,
-    getLocationSummary,
-    availableLocations
-  ]);
+    return {
+      filteredAuditedItems: relevantAuditedItems,
+      filteredItemMaster: activeItemMaster,
+      summary: calculatedSummary
+    };
+
+  }, [selectedLocation, locationName, auditedItems, itemMaster]);
 
   const baseTableData = useMemo(() => {
     return filteredItemMaster.map((item) => {
@@ -157,6 +252,7 @@ const Reports = () => {
         status: auditedItem?.status || "pending",
         lastAudited: auditedItem?.lastAudited || "",
         auditorEntries: auditedItem?.auditorEntries || [],
+        clientRemarks: item.clientRemarks,
       };
     });
   }, [filteredItemMaster, filteredAuditedItems]);
@@ -190,6 +286,24 @@ const Reports = () => {
     () => filteredTableData.slice(0, visibleCount),
     [filteredTableData, visibleCount]
   );
+
+  const canEditRemarkForItem = (itemLocationName: string) => {
+    if (isAdmin) return true;
+    if (isClient && currentAssignment?.status === 'submitted') return true;
+    return false;
+  };
+
+  const handleRemarkStart = (id: string, currentVal: string) => {
+    setEditingRemark(id);
+    setTempRemark(currentVal || "");
+  };
+
+  const handleRemarkSave = async (id: string) => {
+    if (tempRemark.trim()) {
+      await updateItemRemark(id, tempRemark);
+    }
+    setEditingRemark(null);
+  };
 
   const generateCSV = useCallback((data: any[], filename: string) => {
     const headers = Array.from(new Set(data.flatMap((item) => Object.keys(item))));
@@ -234,10 +348,11 @@ const Reports = () => {
       physicalQuantity: item.physicalQuantity,
       variance: item.variance,
       status: item.status,
+      remarks: item.clientRemarks || "-",
       lastAudited: item.lastAudited ? new Date(item.lastAudited).toLocaleString() : "-",
     }));
 
-    const locationTag = selectedLocation ? `_${getLocationName(selectedLocation)}` : "";
+    const locationTag = locationName ? `_${locationName}` : "";
     const statusTag = statusFilter !== 'all' ? `_${statusFilter}` : "";
     const categoryTag = categoryFilter !== 'all' ? `_${categoryFilter}` : "";
     const sortTag = sortOrder !== 'default' ? `_${sortOrder}` : "";
@@ -246,7 +361,7 @@ const Reports = () => {
       reportData,
       `filtered_inventory_report${locationTag}${statusTag}${categoryTag}${sortTag}.csv`
     );
-  }, [filteredTableData, selectedLocation, getLocationName, statusFilter, categoryFilter, sortOrder, generateCSV]);
+  }, [filteredTableData, locationName, statusFilter, categoryFilter, sortOrder, generateCSV]);
 
   const downloadReconciliationReport = useCallback(() => {
     const allAuditors = new Set<string>();
@@ -276,14 +391,15 @@ const Reports = () => {
       baseData.Total = item.physicalQuantity;
       baseData.variance = item.variance;
       baseData.status = item.status;
+      baseData.remarks = item.clientRemarks || "-";
       baseData.lastAudited = item.lastAudited;
 
       return baseData;
     });
 
-    const locationInfo = selectedLocation ? `_${getLocationName(selectedLocation)}` : "";
+    const locationInfo = locationName ? `_${locationName}` : "";
     generateCSV(reportData, `inventory_reconciliation_report${locationInfo}.csv`);
-  }, [baseTableData, selectedLocation, getLocationName, generateCSV]);
+  }, [baseTableData, locationName, generateCSV]);
 
   const downloadDiscrepancyReport = useCallback(() => {
     const discrepancies = baseTableData.filter((item) => item.variance !== 0);
@@ -295,11 +411,12 @@ const Reports = () => {
         systemQuantity: item.systemQuantity,
         physicalQuantity: item.physicalQuantity,
         variance: item.variance,
+        remarks: item.clientRemarks || "-",
         lastAudited: item.lastAudited,
     }));
-    const locationInfo = selectedLocation ? `_${getLocationName(selectedLocation)}` : "";
+    const locationInfo = locationName ? `_${locationName}` : "";
     generateCSV(reportData, `discrepancy_report${locationInfo}.csv`);
-  }, [baseTableData, selectedLocation, getLocationName, generateCSV]);
+  }, [baseTableData, locationName, generateCSV]);
 
   const downloadSummaryReport = useCallback(() => {
     const summaryData = [{
@@ -310,11 +427,11 @@ const Reports = () => {
       discrepancies: summary.discrepancies,
       auditCompletionPercentage: summary.totalItems > 0 ? Math.round((summary.auditedItems / summary.totalItems) * 100) : 0,
       generatedDate: new Date().toISOString(),
-      location: selectedLocation ? getLocationName(selectedLocation) : "All Locations",
+      location: locationName || "All Locations",
     }];
-    const locationInfo = selectedLocation ? `_${getLocationName(selectedLocation)}` : "";
+    const locationInfo = locationName ? `_${locationName}` : "";
     generateCSV(summaryData, `audit_summary_report${locationInfo}.csv`);
-  }, [summary, selectedLocation, getLocationName, generateCSV]);
+  }, [summary, locationName, generateCSV]);
 
   const downloadCombinedExcelReport = useCallback(() => {
     const allAuditors = new Set<string>();
@@ -340,6 +457,7 @@ const Reports = () => {
       row["Physical Qty"] = item.physicalQuantity;
       row.Variance = item.variance;
       row.Status = item.status;
+      row.Remarks = item.clientRemarks || "-";
       row["Last Audited"] = item.lastAudited ? new Date(item.lastAudited).toLocaleString() : "-";
       return row;
     });
@@ -354,12 +472,13 @@ const Reports = () => {
         "System Qty": item.systemQuantity,
         "Physical Qty": item.physicalQuantity,
         Variance: item.variance,
+        Remarks: item.clientRemarks || "-",
         "Last Audited": item.lastAudited ? new Date(item.lastAudited).toLocaleString() : "-",
       }));
 
     const summaryData = [{
       "Company": companyName,
-      "Location": selectedLocation ? getLocationName(selectedLocation) : "All Locations",
+      "Location": locationName || "All Locations",
       "Generated Date": new Date().toLocaleString(),
       "Total Items": summary.totalItems,
       "Audited Items": summary.auditedItems,
@@ -379,10 +498,10 @@ const Reports = () => {
     XLSX.utils.book_append_sheet(wb, wsSummary, "Audit Summary");
     XLSX.utils.book_append_sheet(wb, wsDiscrepancy, "Discrepancies");
 
-    const locationInfo = selectedLocation ? `_${getLocationName(selectedLocation)}` : "";
+    const locationInfo = locationName ? `_${locationName}` : "";
     XLSX.writeFile(wb, `complete_audit_data${locationInfo}.xlsx`);
     toast.success("Combined Excel report downloaded");
-  }, [baseTableData, summary, selectedLocation, getLocationName, companyName]);
+  }, [baseTableData, summary, locationName, companyName]);
 
   const formatQuestionnaireAnswer = useCallback((answer: string | string[], question: Question) => {
       let val: any = answer;
@@ -407,7 +526,6 @@ const Reports = () => {
     doc.text(`Company: ${companyName || "N/A"}`, 14, currentY);
     
     currentY += 7;
-    const locationName = getLocationName(selectedLocation);
     const locationText = locationName ? `Location: ${locationName}` : "Location: All Locations";
     doc.text(locationText, 14, currentY);
     
@@ -470,13 +588,21 @@ const Reports = () => {
     observations.forEach((obs) => { doc.setFontSize(11); doc.text(`• ${obs}`, 16, observationY); observationY += 7; });
 
     const discrepancies = baseTableData.filter((item) => item.status === "discrepancy").map((item) => {
-        return [item.sku, item.name, item.location, item.systemQuantity.toString(), item.physicalQuantity.toString(), item.variance.toString()];
+        return [item.sku, item.name, item.location, item.systemQuantity.toString(), item.physicalQuantity.toString(), item.variance.toString(), item.clientRemarks || "-"];
     });
 
     if (discrepancies.length > 0) {
       const discrepancyY = observationY + 10;
       doc.setFontSize(14); doc.text("Discrepancy Details", 14, discrepancyY);
-      autoTable(doc, { startY: discrepancyY + 5, head: [["SKU", "Name", "Location", "System", "Physical", "Variance"]], body: discrepancies, theme: "grid", headStyles: { fillColor: [249, 115, 22] }, styles: { fontSize: 8 }, columnStyles: { 6: { cellWidth: 40 } } });
+      autoTable(doc, { 
+        startY: discrepancyY + 5, 
+        head: [["SKU", "Name", "Location", "System", "Physical", "Variance", "Remarks"]], 
+        body: discrepancies, 
+        theme: "grid", 
+        headStyles: { fillColor: [249, 115, 22] }, 
+        styles: { fontSize: 8 }, 
+        columnStyles: { 6: { cellWidth: 30 } } 
+      });
     }
 
     if (selectedLocation && selectedLocation !== "all") {
@@ -524,10 +650,10 @@ const Reports = () => {
         doc.text(`Date: ${currentDate}`, 120, signOffY + 30);
     }
 
-    const locationInfo = selectedLocation ? `_${getLocationName(selectedLocation)}` : "";
+    const locationInfo = locationName ? `_${locationName}` : "";
     doc.save(`inventory_audit_report${locationInfo}.pdf`);
     toast.success("PDF Report downloaded");
-  }, [selectedLocation, summary, baseTableData, getLocationName, questionnaireAnswers, getQuestionsForLocation, formatQuestionnaireAnswer, companyName]);
+  }, [selectedLocation, locationName, summary, baseTableData, questionnaireAnswers, getQuestionsForLocation, formatQuestionnaireAnswer, companyName]);
 
   const handleShowMore = () => { setVisibleCount((prev) => prev + 100); };
   const handleShowAll = () => { setVisibleCount(filteredTableData.length); };
@@ -536,155 +662,234 @@ const Reports = () => {
   return (
     <AppLayout>
       <div>
-        {isAdmin || availableLocations.length > 0 ? (
-          <div className="space-y-6" ref={reportRef}>
-            <div className="flex justify-between items-center">
-              <div>
-                <h1 className="text-3xl font-bold tracking-tight text-gray-900">Reports</h1>
-                <p className="text-muted-foreground">Generate and download inventory audit reports with auditor tracking</p>
-              </div>
-              {shouldShowLocationFilter && (
-                <LocationFilterDropdown
-                  selectedLocation={selectedLocation}
-                  onLocationChange={(value) => { setSelectedLocation(value); setVisibleCount(100); }}
-                  availableLocations={availableLocations}
-                  showAllOption={isAdmin || availableLocations.length > 1}
-                />
-              )}
+        <div className="space-y-6" ref={reportRef}>
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight text-gray-900">Reports</h1>
+              <p className="text-muted-foreground">Generate and download inventory audit reports with auditor tracking</p>
             </div>
-
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-              <Card className="bg-gradient-to-br from-indigo-50 to-white shadow-sm border-indigo-100">
-                <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><FileSpreadsheet className="h-5 w-5 text-indigo-600" />Reconciliation</CardTitle></CardHeader>
-                <CardContent className="space-y-2"><p className="text-sm text-gray-500">Complete report with auditor breakdown.</p><Button variant="outline" className="w-full bg-white hover:bg-indigo-50 border-indigo-200 text-indigo-700 hover:text-indigo-800" onClick={downloadReconciliationReport}><Download className="mr-2 h-4 w-4" />Download CSV</Button></CardContent>
-              </Card>
-              <Card className="bg-gradient-to-br from-red-50 to-white shadow-sm border-red-100">
-                <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><FileText className="h-5 w-5 text-red-600" />Discrepancies</CardTitle></CardHeader>
-                <CardContent className="space-y-2"><p className="text-sm text-gray-500">Filtered report showing only variances.</p><Button variant="outline" className="w-full bg-white hover:bg-red-50 border-red-200 text-red-700 hover:text-red-800" onClick={downloadDiscrepancyReport}><Download className="mr-2 h-4 w-4" />Download CSV</Button></CardContent>
-              </Card>
-              <Card className="bg-gradient-to-br from-green-50 to-white shadow-sm border-green-100">
-                <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><FileText className="h-5 w-5 text-green-600" />Audit Summary</CardTitle></CardHeader>
-                <CardContent className="space-y-2"><p className="text-sm text-gray-500">High-level summary of the audit metrics.</p><Button variant="outline" className="w-full bg-white hover:bg-green-50 border-green-200 text-green-700 hover:text-green-800" onClick={downloadSummaryReport}><Download className="mr-2 h-4 w-4" />Download CSV</Button></CardContent>
-              </Card>
-              <Card className="bg-gradient-to-br from-slate-50 to-white shadow-sm border-slate-100">
-                <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><TableIcon className="h-5 w-5 text-slate-600" />Combined Excel</CardTitle></CardHeader>
-                <CardContent className="space-y-2"><p className="text-sm text-gray-500">All reports combined in one Excel file.</p><Button variant="outline" className="w-full bg-white hover:bg-indigo-50 border-slate-200 text-slate-700 hover:text-indigo-700" onClick={downloadCombinedExcelReport}><Download className="mr-2 h-4 w-4" />Download XLSX</Button></CardContent>
-              </Card>
-              <Card className="bg-gradient-to-br from-violet-50 to-white shadow-sm border-violet-100">
-                <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><FileType className="h-5 w-5 text-violet-600" />Complete PDF</CardTitle></CardHeader>
-                <CardContent className="space-y-2"><p className="text-sm text-gray-500">Formal printable audit report.</p><Button variant="outline" className="w-full bg-white hover:bg-violet-50 border-violet-200 text-violet-700 hover:text-violet-800" onClick={generatePDFReport}><Download className="mr-2 h-4 w-4" />Download PDF</Button></CardContent>
-              </Card>
+            <div className="flex gap-3 items-center">
+                {canSubmit && (
+                  <Button onClick={handleSubmitClick} disabled={isSubmitting} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                    {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                    Submit to Client
+                  </Button>
+                )}
+                {canFinalize && (
+                  <Button onClick={handleFinalizeClick} className="bg-green-600 hover:bg-green-700 text-white">
+                    <CheckCheck className="mr-2 h-4 w-4" /> Finalize Audit
+                  </Button>
+                )}
             </div>
+          </div>
 
-            <Card className="bg-white shadow-sm border-gray-200">
-              <CardHeader>
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                  <CardTitle className="text-gray-900">Detailed Report with Filters</CardTitle>
-                  <div className="flex flex-wrap items-center gap-2">
-                    
-                    <div className="w-[150px]">
-                      <Select value={statusFilter} onValueChange={(val) => {
-                        setStatusFilter(val);
-                        if (val !== "discrepancy") setSortOrder("default");
-                      }}>
-                        <SelectTrigger className="focus:ring-indigo-600 border-gray-200"><div className="flex items-center gap-2"><Filter className="h-4 w-4" /><SelectValue placeholder="Status" /></div></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Statuses</SelectItem>
-                          <SelectItem value="matched">Matched</SelectItem>
-                          <SelectItem value="discrepancy">Discrepancy</SelectItem>
-                          <SelectItem value="pending">Pending</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            <Card className="bg-gradient-to-br from-indigo-50 to-white shadow-sm border-indigo-100">
+              <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><FileSpreadsheet className="h-5 w-5 text-indigo-600" />Reconciliation</CardTitle></CardHeader>
+              <CardContent className="space-y-2"><p className="text-sm text-gray-500">Complete report with auditor breakdown.</p><Button variant="outline" className="w-full bg-white hover:bg-indigo-50 border-indigo-200 text-indigo-700 hover:text-indigo-800" onClick={downloadReconciliationReport}><Download className="mr-2 h-4 w-4" />Download CSV</Button></CardContent>
+            </Card>
+            <Card className="bg-gradient-to-br from-red-50 to-white shadow-sm border-red-100">
+              <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><FileText className="h-5 w-5 text-red-600" />Discrepancies</CardTitle></CardHeader>
+              <CardContent className="space-y-2"><p className="text-sm text-gray-500">Filtered report showing only variances.</p><Button variant="outline" className="w-full bg-white hover:bg-red-50 border-red-200 text-red-700 hover:text-red-800" onClick={downloadDiscrepancyReport}><Download className="mr-2 h-4 w-4" />Download CSV</Button></CardContent>
+            </Card>
+            <Card className="bg-gradient-to-br from-green-50 to-white shadow-sm border-green-100">
+              <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><FileText className="h-5 w-5 text-green-600" />Audit Summary</CardTitle></CardHeader>
+              <CardContent className="space-y-2"><p className="text-sm text-gray-500">High-level summary of the audit metrics.</p><Button variant="outline" className="w-full bg-white hover:bg-green-50 border-green-200 text-green-700 hover:text-green-800" onClick={downloadSummaryReport}><Download className="mr-2 h-4 w-4" />Download CSV</Button></CardContent>
+            </Card>
+            <Card className="bg-gradient-to-br from-slate-50 to-white shadow-sm border-slate-100">
+              <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><TableIcon className="h-5 w-5 text-slate-600" />Combined Excel</CardTitle></CardHeader>
+              <CardContent className="space-y-2"><p className="text-sm text-gray-500">All reports combined in one Excel file.</p><Button variant="outline" className="w-full bg-white hover:bg-indigo-50 border-slate-200 text-slate-700 hover:text-indigo-700" onClick={downloadCombinedExcelReport}><Download className="mr-2 h-4 w-4" />Download XLSX</Button></CardContent>
+            </Card>
+            <Card className="bg-gradient-to-br from-violet-50 to-white shadow-sm border-violet-100">
+              <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><FileType className="h-5 w-5 text-violet-600" />Complete PDF</CardTitle></CardHeader>
+              <CardContent className="space-y-2"><p className="text-sm text-gray-500">Formal printable audit report.</p><Button variant="outline" className="w-full bg-white hover:bg-violet-50 border-violet-200 text-violet-700 hover:text-violet-800" onClick={generatePDFReport}><Download className="mr-2 h-4 w-4" />Download PDF</Button></CardContent>
+            </Card>
+          </div>
 
-                    <div className="w-[180px]">
-                      <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                        <SelectTrigger className="focus:ring-indigo-600 border-gray-200"><div className="flex items-center gap-2"><Filter className="h-4 w-4" /><SelectValue placeholder="Category" /></div></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Categories</SelectItem>
-                          {uniqueCategories.map(cat => (
-                            <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {statusFilter === "discrepancy" && (
-                      <div className="w-[180px]">
-                        <Select value={sortOrder} onValueChange={setSortOrder}>
-                          <SelectTrigger className="focus:ring-indigo-600 border-gray-200">
-                            <div className="flex items-center gap-2">
-                              <ArrowUpDown className="h-4 w-4" />
-                              <SelectValue placeholder="Sort Variance" />
-                            </div>
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="default">Default Sort</SelectItem>
-                            <SelectItem value="variance-asc">Variance (Low ↑)</SelectItem>
-                            <SelectItem value="variance-desc">Variance (High ↓)</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-
-                    <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={downloadFilteredReport}>
-                      <Download className="mr-2 h-4 w-4" />
-                      Export Filtered
-                    </Button>
+          <Card className="bg-white shadow-sm border-gray-200">
+            <CardHeader>
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <CardTitle className="text-gray-900">Detailed Report with Filters</CardTitle>
+                <div className="flex flex-wrap items-center gap-2">
+                  
+                  <div className="w-[150px]">
+                    <Select value={statusFilter} onValueChange={(val) => {
+                      setStatusFilter(val);
+                      if (val !== "discrepancy") setSortOrder("default");
+                    }}>
+                      <SelectTrigger className="focus:ring-indigo-600 border-gray-200"><div className="flex items-center gap-2"><Filter className="h-4 w-4" /><SelectValue placeholder="Status" /></div></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Statuses</SelectItem>
+                        <SelectItem value="matched">Matched</SelectItem>
+                        <SelectItem value="discrepancy">Discrepancy</SelectItem>
+                        <SelectItem value="pending">Pending</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-between mb-2 text-sm text-gray-500">
-                  <span>Showing <span className="font-medium text-gray-900">{visibleTableData.length}</span> of <span className="font-medium text-gray-900">{filteredTableData.length}</span> items</span>
-                  {filteredTableData.length > 0 && !showingAll && (<div className="flex gap-2"><Button size="sm" variant="outline" className="hover:text-indigo-600" onClick={handleShowMore}>Show next 100</Button><Button size="sm" variant="ghost" className="hover:text-indigo-600" onClick={handleShowAll}>Show all</Button></div>)}
-                </div>
 
-                <div className="rounded-md border border-gray-200">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-gray-50">
-                        <TableHead>SKU</TableHead>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Location</TableHead>
-                        <TableHead>Category</TableHead>
-                        <TableHead>System Qty</TableHead>
-                        <TableHead>Physical Qty</TableHead>
-                        <TableHead>Variance</TableHead>
-                        <TableHead>Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {visibleTableData.length > 0 ? (
-                        visibleTableData.map((item) => (
+                  <div className="w-[180px]">
+                    <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                      <SelectTrigger className="focus:ring-indigo-600 border-gray-200"><div className="flex items-center gap-2"><Filter className="h-4 w-4" /><SelectValue placeholder="Category" /></div></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Categories</SelectItem>
+                        {uniqueCategories.map(cat => (
+                          <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {statusFilter === "discrepancy" && (
+                    <div className="w-[180px]">
+                      <Select value={sortOrder} onValueChange={setSortOrder}>
+                        <SelectTrigger className="focus:ring-indigo-600 border-gray-200">
+                          <div className="flex items-center gap-2">
+                            <ArrowUpDown className="h-4 w-4" />
+                            <SelectValue placeholder="Sort Variance" />
+                          </div>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="default">Default Sort</SelectItem>
+                          <SelectItem value="variance-asc">Variance (Low ↑)</SelectItem>
+                          <SelectItem value="variance-desc">Variance (High ↓)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={downloadFilteredReport}>
+                    <Download className="mr-2 h-4 w-4" />
+                    Export Filtered
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between mb-2 text-sm text-gray-500">
+                <span>Showing <span className="font-medium text-gray-900">{visibleTableData.length}</span> of <span className="font-medium text-gray-900">{filteredTableData.length}</span> items</span>
+                {filteredTableData.length > 0 && !showingAll && (<div className="flex gap-2"><Button size="sm" variant="outline" className="hover:text-indigo-600" onClick={handleShowMore}>Show next 100</Button><Button size="sm" variant="ghost" className="hover:text-indigo-600" onClick={handleShowAll}>Show all</Button></div>)}
+              </div>
+
+              <div className="rounded-md border border-gray-200">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-gray-50">
+                      <TableHead className="w-[100px]">SKU</TableHead>
+                      <TableHead className="w-[180px]">Name</TableHead>
+                      <TableHead>Location</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead className="text-center w-[80px]">Sys</TableHead>
+                      <TableHead className="text-center w-[80px]">Phy</TableHead>
+                      <TableHead className="text-center w-[80px]">Var</TableHead>
+                      <TableHead className="text-center w-[100px]">Status</TableHead>
+                      <TableHead className="w-[180px]">Remarks</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {visibleTableData.length > 0 ? (
+                      visibleTableData.map((item) => {
+                        const isDiscrepancy = item.status === "discrepancy";
+                        const canEdit = canEditRemarkForItem(item.location);
+
+                        return (
                           <TableRow key={`${item.id}-${item.location}`}>
-                            <TableCell className="font-medium text-gray-900">{item.sku}</TableCell>
-                            <TableCell>{item.name}</TableCell>
-                            <TableCell>{item.location}</TableCell>
-                            <TableCell>{item.category}</TableCell>
-                            <TableCell>{item.systemQuantity}</TableCell>
-                            <TableCell>{item.physicalQuantity}</TableCell>
-                            <TableCell className={item.variance !== 0 ? "text-red-600 font-bold" : ""}>{item.variance}</TableCell>
-                            <TableCell>
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${item.status === "matched" ? "bg-green-100 text-green-800" : item.status === "discrepancy" ? "bg-red-100 text-red-800" : "bg-gray-100 text-gray-800"}`}>
+                            <TableCell className="font-medium text-gray-900 text-xs">{item.sku}</TableCell>
+                            <TableCell className="truncate max-w-[180px] text-sm" title={item.name}>{item.name}</TableCell>
+                            <TableCell className="text-xs">{item.location}</TableCell>
+                            <TableCell className="text-xs">{item.category}</TableCell>
+                            <TableCell className="text-center font-medium">{item.systemQuantity}</TableCell>
+                            <TableCell className="text-center font-medium">{item.physicalQuantity}</TableCell>
+                            <TableCell className={`text-center font-bold ${item.variance !== 0 ? "text-red-600" : ""}`}>{item.variance}</TableCell>
+                            <TableCell className="text-center">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${item.status === "matched" ? "bg-green-100 text-green-800" : item.status === "discrepancy" ? "bg-red-100 text-red-800" : "bg-gray-100 text-gray-800"}`}>
                                 {item.status === "matched" ? "Matched" : item.status === "discrepancy" ? "Discrepancy" : "Pending"}
                               </span>
                             </TableCell>
+                            <TableCell>
+                              {editingRemark === item.id ? (
+                                <Input 
+                                  value={tempRemark} 
+                                  onChange={(e) => setTempRemark(e.target.value)}
+                                  className="h-7 text-xs"
+                                  placeholder="Add remark..."
+                                  autoFocus
+                                  onBlur={() => handleRemarkSave(item.id)}
+                                  onKeyDown={(e) => e.key === 'Enter' && handleRemarkSave(item.id)}
+                                />
+                              ) : (
+                                <div 
+                                  className={`text-xs flex items-center gap-1 min-h-[24px] ${canEdit && isDiscrepancy ? "cursor-pointer hover:bg-gray-50 rounded px-1 -ml-1 border border-transparent hover:border-gray-200" : ""}`}
+                                  onClick={() => canEdit && isDiscrepancy ? handleRemarkStart(item.id, item.clientRemarks || "") : undefined}
+                                >
+                                  {item.clientRemarks ? (
+                                    <span className="text-gray-700">{item.clientRemarks}</span>
+                                  ) : canEdit && isDiscrepancy ? (
+                                    <span className="text-muted-foreground italic flex items-center gap-1">
+                                      <MessageSquare className="h-3 w-3" /> Add remark
+                                    </span>
+                                  ) : (
+                                    <span className="text-muted-foreground">-</span>
+                                  )}
+                                </div>
+                              )}
+                            </TableCell>
                           </TableRow>
-                        ))
-                      ) : (
-                        <TableRow><TableCell colSpan={8} className="text-center py-4 text-gray-500">No data available matching filters</TableCell></TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        ) : (
-          <div className="flex items-center justify-center min-h-[50vh]"><h1 className="text-gray-400 font-semibold text-xl">Currently You Don't have access</h1></div>
-        )}
+                        );
+                      })
+                    ) : (
+                      <TableRow><TableCell colSpan={9} className="text-center py-4 text-gray-500">No data available matching filters</TableCell></TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
+
+      <Dialog open={isOtpDialogOpen} onOpenChange={setIsOtpDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Audit Finalization Verification</DialogTitle>
+            <DialogDescription>
+              To finalize this audit, please verify with the One-Time Password sent to your registered device.
+              This action will reset the current inventory counts for this location.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Verification Code</Label>
+              <div className="flex gap-2">
+                <Input 
+                  placeholder="Enter 6-digit code" 
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value)}
+                  maxLength={6}
+                />
+                <Button 
+                  onClick={handleSendOtp} 
+                  disabled={isSendingOtp}
+                  variant="secondary"
+                >
+                  {isSendingOtp ? <Loader2 className="h-4 w-4 animate-spin" /> : "Send OTP"}
+                </Button>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsOtpDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleVerifyAndFinalize} disabled={isVerifyingOtp}>
+              {isVerifyingOtp ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Verifying...
+                </>
+              ) : (
+                "Verify & Finalize"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 };

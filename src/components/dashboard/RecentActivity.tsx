@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useInventory } from "@/context/InventoryContext";
+import { useInventory, Assignment } from "@/context/InventoryContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Check, X } from "lucide-react";
 import { format } from "date-fns";
@@ -9,14 +9,18 @@ import { useCompany } from "@/context/CompanyContext";
 import { useLocationFilter } from "@/hooks/useLocationFilter";
 
 export const RecentActivity = () => {
-  const { auditedItems, locations } = useInventory();
+  const { auditedItems, locations, assignments } = useInventory();
   const { currentUser } = useUser();
   const { accessibleLocations } = useUserAccess();
-  const { selectedCompanyId } = useCompany();
+  // FIX: Import selectedAssignmentId to ensure strict filtering
+  const { selectedCompanyId, selectedAssignmentId } = useCompany();
   const { selectedLocation } = useLocationFilter();
 
   const userAccessibleLocations = accessibleLocations();
-  const accessibleLocationNames = userAccessibleLocations.map((loc) => loc.name);
+  const accessibleLocationNames = useMemo(
+    () => userAccessibleLocations.map((loc) => loc.name),
+    [userAccessibleLocations]
+  );
 
   const locationByName = useMemo(() => {
     const map = new Map<string, (typeof locations)[number]>();
@@ -26,42 +30,72 @@ export const RecentActivity = () => {
     return map;
   }, [locations]);
 
-  const filteredItems = auditedItems.filter((item) => {
-    const itemLocation = locationByName.get(item.location);
-
-    if (!itemLocation) return false;
-
-    if (selectedCompanyId && itemLocation.companyId !== selectedCompanyId) {
-      return false;
+  const filteredItems = useMemo(() => {
+    // Determine strict assignment location constraint
+    let assignmentLocationName: string | null = null;
+    if (selectedAssignmentId) {
+       const ass = assignments.find((a: Assignment) => a.id === selectedAssignmentId);
+       if (ass) {
+          const loc = locations.find(l => l.id === ass.locationId);
+          if (loc) assignmentLocationName = loc.name;
+       }
     }
 
-    if (currentUser?.role === "admin") {
+    return auditedItems.filter((item) => {
+      if (!item.status || item.status === "pending") return false;
+
+      // FIX: If assignment is selected, ONLY show items from that location
+      if (assignmentLocationName && item.location !== assignmentLocationName) {
+        return false;
+      }
+
+      const itemLocation = locationByName.get(item.location);
+      if (!itemLocation) return false;
+
+      if (selectedCompanyId && itemLocation.companyId !== selectedCompanyId) {
+        return false;
+      }
+
+      if (currentUser?.role === "admin") {
+        if (selectedLocation && selectedLocation !== "all") {
+          const locationObj = locations.find((loc) => loc.id === selectedLocation);
+          return item.location === locationObj?.name;
+        }
+        return true;
+      }
+
       if (selectedLocation && selectedLocation !== "all") {
         const locationObj = locations.find((loc) => loc.id === selectedLocation);
-        return item.location === locationObj?.name;
+        return (
+          item.location === locationObj?.name &&
+          accessibleLocationNames.includes(item.location)
+        );
       }
-      return true;
-    }
 
-    if (selectedLocation && selectedLocation !== "all") {
-      const locationObj = locations.find((loc) => loc.id === selectedLocation);
-      return (
-        item.location === locationObj?.name &&
-        accessibleLocationNames.includes(item.location)
-      );
-    }
+      return accessibleLocationNames.includes(item.location);
+    });
+  }, [
+    auditedItems,
+    locationByName,
+    selectedCompanyId,
+    currentUser,
+    selectedLocation,
+    accessibleLocationNames,
+    locations,
+    selectedAssignmentId, // Added dependency
+    assignments
+  ]);
 
-    return accessibleLocationNames.includes(item.location);
-  });
-
-  const recentItems = [...filteredItems]
-    .sort((a, b) => {
-      if (!a.lastAudited || !b.lastAudited) return 0;
-      return (
-        new Date(b.lastAudited).getTime() - new Date(a.lastAudited).getTime()
-      );
-    })
-    .slice(0, 5);
+  const recentItems = useMemo(() => {
+    return [...filteredItems]
+      .sort((a, b) => {
+        if (!a.lastAudited || !b.lastAudited) return 0;
+        return (
+          new Date(b.lastAudited).getTime() - new Date(a.lastAudited).getTime()
+        );
+      })
+      .slice(0, 5);
+  }, [filteredItems]);
 
   if (recentItems.length === 0) {
     return (
@@ -72,7 +106,7 @@ export const RecentActivity = () => {
         <CardContent>
           <div className="text-center text-muted-foreground py-8">
             No recent audit activity
-            {selectedLocation && selectedLocation !== "all" && " for this location"}
+            {(selectedLocation && selectedLocation !== "all") || selectedAssignmentId ? " for this location" : ""}
             .
           </div>
         </CardContent>

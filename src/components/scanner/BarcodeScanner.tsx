@@ -5,25 +5,28 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { Barcode, Scan, Check, MapPin, Keyboard } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { useUser } from "@/context/UserContext"; 
 import { useUserAccess } from "@/hooks/useUserAccess";
 import { LocationAuditSummary } from "@/components/locations/LocationAuditSummary";
 import { RecentActivity } from "@/components/dashboard/RecentActivity";
+import { useCompany } from "@/context/CompanyContext";
 
 export const BarcodeScanner = () => {
     const [isScanning, setIsScanning] = useState(false);
     const [isHardwareScannerMode, setIsHardwareScannerMode] = useState(false);
     const [manualBarcode, setManualBarcode] = useState("");
-    const [selectedLocation, setSelectedLocation] = useState(""); 
     const [scannedBarcode, setScannedBarcode] = useState(""); 
     const [debugInfo, setDebugInfo] = useState("");
     
-    const { itemMaster, auditedItems, updateAuditedItem, locations } = useInventory();
+    const { itemMaster, auditedItems, updateAuditedItem, locations, assignments } = useInventory();
     const { accessibleLocations } = useUserAccess();
     const { currentUser } = useUser();
-    const userAccessibleLocations = accessibleLocations();
+    const { selectedAssignmentId } = useCompany();
+
+    // AUTO-DETECT LOCATION FROM ASSIGNMENT
+    const currentAssignment = assignments.find(a => a.id === selectedAssignmentId);
+    const selectedLocation = currentAssignment?.locationId || "";
     
     const html5QrCodeRef = useRef(null);
     const hardwareScannerInputRef = useRef(null);
@@ -35,14 +38,9 @@ export const BarcodeScanner = () => {
     // Handle item scanning with auditor tracking
     const handleItemScan = async (barcode, locationId) => {
         console.log("=== handleItemScan called ===");
-        console.log("Barcode:", barcode);
-        console.log("Location ID:", locationId);
         
         if (typeof updateAuditedItem !== 'function') {
-            console.error("updateAuditedItem is not available in InventoryContext.");
-            toast.error("System Error", {
-                description: "Inventory update function missing.",
-            });
+            console.error("updateAuditedItem is not available.");
             return false;
         }
 
@@ -50,9 +48,7 @@ export const BarcodeScanner = () => {
             let locationName = '';
             
             if (!locationId || locationId === "") {
-                 toast.error("Location Required", {
-                    description: "Please select a location from the dropdown before scanning.",
-                 });
+                 toast.error("Location Required", { description: "No active assignment location found." });
                  return false; 
             }
             
@@ -60,12 +56,11 @@ export const BarcodeScanner = () => {
             locationName = locationObj?.name || '';
             
             if (locationName === '') {
-                 toast.error("Invalid Location", {
-                    description: "The selected location ID could not be matched to a location name.",
-                 });
+                 toast.error("Invalid Location", { description: "Location name mismatch." });
                  return false;
             }
             
+            // 1. Find the Master Item (Global Definition)
             const masterItem = itemMaster.find(item => 
                 (item.sku === barcode) && item.location === locationName
             );
@@ -84,11 +79,16 @@ export const BarcodeScanner = () => {
                 return false;
             }
 
+            // 2. Find Existing Audit Entry for this Assignment
+            // FIX: Match by SKU/Location instead of ID, because ID changes when forked to assignment
             const existingAuditedItem = auditedItems.find(
-                item => item.id === masterItem.id && item.location === locationName
+                item => item.sku === masterItem.sku && item.location === locationName
             );
 
-            const existingAuditorEntries = existingAuditedItem?.auditorEntries || [];
+            // Use the existing entry's ID if available, otherwise fallback to Master (InventoryContext will handle the fork)
+            const targetItem = existingAuditedItem || masterItem;
+
+            const existingAuditorEntries = targetItem.auditorEntries || [];
             const currentAuditorEntry = existingAuditorEntries.find(
                 entry => entry.auditorId === currentUser?.id
             );
@@ -97,16 +97,11 @@ export const BarcodeScanner = () => {
             const newAuditorQuantity = currentAuditorQuantity + 1;
 
             const itemToUpdate = {
-                id: masterItem.id,
-                sku: masterItem.sku,
-                name: masterItem.name,
-                category: masterItem.category,
-                location: locationName, 
-                systemQuantity: masterItem.systemQuantity,
+                ...targetItem, // Preserve all props including correct ID if it exists
                 physicalQuantity: newAuditorQuantity, 
-                status: 'pending',
+                status: 'pending' as const,
                 lastAudited: new Date().toISOString(),
-                notes: existingAuditedItem?.notes || masterItem.notes,
+                notes: targetItem.notes || masterItem.notes,
             };
 
             await updateAuditedItem(
@@ -115,9 +110,8 @@ export const BarcodeScanner = () => {
                 currentUser?.email || currentUser?.name || 'Unknown Auditor'
             );
 
-            const updatedItem = itemMaster.find(i => i.id === masterItem.id && i.location === locationName);
-            const totalPhysicalQuantity = updatedItem?.physicalQuantity || newAuditorQuantity;
-
+            // Calculate display totals
+            const totalPhysicalQuantity = (targetItem.physicalQuantity || 0) + 1; // Approximate immediate update
             const quantityInfo = currentAuditorQuantity > 0 
                 ? `Your count: ${currentAuditorQuantity} → ${newAuditorQuantity} (Total: ${totalPhysicalQuantity}/${masterItem.systemQuantity})`
                 : `Your count: ${newAuditorQuantity} (Total: ${totalPhysicalQuantity}/${masterItem.systemQuantity})`;
@@ -135,11 +129,9 @@ export const BarcodeScanner = () => {
             }
 
             return true;
-        } catch (error) {
-            console.error("Scanning failed due to unhandled error:", error);
-            toast.error("Scanning Error", {
-                description: error.message || "Failed to process the scanned item",
-            });
+        } catch (error: any) {
+            console.error("Scanning failed:", error);
+            toast.error("Scanning Error", { description: error.message });
             return false;
         }
     };
@@ -241,7 +233,7 @@ export const BarcodeScanner = () => {
     const handleStartHardwareScanner = () => {
         if (!selectedLocation) {
             toast.error("Location required", {
-                description: "Please select a specific location before scanning."
+                description: "No active assignment location found."
             });
             return;
         }
@@ -270,7 +262,7 @@ export const BarcodeScanner = () => {
     const handleStartScanning = async () => {
         if (!selectedLocation) {
             toast.error("Location required", {
-                description: "Please select a specific location before scanning."
+                description: "No active assignment location found."
             });
             return;
         }
@@ -350,7 +342,7 @@ export const BarcodeScanner = () => {
         e.preventDefault();
         if (!selectedLocation) {
             toast.error("Location required", {
-                description: "Please select a location before submitting."
+                description: "No active assignment location found."
             });
             return;
         }
@@ -396,43 +388,12 @@ export const BarcodeScanner = () => {
                 </CardHeader>
                 <CardContent>
                     <div className="space-y-4">
-                        <div className="flex items-center gap-2">
-                            <MapPin className="h-4 w-4 text-gray-500" />
-                            <Select value={selectedLocation} onValueChange={setSelectedLocation}>
-                                <SelectTrigger className="flex-1 focus:ring-indigo-600 focus:border-indigo-600">
-                                    <SelectValue placeholder="Select location" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {currentUser?.role === "super_admin" || currentUser?.role === "admin" ? (
-                                    <>
-                                        {locations.map((location) => (
-                                            <SelectItem key={location.id} value={location.id}>
-                                                {location.name}
-                                            </SelectItem>
-                                        ))}
-                                    </>
-                                    ) : (
-                                    userAccessibleLocations.length > 0 ? (
-                                        userAccessibleLocations.map((location) => (
-                                            <SelectItem key={location.id} value={location.id}>
-                                                {location.name}
-                                            </SelectItem>
-                                        ))
-                                    ) : (
-                                        <SelectItem value="no-locations" disabled>
-                                            No assigned locations
-                                        </SelectItem>
-                                    )
-                                    )}
-                                </SelectContent>
-                            </Select>
+                        <div className="flex items-center gap-2 mb-2 p-2 bg-gray-50 rounded border border-gray-200">
+                            <MapPin className="h-4 w-4 text-indigo-500" />
+                            <span className="text-sm font-medium text-gray-700">
+                                Location: {locations.find(l => l.id === selectedLocation)?.name || 'Loading...'}
+                            </span>
                         </div>
-                        
-                        {selectedLocation && (
-                            <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded border border-gray-100">
-                                <strong>Selected:</strong> {locations.find(l => l.id === selectedLocation)?.name || 'Error'}
-                            </div>
-                        )}
                         
                         {isHardwareScannerMode ? (
                             <div>
@@ -537,24 +498,20 @@ export const BarcodeScanner = () => {
                 </CardContent>
             </Card>
 
-            {/* Right Column: Summary + Recent Activity */}
             <div className="space-y-6">
                 {selectedLocation ? (
                     <>
-                        {/* 1. Stats Dashboard */}
                         <LocationAuditSummary 
                             locationId={selectedLocation} 
                             hideDropdown={true} 
                         />
-                        
-                        {/* 2. Activity Feed (Recent Scans) */}
                         <RecentActivity selectedLocation={selectedLocation} />
                     </>
                 ) : (
                     <Card className="h-full flex items-center justify-center p-6 shadow-sm border-gray-200">
                         <div className="text-center text-gray-400">
                             <MapPin className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                            <p>Select a location from the dropdown on the left to view audit summary.</p>
+                            <p>Loading active assignment...</p>
                         </div>
                     </Card>
                 )}

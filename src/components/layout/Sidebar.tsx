@@ -15,6 +15,7 @@ import {
   Upload,
   ListChecks,
   Building2,
+  History,
 } from "lucide-react";
 import { useUser } from "@/context/UserContext";
 import { Button } from "@/components/ui/button";
@@ -32,7 +33,7 @@ export function Sidebar({
   setMobileOpen?: (open: boolean) => void;
 }) {
   const location = useLocation();
-  const { isAuthenticated, logout, currentUser } = useUser();
+  const { isAuthenticated, logout } = useUser();
   const { accessibleLocations, userRole, userRoleDisplay } = useUserAccess();
   const { selectedCompanyId } = useCompany();
 
@@ -71,7 +72,6 @@ export function Sidebar({
       setCurrentCompanyName(null);
     }
   }, [selectedCompanyId]);
-
   useEffect(() => {
     fetchCompanyName();
   }, [fetchCompanyName]);
@@ -87,6 +87,7 @@ export function Sidebar({
     nav.push(
       { name: "Search", href: "/search", icon: Search },
       { name: "Reports", href: "/reports", icon: FileSpreadsheet },
+      { name: "History", href: "/history", icon: History },
       { name: "Analytics", href: "/analytics", icon: BarChart3 }
     );
     nav.push({
@@ -98,25 +99,21 @@ export function Sidebar({
       nav.push({ name: "Upload Data", href: "/upload", icon: Upload });
     }
     nav.push({ name: "Locations", href: "/locations", icon: Building });
-    
+  
     if (["super_admin", "admin", "client"].includes(userRole)) {
       nav.push({ name: "Admin Overview", href: "/admin-overview", icon: Settings });
     }
-    
     if (["super_admin", "admin"].includes(userRole)) {
       nav.push({ name: "User Management", href: "/users", icon: Users });
     }
-    
     if (userRole === "super_admin") {
       nav.push({ name: "Company", href: "/add-company", icon: Building2 });
     }
-    
     nav.push({ name: "My Profile", href: "/profile", icon: UserCircle });
     return nav;
   }, [userRole]);
 
   const handleLogout = () => logout();
-
   const handleLinkClick = () => {
     if (isMobile && setMobileOpen) setMobileOpen(false);
   };

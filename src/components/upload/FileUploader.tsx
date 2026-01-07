@@ -1,9 +1,7 @@
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useInventory } from "@/context/InventoryContext";
 import { toast } from "sonner";
 import { FileInputCard } from "./FileInputCard";
-import { LocationSelector } from "./LocationSelector";
-import { ImportSection } from "./ImportSection";
 import { NoPermissionCard } from "./NoPermissionCard";
 import {
   processCSV,
@@ -11,29 +9,33 @@ import {
   processClosingStockData,
 } from "./utils/csvUtils";
 import { Button } from "@/components/ui/button";
-import { Loader2, AlertCircle } from "lucide-react";
+import { Loader2, AlertCircle, MapPin, Lock } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useCompany } from "@/context/CompanyContext";
 import SupabaseDataService from "@/services/SupabaseDataService";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import { format } from "date-fns";
 
 export interface FileUploaderProps {
   userRole: "admin" | "auditor" | "client";
   assignedLocations?: string[];
   canUploadItemMaster?: boolean;
   canUploadClosingStock?: boolean;
+  onUploadComplete?: () => void;
 }
 
 const generateBatchKey = (): string => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
   }
-
-  const template = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx";
-  return template.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
+  return "batch-" + Math.random().toString(36).substr(2, 9);
 };
 
 export const FileUploader = ({
@@ -41,311 +43,191 @@ export const FileUploader = ({
   assignedLocations = [],
   canUploadItemMaster = false,
   canUploadClosingStock = false,
+  onUploadComplete,
 }: FileUploaderProps) => {
   const [itemMasterFile, setItemMasterFile] = useState<File | null>(null);
   const [closingStockFile, setClosingStockFile] = useState<File | null>(null);
-  const [selectedLocation, setSelectedLocation] = useState<string>("default");
-  const [isImporting, setIsImporting] = useState(false);
 
-  const { setItemMaster, setClosingStock, locations, itemMaster } =
-    useInventory();
-  const { selectedCompanyId } = useCompany();
+  const { setItemMaster, setClosingStock, locations, itemMaster, assignments } = useInventory();
+  const { selectedCompanyId, selectedAssignmentId: contextAssignmentId } = useCompany();
 
-  const accessibleLocations = locations.filter(
-    (location) =>
-      userRole === "admin" ||
-      (assignedLocations && assignedLocations.includes(location.id))
+  // Initialize selected assignment from context
+  const [selectedAssignmentId, setSelectedAssignmentId] = useState<string>(
+    contextAssignmentId ? String(contextAssignmentId) : ""
   );
+
+  // Sync state if context changes
+  useEffect(() => {
+    if (contextAssignmentId) {
+      setSelectedAssignmentId(String(contextAssignmentId));
+    }
+  }, [contextAssignmentId]);
+
+  const activeAssignments = useMemo(() => {
+    return assignments.filter(a => {
+      if (a.status === 'finalized') return false;
+      if (userRole === 'admin') return true;
+      if (userRole === 'auditor') {
+         // Assumes auditor has access to loaded assignments
+         return true; 
+      }
+      return false;
+    });
+  }, [assignments, userRole, assignedLocations]);
 
   const hasItemMaster = itemMaster.length > 0;
 
-  const handleItemMasterUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
+  // Determine current active assignment object based on selection/context
+  const currentActiveAssignment = useMemo(() => {
+     return activeAssignments.find(a => String(a.id) === selectedAssignmentId);
+  }, [activeAssignments, selectedAssignmentId]);
 
-      if (!file.name.toLowerCase().endsWith(".csv")) {
-        toast.error("Invalid file format", {
-          description: "Please upload a CSV file",
-        });
-        e.target.value = "";
-        return;
-      }
+  const targetLocationId = currentActiveAssignment ? currentActiveAssignment.locationId : null;
+  const isAssignmentActive = !!currentActiveAssignment;
 
-      if (file.size > 10 * 1024 * 1024) {
-        toast.error("File too large", {
-          description: "Please upload a file smaller than 10MB",
-        });
-        e.target.value = "";
-        return;
-      }
-
-      setItemMasterFile(file);
-      toast.info("File selected", {
-        description: `${file.name} (${(file.size / 1024).toFixed(2)} KB)`,
-      });
+  const handleFileChange = (file: File | null, setFile: (f: File | null) => void) => {
+    if (file && !file.name.toLowerCase().endsWith(".csv")) {
+      toast.error("Invalid file", { description: "Please upload a CSV file" });
+      return;
     }
+    setFile(file);
   };
 
-  const handleClosingStockUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-
-      if (!hasItemMaster) {
-        toast.error("Item Master Required", {
-          description:
-            "Please upload the Item Master file first before uploading Closing Stock.",
-        });
-        e.target.value = "";
-        return;
-      }
-
-      if (!file.name.toLowerCase().endsWith(".csv")) {
-        toast.error("Invalid file format", {
-          description: "Please upload a CSV file",
-        });
-        e.target.value = "";
-        return;
-      }
-
-      if (file.size > 10 * 1024 * 1024) {
-        toast.error("File too large", {
-          description: "Please upload a file smaller than 10MB",
-        });
-        e.target.value = "";
-        return;
-      }
-
-      setClosingStockFile(file);
-      toast.info("File selected", {
-        description: `${file.name} (${(file.size / 1024).toFixed(2)} KB)`,
-      });
-    }
-  };
+  const [isImporting, setIsImporting] = useState(false);
 
   const handleImport = async () => {
     setIsImporting(true);
 
     try {
+      // --- ITEM MASTER UPLOAD (Company Wide) ---
       if (canUploadItemMaster && itemMasterFile) {
-        if (!selectedCompanyId) {
-          throw new Error(
-            "Please select a company before uploading the Item Master."
-          );
-        }
-
+        if (!selectedCompanyId) throw new Error("Select a company first.");
+        
         const text = await itemMasterFile.text();
         const rows = processCSV(text);
-
-        if (rows.length === 0) {
-          throw new Error("Item Master file is empty or invalid.");
-        }
-
-        const firstRow = rows[0];
-        const requiredColumns = ["sku", "name"];
-        const missingColumns = requiredColumns.filter(
-          (col) => !(col in firstRow)
-        );
-
-        if (missingColumns.length > 0) {
-          throw new Error(
-            `Missing required columns in Item Master: ${missingColumns.join(
-              ", "
-            )}. Required columns are: SKU, Name, Category (optional)`
-          );
-        }
+        if (rows.length === 0) throw new Error("File is empty.");
 
         const processedItems = processItemMasterData(rows);
-
-        if (processedItems.length === 0) {
-          throw new Error("No valid items found in Item Master file");
-        }
-
         const batchKey = generateBatchKey();
-        const itemsWithKey = processedItems.map((item) => ({
-          ...item,
-          uploadBatchKey: batchKey,
+        
+        const itemsWithKey = processedItems.map((item) => ({ 
+            ...item, 
+            uploadBatchKey: batchKey 
         }));
 
         await setItemMaster(itemsWithKey, selectedCompanyId);
-
+        
         await SupabaseDataService.logUploadBatch({
           batchKey,
           companyId: selectedCompanyId,
           locationId: null,
-          locationName: null,
+          locationName: "All Locations",
           uploadType: "item_master",
           totalItems: itemsWithKey.length,
         });
 
-        toast.success("Item Master Uploaded Successfully!", {
-          description: `Loaded ${itemsWithKey.length} products. You can now upload Closing Stock.`,
-        });
-
+        toast.success("Item Master Uploaded", { description: `${itemsWithKey.length} items added.` });
         setItemMasterFile(null);
+        if (onUploadComplete) onUploadComplete();
       }
 
+      // --- CLOSING STOCK UPLOAD (Assignment Specific) ---
       else if (canUploadClosingStock && closingStockFile) {
-        if (!selectedCompanyId) {
-          throw new Error(
-            "Please select a company before uploading Closing Stock."
-          );
-        }
-
-        if (!hasItemMaster) {
-          throw new Error(
-            "Item Master must be uploaded first. Please contact your administrator to upload the Item Master."
-          );
-        }
-
-        if (
-          userRole === "auditor" &&
-          (!selectedLocation || selectedLocation === "default")
-        ) {
-          throw new Error(
-            "Please select a location before uploading closing stock."
-          );
-        }
+        if (!selectedCompanyId) throw new Error("Select a company first.");
+        if (!hasItemMaster) throw new Error("Item Master missing. Please upload it first.");
+        
+        // Validation for Assignment
+        if (!selectedAssignmentId) throw new Error("No assignment selected.");
+        if (!currentActiveAssignment) throw new Error("The selected assignment is not active or valid.");
+        if (!targetLocationId) throw new Error("Selected Assignment has no valid Location linked.");
 
         const text = await closingStockFile.text();
         const rows = processCSV(text);
-
-        if (rows.length === 0) {
-          throw new Error("Closing Stock file is empty or invalid.");
-        }
-
-        const firstRow = rows[0];
-        const requiredColumns = ["sku", "systemquantity"];
-        const missingColumns = requiredColumns.filter((col) => {
-          const lowerCaseKeys = Object.keys(firstRow).map((k) =>
-            k.toLowerCase()
-          );
-          return !lowerCaseKeys.includes(col);
-        });
-
-        if (missingColumns.length > 0) {
-          throw new Error(
-            `Missing required columns in Closing Stock: ${missingColumns.join(
-              ", "
-            )}. Required columns are: SKU, SystemQuantity, Location (for admin)`
-          );
-        }
+        if (rows.length === 0) throw new Error("File is empty.");
 
         const processedItems = processClosingStockData(
           rows,
-          userRole,
-          selectedLocation,
+          'auditor', 
+          targetLocationId, 
           locations
         );
 
-        if (processedItems.length === 0) {
-          throw new Error("No valid items found in Closing Stock file");
-        }
+        if (processedItems.length === 0) throw new Error("No valid items found.");
 
-        const uploadSKUs = processedItems.map((item) => item.sku);
-        const masterSKUs = new Set(itemMaster.map((item) => item.sku));
-        const invalidSKUs = uploadSKUs.filter((sku) => !masterSKUs.has(sku));
+        const masterMap = new Map();
+        itemMaster.forEach(item => {
+            const cleanKey = String(item.sku).trim().toLowerCase();
+            masterMap.set(cleanKey, item);
+        });
 
-        if (invalidSKUs.length > 0) {
-          const uniqueInvalidSKUs = [...new Set(invalidSKUs)];
-          throw new Error(
-            `The following SKUs are not in the Item Master and cannot be uploaded: ${uniqueInvalidSKUs
-              .slice(0, 10)
-              .join(", ")}${
-              uniqueInvalidSKUs.length > 10
-                ? ` and ${uniqueInvalidSKUs.length - 10} more...`
-                : ""
-            }. Only items from the Item Master can be included in Closing Stock.`
-          );
-        }
-
+        const invalidSKUs: string[] = [];
+        const itemsWithDetails: any[] = [];
         const batchKey = generateBatchKey();
-        const itemsWithKey = processedItems.map((item) => ({
-          ...item,
-          uploadBatchKey: batchKey,
-        }));
 
-        await setClosingStock(itemsWithKey, selectedCompanyId);
+        processedItems.forEach(stockItem => {
+            const stockSku = String(stockItem.sku).trim().toLowerCase();
+            const masterItem = masterMap.get(stockSku);
 
-        let locationIdForHistory: string | null = null;
-        let locationNameForHistory: string | null = null;
-
-        if (
-          userRole === "auditor" &&
-          selectedLocation &&
-          selectedLocation !== "default"
-        ) {
-          locationIdForHistory = selectedLocation;
-          const locObj = locations.find((l) => l.id === selectedLocation);
-          locationNameForHistory = locObj?.name ?? null;
+            if (!masterItem) {
+                invalidSKUs.push(stockItem.sku);
+            } else {
+                itemsWithDetails.push({
+                    ...stockItem,
+                    sku: masterItem.sku, 
+                    name: masterItem.name || "Unnamed Item", 
+                    category: masterItem.category || "Uncategorized",
+                    description: masterItem.description || "",
+                    uom: masterItem.uom,
+                    price: masterItem.price,
+                    uploadBatchKey: batchKey
+                });
+            }
+        });
+        
+        if (invalidSKUs.length > 0) {
+           const examples = invalidSKUs.slice(0, 3).join(", ");
+           throw new Error(`Found ${invalidSKUs.length} SKUs not in Item Master (e.g., ${examples}). Please check for whitespace or typos. Upload rejected.`);
         }
 
+        if (itemsWithDetails.length === 0) throw new Error("No valid items matched with Item Master.");
+
+        // PASS THE ASSIGNMENT ID HERE
+        await setClosingStock(itemsWithDetails, selectedCompanyId, selectedAssignmentId);
+
+        const locName = locations.find(l => l.id === targetLocationId)?.name || "Unknown";
+        const assignmentIdInt = parseInt(selectedAssignmentId, 10);
+        
         await SupabaseDataService.logUploadBatch({
           batchKey,
           companyId: selectedCompanyId,
-          locationId: locationIdForHistory,
-          locationName: locationNameForHistory,
+          locationId: targetLocationId,
+          locationName: locName,
           uploadType: "closing_stock",
-          totalItems: itemsWithKey.length,
+          totalItems: itemsWithDetails.length,
+          assignmentId: isNaN(assignmentIdInt) ? null : assignmentIdInt
         });
 
-        toast.success("Closing Stock Uploaded Successfully!", {
-          description: `Successfully saved ${itemsWithKey.length} items to the database.`,
-        });
-
+        toast.success("Closing Stock Uploaded", { description: `${itemsWithDetails.length} items added for ${locName}` });
         setClosingStockFile(null);
+        if (onUploadComplete) onUploadComplete();
       }
     } catch (error: any) {
       console.error("Import error:", error);
-
-      let errorTitle = "Import Failed";
-      let errorDescription = error.message || "An unexpected error occurred.";
-
-      if (error.message && error.message.includes("VALIDATION_ERROR:")) {
-        errorTitle = "Validation Error";
-        errorDescription = error.message.replace("VALIDATION_ERROR:", "").trim();
-      }
-
-      toast.error(errorTitle, {
-        description: errorDescription,
-        duration: 8000,
-      });
+      toast.error("Upload Failed", { description: error.message });
     } finally {
       setIsImporting(false);
     }
   };
 
-  const isImportDisabled =
-    isImporting || (!itemMasterFile && !closingStockFile);
-
-  if (!canUploadItemMaster && !canUploadClosingStock) {
-    return <NoPermissionCard />;
-  }
+  if (!canUploadItemMaster && !canUploadClosingStock) return <NoPermissionCard />;
 
   return (
     <div className="space-y-6">
-      {!hasItemMaster && canUploadClosingStock && !canUploadItemMaster && (
+      {!hasItemMaster && canUploadClosingStock && (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
-            <strong>Item Master Required:</strong> The Item Master has not been
-            uploaded yet. Please contact your administrator to upload the Item
-            Master before you can upload Closing Stock.
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {hasItemMaster && (
-        <Alert className="bg-indigo-50 border-indigo-200 text-indigo-800">
-          <AlertCircle className="h-4 w-4 text-indigo-600" />
-          <AlertDescription>
-            <strong>Item Master Loaded:</strong>{" "}
-            {
-              itemMaster.filter(
-                (i) => !i.location || i.location === ""
-              ).length
-            }{" "}
-            unique products in the system. You can now upload Closing Stock for
-            specific locations.
+            <strong>Item Master Missing:</strong> You must upload the Item Master file before uploading Closing Stock.
           </AlertDescription>
         </Alert>
       )}
@@ -353,69 +235,96 @@ export const FileUploader = ({
       <div className="grid md:grid-cols-2 gap-6">
         {canUploadItemMaster && (
           <FileInputCard
-            title="Step 1: Upload Item Master"
-            description="Upload a CSV with SKU, Name, and Category."
+            title="Step 1: Item Master"
+            description="Upload CSV with SKU, Name, Category. (No quantities)"
             fileInputId="itemMasterUpload"
             file={itemMasterFile}
-            onFileChange={handleItemMasterUpload}
+            onFileChange={(e) => handleFileChange(e.target.files?.[0] || null, setItemMasterFile)}
           />
         )}
 
         {canUploadClosingStock && (
-          <div className={!canUploadItemMaster ? "md:col-span-2" : ""}>
+          <div className="space-y-4">
+            {/* ASSIGNMENT SELECTION LOGIC */}
+            <div className="bg-white p-4 rounded-lg border shadow-sm space-y-3">
+               <Label>Target Assignment</Label>
+               
+               {/* CASE 1: Context ID exists (User came from Dashboard/Assignment Selection) */}
+               {contextAssignmentId ? (
+                  <div className={`p-3 rounded-md border ${isAssignmentActive ? 'bg-indigo-50 border-indigo-100' : 'bg-red-50 border-red-100'}`}>
+                      {isAssignmentActive ? (
+                        <>
+                           <div className="flex items-center gap-2 text-indigo-900 font-medium">
+                              <Lock className="h-4 w-4 text-indigo-500" />
+                              Using Active Assignment
+                           </div>
+                           <div className="mt-2 text-sm text-indigo-700 flex items-center gap-2 ml-6">
+                              <MapPin className="h-3 w-3" />
+                              {locations.find(l => l.id === currentActiveAssignment?.locationId)?.name || "Unknown Location"}
+                           </div>
+                           <div className="text-xs text-indigo-500 ml-6 mt-1">
+                              ID: {contextAssignmentId} • {currentActiveAssignment?.scheduledDate ? format(new Date(currentActiveAssignment.scheduledDate), "MMM dd, yyyy") : ""}
+                           </div>
+                        </>
+                      ) : (
+                        <div className="flex items-center gap-2 text-red-700">
+                           <AlertCircle className="h-4 w-4" />
+                           <span>The selected assignment is not active or finalized. Upload is disabled.</span>
+                        </div>
+                      )}
+                  </div>
+               ) : (
+                  /* CASE 2: No Context (Fallback for Admin direct access) */
+                  <>
+                    {activeAssignments.length === 0 ? (
+                      <p className="text-sm text-yellow-600 bg-yellow-50 p-2 rounded">
+                        No active assignments found. Please create an assignment first.
+                      </p>
+                    ) : (
+                      <Select value={selectedAssignmentId} onValueChange={setSelectedAssignmentId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select Assignment..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {activeAssignments.map(a => {
+                            const loc = locations.find(l => l.id === a.locationId);
+                            const date = a.scheduledDate ? format(new Date(a.scheduledDate), "MMM dd") : "";
+                            return (
+                              <SelectItem key={a.id} value={String(a.id)}>
+                                <div className="flex items-center gap-2">
+                                  <MapPin className="h-3 w-3 text-indigo-500" />
+                                  <span className="font-medium">{loc?.name || "Unknown"}</span>
+                                  <span className="text-gray-400 text-xs">({date})</span>
+                                </div>
+                              </SelectItem>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </>
+               )}
+            </div>
+
             <FileInputCard
-              title={
-                canUploadItemMaster
-                  ? "Step 2: Upload Closing Stock"
-                  : "Upload Closing Stock"
-              }
-              description={
-                userRole === "auditor"
-                  ? "Upload a CSV with SKU and System Quantity for your selected location. Only items from the Item Master can be uploaded."
-                  : "Upload a CSV with SKU, System Quantity, and Location. Only items from the Item Master can be uploaded."
-              }
+              title="Step 2: Closing Stock"
+              description="Upload CSV with SKU and System Quantity."
               fileInputId="closingStockUpload"
               file={closingStockFile}
-              onFileChange={handleClosingStockUpload}
-              disabled={!hasItemMaster}
+              onFileChange={(e) => handleFileChange(e.target.files?.[0] || null, setClosingStockFile)}
+              disabled={!hasItemMaster || !selectedAssignmentId || !isAssignmentActive} 
             />
-
-            {userRole === "auditor" && accessibleLocations.length > 0 && (
-              <div className="mt-4">
-                <LocationSelector
-                  locations={accessibleLocations}
-                  selectedLocation={selectedLocation}
-                  onLocationChange={setSelectedLocation}
-                  placeholder="Select location for upload"
-                />
-              </div>
-            )}
           </div>
         )}
 
-        <div className="md:col-span-2">
-          <div className="flex justify-center mb-4">
-            <Button
-              className="w-full max-w-md bg-indigo-600 hover:bg-indigo-700 text-white shadow-md transition-all disabled:opacity-50"
-              disabled={isImportDisabled}
-              onClick={handleImport}
-            >
-              {isImporting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing...
-                </>
-              ) : (
-                `Process ${
-                  itemMasterFile ? "Item Master File" : "Closing Stock File"
-                }`
-              )}
-            </Button>
-          </div>
-          <ImportSection
-            canUploadItemMaster={canUploadItemMaster}
-            canUploadClosingStock={canUploadClosingStock}
-            showLocationInfo={userRole === "auditor"}
-          />
+        <div className="md:col-span-2 flex flex-col items-center">
+          <Button
+            className="w-full max-w-md bg-indigo-600 hover:bg-indigo-700 text-white"
+            disabled={isImporting || (!itemMasterFile && !closingStockFile)}
+            onClick={handleImport}
+          >
+            {isImporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Start Upload"}
+          </Button>
         </div>
       </div>
     </div>

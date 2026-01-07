@@ -1,136 +1,113 @@
-// src/components/upload/UploadHistory.tsx
-import { useEffect, useState } from "react";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { useState } from "react";
+import { Trash2, FileSpreadsheet, Calendar, MapPin, Loader2 } from "lucide-react";
+import { format } from "date-fns";
+import { Button } from "@/components/ui/button";
+import SupabaseDataService from "@/services/SupabaseDataService";
+import { toast } from "sonner";
 import {
   Table,
-  TableHeader,
-  TableRow,
-  TableHead,
   TableBody,
   TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
-import { Trash2 } from "lucide-react";
-import { format } from "date-fns";
-import { toast } from "sonner";
-import { useCompany } from "@/context/CompanyContext";
-import SupabaseDataService from "../../services/SupabaseDataService";
 
-type UploadHistoryRow = {
-  id: string;
-  batch_key: string;
-  company_id: string | null;
-  location_id: string | null;
-  location_name: string | null;
-  upload_type: string;
-  total_items: number;
-  uploaded_at: string;
-};
+interface UploadHistoryProps {
+  history: any[];
+  onDelete: () => void;
+}
 
-export const UploadHistory = () => {
-  const { selectedCompanyId } = useCompany();
-  const [rows, setRows] = useState<UploadHistoryRow[]>([]);
-  const [loading, setLoading] = useState(false);
+export function UploadHistory({ history = [], onDelete }: UploadHistoryProps) {
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const loadHistory = async () => {
-    if (!selectedCompanyId) {
-      setRows([]);
-      return;
-    }
-    setLoading(true);
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this batch? This will remove all items associated with it.")) return;
+
     try {
-      const data = await SupabaseDataService.getUploadHistory(selectedCompanyId);
-      setRows(data as UploadHistoryRow[]);
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to load upload history");
+      setDeletingId(id);
+      await SupabaseDataService.deleteUploadBatch(id);
+      toast.success("Upload batch removed");
+      
+      // Trigger parent refresh
+      onDelete(); 
+    } catch (error: any) {
+      console.error(error);
+      toast.error("Failed to delete batch", { description: error.message });
     } finally {
-      setLoading(false);
+      setDeletingId(null);
     }
   };
 
-  useEffect(() => {
-    loadHistory();
-  }, [selectedCompanyId]);
-
-  const handleDelete = async (batchKey: string) => {
-    const ok = window.confirm(
-      "Delete all items from this upload? This cannot be undone."
+  if (!history || history.length === 0) {
+    return (
+      <div className="bg-white rounded-lg border p-8 text-center shadow-sm">
+        <p className="text-gray-500">No upload history found.</p>
+      </div>
     );
-    if (!ok) return;
-
-    try {
-      const deletedCount = await SupabaseDataService.deleteUploadBatch(batchKey);
-
-      if (!deletedCount) {
-        toast.error(
-          "No items were deleted for this upload. Please confirm upload_batch_key is stored correctly."
-        );
-        return;
-      }
-
-      setRows((prev) => prev.filter((r) => r.batch_key !== batchKey));
-      toast.success(`Upload batch deleted (${deletedCount} items removed)`);
-      // Optionally: trigger a refresh in InventoryContext here if needed
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to delete upload batch");
-    }
-  };
-
-  if (!selectedCompanyId) return null;
+  }
 
   return (
-    <Card className="mb-6">
-      <CardHeader>
-        <CardTitle>Upload History</CardTitle>
-      </CardHeader>
-      <CardContent>
-        {loading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
-        ) : rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No uploads found for this company.
-          </p>
-        ) : (
-          <div className="rounded-md border overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Location</TableHead>
-                  <TableHead>Items</TableHead>
-                  <TableHead>Uploaded At</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell className="capitalize">
-                      {row.upload_type.replace("_", " ")}
-                    </TableCell>
-                    <TableCell>{row.location_name || "-"}</TableCell>
-                    <TableCell>{row.total_items}</TableCell>
-                    <TableCell>
-                      {format(new Date(row.uploaded_at), "dd MMM yyyy, HH:mm")}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleDelete(row.batch_key)}
-                      >
-                        <Trash2 className="h-4 w-4 text-red-600" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+    <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
+      <div className="p-4 border-b bg-gray-50/50 flex justify-between items-center">
+        <h3 className="font-semibold text-gray-900">Upload History</h3>
+        <span className="text-xs text-gray-500">Recent uploads</span>
+      </div>
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-gray-50">
+            <TableHead>Type</TableHead>
+            <TableHead>Location</TableHead>
+            <TableHead>Items</TableHead>
+            <TableHead>Date</TableHead>
+            <TableHead className="text-right">Action</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {history.map((item) => (
+            <TableRow key={item.id}>
+              <TableCell className="font-medium">
+                <div className="flex items-center gap-2">
+                  <FileSpreadsheet className="h-4 w-4 text-indigo-600" />
+                  <span className="capitalize">{item.upload_type?.replace('_', ' ') || 'Upload'}</span>
+                </div>
+              </TableCell>
+              <TableCell>
+                <div className="flex items-center gap-2 text-gray-600">
+                  <MapPin className="h-3 w-3" />
+                  {item.location_name || 'Unknown'}
+                </div>
+              </TableCell>
+              <TableCell>
+                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                  {item.total_items} items
+                </span>
+              </TableCell>
+              <TableCell className="text-gray-600 text-sm">
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-3 w-3" />
+                  {item.created_at ? format(new Date(item.created_at), "MMM dd, HH:mm") : "-"}
+                </div>
+              </TableCell>
+              <TableCell className="text-right">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-gray-400 hover:text-red-600 hover:bg-red-50"
+                  onClick={() => handleDelete(item.id)}
+                  disabled={deletingId === item.id}
+                >
+                  {deletingId === item.id ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-4 w-4" />
+                  )}
+                </Button>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
   );
-};
+}

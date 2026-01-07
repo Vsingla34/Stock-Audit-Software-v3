@@ -197,7 +197,6 @@ export const LocationMaster = () => {
         {isAuditor ? (
           <div className="text-sm text-gray-500 bg-gray-50 p-4 rounded-lg border border-gray-100">
             Location management is restricted to Admin and Client users.
-            You can still view assigned locations and perform audits.
           </div>
         ) : (
           <>

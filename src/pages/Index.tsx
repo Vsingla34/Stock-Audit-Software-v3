@@ -14,7 +14,7 @@ import { supabase } from "@/integrations/supabase/client";
 const Index = () => {
   const { canUploadData, canPerformAudits, isClientUser } = useUserAccess();
   const { currentUser } = useUser();
-  const { selectedCompanyId } = useCompany();
+  const { selectedCompanyId, selectedAssignmentId } = useCompany(); // Destructure assignment ID
   const [companyName, setCompanyName] = useState<string>("");
 
   useEffect(() => {
@@ -52,11 +52,18 @@ const Index = () => {
             </p>
           </div>
 
-          {companyName && (
-            <h2 className="text-2xl font-bold tracking-tight text-gray-900 hidden md:block">
-              {companyName}
-            </h2>
-          )}
+          <div className="text-right hidden md:block">
+            {companyName && (
+              <h2 className="text-2xl font-bold tracking-tight text-gray-900">
+                {companyName}
+              </h2>
+            )}
+            {selectedAssignmentId && (
+              <p className="text-sm text-gray-500 font-medium mt-1">
+                Assignment ID: <span className="text-indigo-600">#{selectedAssignmentId}</span>
+              </p>
+            )}
+          </div>
         </div>
 
         <InventoryOverview />

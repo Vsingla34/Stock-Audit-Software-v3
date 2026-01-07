@@ -1,4 +1,3 @@
-
 import {
   createContext,
   useContext,
@@ -7,8 +6,6 @@ import {
   ReactNode,
 } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { useCompany } from "@/context/CompanyContext";
-
 
 export type UserRole = "super_admin" | "admin" | "auditor" | "client";
 
@@ -38,9 +35,8 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // REMOVED: useCompany dependency to prevent circular loops
   
-  const { setSelectedCompanyId } = useCompany();
-
   useEffect(() => {
     const init = async () => {
       try {
@@ -99,18 +95,29 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
 
     setCurrentUser(profile as UserProfile);
     setIsAuthenticated(true);
-
-
-    setSelectedCompanyId(null);
+    
+    // Note: Company context will auto-reset because we clear sessionStorage on logout
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
-    setCurrentUser(null);
-    setIsAuthenticated(false);
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.error("Error signing out:", error);
+    } finally {
+      // 1. Clear State
+      setCurrentUser(null);
+      setIsAuthenticated(false);
 
-    
-    setSelectedCompanyId(null);
+      // 2. Clear Storage (This handles clearing the Company Selection indirectly)
+      localStorage.clear();
+      sessionStorage.clear();
+
+      // 3. HARD REDIRECT
+      // This forces the browser to reload the page, guaranteeing that no 
+      // old React components try to render with null user data.
+      window.location.href = '/login';
+    }
   };
 
   const hasPermission = (permission: string) => {
@@ -118,13 +125,10 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
 
     switch (permission) {
       case "manageCompanies":
-        
         return currentUser.role === "super_admin";
       case "manageUsers":
-        
         return currentUser.role === "super_admin" || currentUser.role === "admin";
       case "conductAudits":
-        
         return ["super_admin", "admin", "auditor"].includes(currentUser.role);
       default:
         return true;

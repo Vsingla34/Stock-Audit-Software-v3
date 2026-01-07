@@ -20,6 +20,7 @@ export const processCSV = (csvText: string): CSVRow[] => {
   const cleanedData = result.data.map((row: any) => {
     const cleanedRow: CSVRow = {};
     Object.keys(row).forEach(key => {
+      // Robust key cleaning
       const cleanKey = key.trim().toLowerCase();
       cleanedRow[cleanKey] = typeof row[key] === 'string' ? row[key].trim() : row[key];
     });
@@ -29,11 +30,6 @@ export const processCSV = (csvText: string): CSVRow[] => {
   return cleanedData;
 };
 
-/**
- * Process Item Master CSV - Creates BLUEPRINTS with NO location
- * Expected columns: sku, name, category
- * Location will be EMPTY (null or '')
- */
 export const processItemMasterData = (rows: CSVRow[]): Omit<InventoryItem, 'id'>[] => {
   return rows.map((row, index) => {
     const sku = row['sku'] || row['item code'];
@@ -44,12 +40,11 @@ export const processItemMasterData = (rows: CSVRow[]): Omit<InventoryItem, 'id'>
     const name = row['name'] || row['item name'] || row['description'] || 'Unnamed Item';
     const category = row['category'] || row['type'] || '';
 
-    // BLUEPRINT: Location is EMPTY
     return {
       sku,
       name,
       category,
-      location: '', // Empty location = Blueprint
+      location: '', 
       systemQuantity: 0,
       physicalQuantity: null,
       status: 'pending' as const,
@@ -59,10 +54,6 @@ export const processItemMasterData = (rows: CSVRow[]): Omit<InventoryItem, 'id'>
   });
 };
 
-/**
- * Process Closing Stock CSV
- * Returns array of {sku, location, systemQuantity} objects
- */
 export const processClosingStockData = (
   rows: CSVRow[],
   userRole: 'admin' | 'auditor',
@@ -94,7 +85,7 @@ export const processClosingStockData = (
       };
     });
   } else {
-    // Admin workflow - requires location in CSV
+    // Admin workflow logic (unused in current FileUploader but kept for safety)
     return rows.map((row, index) => {
       const sku = row['sku'] || row['item code'];
       if (!sku) throw new Error(`Row ${index + 2} is missing 'sku'.`);
@@ -114,4 +105,3 @@ export const processClosingStockData = (
     });
   }
 };
-

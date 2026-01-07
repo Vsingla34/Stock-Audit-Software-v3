@@ -17,21 +17,52 @@ import { useUserAccess } from "@/hooks/useUserAccess";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useEffect } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useUser } from "@/context/UserContext";
+import { useCompany } from "@/context/CompanyContext";
+import SupabaseDataService from "@/services/SupabaseDataService";
 
 const Upload = () => {
   const { currentUser } = useUser();
-  const { canUploadData, canUploadItemMaster, canUploadClosingStock } =
-    useUserAccess();
+  const { selectedCompanyId, selectedAssignmentId } = useCompany();
+  const { canUploadData, canUploadItemMaster, canUploadClosingStock } = useUserAccess();
   const navigate = useNavigate();
 
-  
+  const [history, setHistory] = useState<any[]>([]);
+
   useEffect(() => {
     if (currentUser && !canUploadData()) {
       navigate("/");
     }
   }, [currentUser, navigate, canUploadData]);
+
+  const loadHistory = useCallback(async () => {
+    if (!selectedCompanyId) return;
+    try {
+      const data = await SupabaseDataService.getUploadHistory(selectedCompanyId);
+      
+      // FILTERING LOGIC:
+      // 1. Always show 'item_master' (Company Wide)
+      // 2. Only show 'closing_stock' if it belongs to the CURRENT Assignment
+      const filtered = data.filter(item => {
+        if (item.upload_type === 'item_master') return true;
+        if (item.upload_type === 'closing_stock') {
+           return item.assignment_id === selectedAssignmentId;
+        }
+        return true; 
+      });
+
+      setHistory(filtered);
+    } catch (error) {
+      console.error("Failed to load history", error);
+    }
+  }, [selectedCompanyId, selectedAssignmentId]);
+
+  useEffect(() => {
+    if (selectedCompanyId) {
+      loadHistory();
+    }
+  }, [selectedCompanyId, loadHistory]);
 
   if (!currentUser || !canUploadData()) {
     return null; 
@@ -46,8 +77,8 @@ const Upload = () => {
           <h1 className="text-3xl font-bold tracking-tight text-gray-900">Upload Data</h1>
           <p className="text-muted-foreground">
             {isAdminCanUploadItemMaster
-              ? "Import your Item Master, Closing Stock data, and optionally Locations"
-              : "Import your Closing Stock data for your assigned locations"}
+              ? "Import your Item Master (Company-wide) and Closing Stock (Assignment-specific)"
+              : "Import Closing Stock data for your active assignment"}
           </p>
         </div>
 
@@ -56,8 +87,7 @@ const Upload = () => {
             <AlertCircle className="h-5 w-5 text-indigo-600" />
             <AlertTitle className="text-indigo-800">Auditor Access</AlertTitle>
             <AlertDescription className="text-indigo-700">
-              As an auditor, you can only upload Closing Stock data for your
-              assigned locations.
+              You are uploading data for your currently selected assignment.
             </AlertDescription>
           </Alert>
         )}
@@ -86,7 +116,6 @@ const Upload = () => {
             )}
           </TabsList>
 
-          
           <TabsContent value="upload" className="space-y-4">
             
             <Card className="shadow-sm border-gray-200">
@@ -94,8 +123,8 @@ const Upload = () => {
                 <CardTitle className="text-gray-900">Import Inventory Data</CardTitle>
                 <CardDescription>
                   {isAdminCanUploadItemMaster
-                    ? "Upload your Item Master (without quantity) and Closing Stock (with quantity) files"
-                    : "Upload your Closing Stock (with quantity) files for your assigned locations"}
+                    ? "Upload Item Master (Company Wide) or Closing Stock (For Active Assignment)"
+                    : "Upload Closing Stock quantities for your active assignment"}
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -104,20 +133,17 @@ const Upload = () => {
                   assignedLocations={currentUser.assigned_locations || []}
                   canUploadItemMaster={isAdminCanUploadItemMaster}
                   canUploadClosingStock={canUploadClosingStock()}
+                  onUploadComplete={loadHistory}
                 />
               </CardContent>
             </Card>
-
 
             {isAdminCanUploadItemMaster && (
               <Card className="shadow-sm border-gray-200">
                 <CardHeader>
                   <CardTitle className="text-gray-900">Upload Locations (Optional)</CardTitle>
                   <CardDescription>
-                    Upload a CSV / Excel file with columns like{" "}
-                    <span className="font-medium text-gray-700">name, status, description</span>{" "}
-                    to create or update locations. You can still add locations
-                    manually from the Locations page.
+                    Upload a CSV / Excel file to bulk create locations.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -132,43 +158,35 @@ const Upload = () => {
               </h3>
               <ul className="list-disc list-inside text-sm text-indigo-800 space-y-1">
                 <li>
-                  Item Master should contain product information WITHOUT
-                  quantities
+                  <strong>Item Master:</strong> Shared across the entire company. Contains SKU, Name, Description. (No quantities).
                 </li>
                 <li>
-                  Closing Stock should contain the quantities for each location
+                  <strong>Closing Stock:</strong> Specific to the <strong>active assignment</strong>. Contains SKU and System Quantity.
                 </li>
                 <li>
-                  The same item can appear in multiple locations with different
-                  quantities
+                  Ensure Closing Stock SKUs match the Item Master exactly.
                 </li>
                 <li>
-                  Ensure both files use the same item IDs and SKUs for proper
-                  matching
+                   Uploading Closing Stock overwrites any previous system quantities for this assignment's location.
                 </li>
               </ul>
             </Card>
           </TabsContent>
 
-          
           <TabsContent value="examples">
             <ExampleData />
           </TabsContent>
 
-          
           {isAdminCanUploadItemMaster && (
             <TabsContent value="clear" className="space-y-4">
-              
-              <UploadHistory />
-
+              <UploadHistory history={history} onDelete={loadHistory} />
               <Card className="border-red-100 shadow-sm">
                 <CardHeader>
                   <CardTitle className="text-red-600">
                     Clear Company Data
                   </CardTitle>
                   <CardDescription>
-                    This will reset all your inventory data. This action cannot
-                    be undone.
+                    This will reset all your inventory data. This action cannot be undone.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>

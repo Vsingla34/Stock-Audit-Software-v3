@@ -3,27 +3,24 @@ import { useInventory, InventoryItem } from "@/context/InventoryContext";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Search, Plus, Minus, MapPin } from "lucide-react";
 import { toast } from "sonner";
-import { useLocationFilter } from "@/hooks/useLocationFilter";
 import { useUser } from "@/context/UserContext";
+import { useCompany } from "@/context/CompanyContext";
 
 export const SearchInventory = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<InventoryItem[]>([]);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   
-  const { searchItem, addItemToAudit } = useInventory();
+  const { searchItem, addItemToAudit, assignments, locations } = useInventory();
   const { currentUser } = useUser();
-  
-  const { 
-    isAdmin, 
-    availableLocations,
-    selectedLocation,
-    setSelectedLocation,
-    getLocationName
-  } = useLocationFilter();
+  const { selectedAssignmentId } = useCompany();
+
+  // AUTO-DETECT LOCATION FROM ASSIGNMENT
+  const currentAssignment = assignments.find(a => a.id === selectedAssignmentId);
+  const activeLocationId = currentAssignment?.locationId;
+  const activeLocationName = locations.find(l => l.id === activeLocationId)?.name;
 
   const performSearch = useCallback((query: string) => {
     // Clear results if query is empty or too short
@@ -33,21 +30,13 @@ export const SearchInventory = () => {
     }
 
     const results = searchItem(query);
+    // Since itemMaster is already scoped to the assignment/global, 
+    // we just need to ensure we show items relevant to the current location if they are global
     let filteredResults = results;
     
-    // 1. Filter by Specific Location if selected
-    if (selectedLocation && selectedLocation !== "all") {
-      const locationName = getLocationName(selectedLocation);
-      if (locationName) {
-        filteredResults = results.filter(item => item.location === locationName);
-      }
-    } 
-    // 2. Filter by Access Rights (if "All Locations" or default)
-    else if (!isAdmin) {
-      const accessibleNames = availableLocations.map(loc => loc.name);
-      filteredResults = results.filter(item => 
-        accessibleNames.includes(item.location)
-      );
+    // Explicitly filter by the active location name if it exists to be safe
+    if (activeLocationName) {
+        filteredResults = results.filter(item => item.location === activeLocationName);
     }
     
     setSearchResults(filteredResults);
@@ -60,7 +49,7 @@ export const SearchInventory = () => {
     });
     setQuantities(newQuantities);
 
-  }, [selectedLocation, isAdmin, availableLocations, searchItem, getLocationName, quantities]);
+  }, [searchItem, activeLocationName, quantities]);
 
   // Auto-search effect with debounce
   useEffect(() => {
@@ -70,11 +59,6 @@ export const SearchInventory = () => {
 
     return () => clearTimeout(delayDebounceFn);
   }, [searchQuery, performSearch]);
-
-  // Re-run search immediately when location filter changes
-  useEffect(() => {
-    performSearch(searchQuery);
-  }, [selectedLocation]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -123,31 +107,6 @@ export const SearchInventory = () => {
     }
   };
 
-  // Determine if "All Locations" option should be visible
-  const showAllOption = isAdmin || availableLocations.length > 1;
-
-  // Disable dropdown if: Not Admin AND only 1 location (forced selection)
-  const isDropdownDisabled = !isAdmin && availableLocations.length <= 1;
-
-  if (!isAdmin && availableLocations.length === 0) {
-    return (
-      <Card className="w-full shadow-sm border-gray-200">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-gray-900">
-            <Search className="h-5 w-5" />
-            <span>Search Inventory</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-center p-8 text-gray-500">
-            <h3 className="text-lg font-semibold mb-2 text-gray-900">No Access</h3>
-            <p>You don't have access to any locations for searching inventory.</p>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
     <Card className="w-full shadow-sm border-gray-200">
       <CardHeader>
@@ -169,29 +128,13 @@ export const SearchInventory = () => {
           </p>
         </div>
 
-        {/* Location Dropdown */}
-        <div className="flex items-center gap-2 mb-4">
-          <MapPin className="h-4 w-4 text-gray-500" />
-          <Select 
-            value={selectedLocation} 
-            onValueChange={setSelectedLocation}
-            disabled={isDropdownDisabled}
-          >
-            <SelectTrigger className="flex-1 focus:ring-indigo-600 focus:border-indigo-600">
-              <SelectValue placeholder="Select location" />
-            </SelectTrigger>
-            <SelectContent>
-              {showAllOption && (
-                <SelectItem value="all">All Locations</SelectItem>
-              )}
-              {availableLocations.map((location) => (
-                <SelectItem key={location.id} value={location.id}>
-                  {location.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {/* LOCATION DROPDOWN REMOVED */}
+        {activeLocationName && (
+            <div className="flex items-center gap-2 mb-4 p-2 bg-gray-50 rounded border border-gray-200 text-sm text-gray-600">
+                <MapPin className="h-4 w-4" />
+                Searching in: <strong>{activeLocationName}</strong>
+            </div>
+        )}
 
         <form onSubmit={handleSearch} className="mb-6 relative">
           <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
@@ -283,20 +226,13 @@ export const SearchInventory = () => {
         ) : searchQuery.length >= 2 ? (
           <div className="text-center p-8 text-gray-500">
             No results found for "{searchQuery}"
-            {selectedLocation && selectedLocation !== "all" ? (
-               <div className="text-sm mt-1">in {getLocationName(selectedLocation)}</div>
-            ) : (
-               !isAdmin && <div className="text-sm mt-1">(Search limited to your assigned locations)</div>
+            {activeLocationName && (
+                <div className="text-sm mt-1">in {activeLocationName}</div>
             )}
           </div>
         ) : (
           <div className="text-center p-8 text-gray-500">
             Enter at least 2 characters to search
-            {!isAdmin && availableLocations.length > 0 && (
-              <div className="text-sm mt-2">
-                You can search items from: {availableLocations.map(loc => loc.name).join(", ")}
-              </div>
-            )}
           </div>
         )}
       </CardContent>

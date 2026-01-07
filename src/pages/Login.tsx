@@ -20,7 +20,9 @@ const Login = () => {
     setSubmitting(true);
     try {
       await login(email, password);
-      navigate("/company-selection", { replace: true });
+      // FIX: Changed from hardcoded "/company-selection" to root "/"
+      // This allows App.tsx to determine the correct redirect based on role (Auditor -> Assignment, Admin -> Company)
+      navigate("/", { replace: true });
     } catch (error: any) {
       console.error(error);
       toast.error(error.message || "Login failed");
