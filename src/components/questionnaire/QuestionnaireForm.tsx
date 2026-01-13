@@ -11,6 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 interface QuestionnaireFormProps {
   locationId: string;
+  assignmentId: number; 
   locationName?: string;
   onComplete?: () => void;
 }
@@ -18,7 +19,6 @@ interface QuestionnaireFormProps {
 interface AnswerState {
   [questionId: string]: string | string[];
 }
-
 
 const getAutoFillType = (text: string) => {
   const t = text.trim().toLowerCase();
@@ -28,9 +28,8 @@ const getAutoFillType = (text: string) => {
   return null;
 };
 
-
-export const QuestionnaireForm = ({ locationId, locationName, onComplete }: QuestionnaireFormProps) => {
-  const { questions, getLocationQuestionnaireAnswers, saveQuestionnaireAnswer, locations } = useInventory();
+export const QuestionnaireForm = ({ locationId, assignmentId, locationName, onComplete }: QuestionnaireFormProps) => {
+  const { questions, getAssignmentQuestionnaireAnswers, saveQuestionnaireAnswer, locations } = useInventory();
   const { currentUser } = useUser();
   const { selectedCompanyId } = useCompany();
   
@@ -41,7 +40,6 @@ export const QuestionnaireForm = ({ locationId, locationName, onComplete }: Ques
   const targetLocation = locations.find(l => l.id === locationId);
   const activeCompanyId = targetLocation?.companyId || selectedCompanyId;
 
-  
   useEffect(() => {
     const fetchCompany = async () => {
       if (!activeCompanyId) return;
@@ -62,19 +60,17 @@ export const QuestionnaireForm = ({ locationId, locationName, onComplete }: Ques
     fetchCompany();
   }, [activeCompanyId]);
 
-  
   useEffect(() => {
-    if (locationId) {
-      const locationAnswers = getLocationQuestionnaireAnswers(locationId);
+    if (assignmentId) {
+      const assignmentAnswers = getAssignmentQuestionnaireAnswers(assignmentId);
       const initialAnswers: AnswerState = {};
-      locationAnswers.forEach(answer => {
+      assignmentAnswers.forEach(answer => {
         initialAnswers[answer.questionId] = answer.answer;
       });
       setAnswers(initialAnswers);
     }
-  }, [locationId, getLocationQuestionnaireAnswers]);
+  }, [assignmentId, getAssignmentQuestionnaireAnswers]);
 
-  
   useEffect(() => {
     if (!questions.length) return;
 
@@ -140,6 +136,7 @@ export const QuestionnaireForm = ({ locationId, locationName, onComplete }: Ques
         saveQuestionnaireAnswer({
           questionId: question.id,
           locationId,
+          assignmentId, 
           answer,
           answeredBy: currentUser?.name 
         });

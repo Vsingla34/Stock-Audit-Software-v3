@@ -1,8 +1,9 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useCompany } from "@/context/CompanyContext";
+import { useInventory } from "@/context/InventoryContext";
 import SupabaseDataService from "@/services/SupabaseDataService";
 import { 
   FileText, 
@@ -43,6 +44,7 @@ declare module "jspdf" {
 
 const History = () => {
   const { selectedCompanyId } = useCompany();
+  const { questions } = useInventory(); 
   const [reports, setReports] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [companyName, setCompanyName] = useState<string>("");
@@ -266,6 +268,32 @@ const History = () => {
     toast.success("Excel report downloaded");
   };
 
+  // --- FORMAT HELPER ---
+  const formatQuestionnaireAnswer = (answer: string | string[], question: any) => {
+    let val: any = answer;
+    if (typeof val === "string") { try { if (val.trim().startsWith("[") || val.trim().startsWith("{")) { val = JSON.parse(val); } } catch {} }
+    
+    if (question.type === "yes_no") { 
+       const v = Array.isArray(val) ? val[0] : val; 
+       const s = String(v ?? "").toLowerCase(); 
+       if (["yes", "true", "1"].includes(s)) return "Yes"; 
+       if (["no", "false", "0"].includes(s)) return "No"; 
+       return String(v ?? ""); 
+    }
+    
+    if ((question.type === "single_select" || question.type === "multi_select") && question.options) { 
+        const ids = Array.isArray(val) ? val : [val]; 
+        const labels = ids.map((id: string) => { 
+            const opt = question.options?.find((o: any) => o.id === id); 
+            return opt ? opt.text : id; 
+        }); 
+        return labels.join(", "); 
+    }
+    
+    if (Array.isArray(val)) { return val.join(", "); }
+    return String(val);
+  };
+
   // --- REPORT 5: COMPLETE PDF ---
   const downloadPDF = (report: any) => {
     try {
@@ -274,6 +302,37 @@ const History = () => {
       const summary = data.summary || {};
       const locationName = report.locations?.name || "Unknown";
       
+      const savedAnswers = data.questionnaire || [];
+
+      // DEDUPLICATION & FILTERING LOGIC
+      let validAnswers = savedAnswers;
+      
+      // 1. If this report belongs to a specific assignment, try to filter answers for that assignment
+      // This fixes the issue of answers from other assignments showing up
+      if (report.assignment_id) {
+          const assignmentSpecific = savedAnswers.filter((a: any) => a.assignmentId === report.assignment_id);
+          // Only switch to assignment-specific if we actually found some (for backward compatibility with old reports)
+          if (assignmentSpecific.length > 0) {
+              validAnswers = assignmentSpecific;
+          }
+      }
+
+      // 2. Deduplicate by questionId to prevent repeating rows
+      const uniqueMap = new Map();
+      validAnswers.forEach((ans: any) => {
+          uniqueMap.set(ans.questionId, ans);
+      });
+      const finalAnswers = Array.from(uniqueMap.values());
+
+      // Helper to lookup answers for this report
+      const getAnswerText = (questionText: string) => {
+          const q = questions.find(q => q.text.trim().toLowerCase() === questionText.trim().toLowerCase());
+          if (!q) return "N/A";
+          const ans = finalAnswers.find((a: any) => a.questionId === q.id); // Use finalAnswers
+          if (!ans) return "N/A";
+          return formatQuestionnaireAnswer(ans.answer, q);
+      };
+
       let currentY = 20;
       doc.setFontSize(20); 
       doc.setTextColor(40); 
@@ -289,6 +348,15 @@ const History = () => {
       
       currentY += 7;
       doc.text(`Finalized on: ${format(new Date(report.finalized_at), "PPpp")}`, 14, currentY);
+
+      // EXTRACTED HEADER INFO
+      const locManager = getAnswerText("Location Manager");
+      const audName = getAnswerText("Auditor Name");
+      const phone = getAnswerText("Phone No.");
+
+      if (locManager !== "N/A") { currentY += 7; doc.text(`Location Manager: ${locManager}`, 14, currentY); }
+      if (audName !== "N/A") { currentY += 7; doc.text(`Auditor: ${audName}`, 14, currentY); }
+      if (phone !== "N/A") { currentY += 7; doc.text(`Phone: ${phone}`, 14, currentY); }
 
       currentY += 14;
       doc.setFontSize(14); 
@@ -313,11 +381,36 @@ const History = () => {
       
       currentY = (doc as any)["lastAutoTable"].finalY + 15;
 
+      // --- Observations Section ---
+      doc.setFontSize(14); 
+      doc.text("Observations", 14, currentY);
+      const observations: string[] = [];
+      if (summary.discrepancies > 0) { 
+        observations.push(`There are ${summary.discrepancies} items with quantity discrepancies.`); 
+      } else { 
+        observations.push("All audited items match their expected quantities."); 
+      }
+      if (summary.pendingItems > 0) { 
+        observations.push(`${summary.pendingItems} items (${Math.round((summary.pendingItems / summary.totalItems) * 100)}%) are still pending audit.`); 
+      } else { 
+        observations.push("All items have been audited."); 
+      }
+
+      let observationY = currentY + 10;
+      observations.forEach((obs) => { 
+        doc.setFontSize(11); 
+        doc.text(`• ${obs}`, 16, observationY); 
+        observationY += 7; 
+      });
+
+      currentY = observationY + 5;
+
       // --- Discrepancies Table ---
       const items = data.items || [];
       const discrepancies = items.filter((i: any) => i.variance !== 0);
 
       if (discrepancies.length > 0) {
+         doc.setFontSize(14);
          doc.text("Discrepancy Details", 14, currentY);
          const discBody = discrepancies.map((i: any) => [
             i.sku,
@@ -338,10 +431,41 @@ const History = () => {
             columnStyles: { 5: { cellWidth: 40 } }
          });
          currentY = (doc as any)["lastAutoTable"].finalY + 15;
-      } else {
-         doc.setFontSize(11);
-         doc.text("No discrepancies found.", 14, currentY);
-         currentY += 15;
+      }
+
+      // --- Questionnaire Table ---
+      const hiddenQuestions = ["company", "location", "location manager", "auditor name", "phone no."];
+      const answersToDisplay: any[] = [];
+      
+      // Use finalAnswers (deduplicated) here
+      finalAnswers.forEach((ans: any) => {
+         const q = questions.find(q => q.id === ans.questionId);
+         if (q && !hiddenQuestions.includes(q.text.trim().toLowerCase())) {
+             answersToDisplay.push([
+                 q.text,
+                 formatQuestionnaireAnswer(ans.answer, q),
+                 ans.answeredBy || "-",
+                 ans.answeredOn ? format(new Date(ans.answeredOn), "PP") : "-"
+             ]);
+         }
+      });
+
+      if (answersToDisplay.length > 0) {
+          if (currentY > doc.internal.pageSize.height - 40) { doc.addPage(); currentY = 20; }
+          
+          doc.setFontSize(14);
+          doc.text("Audit Questionnaire Responses", 14, currentY);
+
+          autoTable(doc, {
+            startY: currentY + 5,
+            head: [["Question", "Response", "Answered By", "Date"]],
+            body: answersToDisplay,
+            theme: "grid",
+            headStyles: { fillColor: [67, 56, 202] },
+            styles: { fontSize: 9 },
+            columnStyles: { 0: { cellWidth: 80 }, 1: { cellWidth: 60 } }
+          });
+          currentY = (doc as any)["lastAutoTable"].finalY + 20;
       }
 
       // --- Sign-off Section ---
@@ -350,18 +474,18 @@ const History = () => {
           currentY = 20;
       }
       
-      // FIX: Use the resolved AUDITOR name from the assignment, not the client/user name
-      const auditorName = report.auditor_name || "Unknown Auditor";
+      const auditorSignName = audName !== "N/A" ? audName : (report.auditor_name || "Unknown Auditor");
+      const managerSignName = locManager !== "N/A" ? locManager : "________________________";
 
       doc.setFontSize(12);
       doc.text("Auditor Sign-off", 14, currentY);
       doc.setFontSize(10);
-      doc.text(`Name: ${auditorName}`, 14, currentY + 10);
+      doc.text(`Name: ${auditorSignName}`, 14, currentY + 10);
       doc.text("Signature: _____________________", 14, currentY + 20);
       doc.text(`Date: ${format(new Date(report.finalized_at), "PP")}`, 14, currentY + 30);
 
       doc.text("Store Manager Sign-off", 120, currentY);
-      doc.text("Name: ________________________", 120, currentY + 10);
+      doc.text(`Name: ${managerSignName}`, 120, currentY + 10);
       doc.text("Signature: _____________________", 120, currentY + 20);
       doc.text(`Date: ${format(new Date(report.finalized_at), "PP")}`, 120, currentY + 30);
       
@@ -442,8 +566,6 @@ const History = () => {
                               <FileType className="mr-2 h-4 w-4 text-violet-600" />
                               <span>Complete PDF</span>
                             </DropdownMenuItem>
-                            
-                            <DropdownMenuSeparator />
                             
                             <DropdownMenuItem onClick={() => downloadExcel(report)}>
                               <TableIcon className="mr-2 h-4 w-4 text-green-600" />

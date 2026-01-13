@@ -10,20 +10,17 @@ import { useInventory } from "@/context/InventoryContext";
 
 const Questionnaire = () => {
   const { userRole, accessibleLocations } = useUserAccess();
-  const { locations } = useInventory();
+  const { locations, assignments } = useInventory();
   
-  // Logic to determine permissions
   const canManageQuestions = userRole === "admin" || userRole === "super_admin";
   const isClient = userRole === "client";
 
-  // Set default tab: Clients go straight to responses, others to management/answering
   const [activeTab, setActiveTab] = useState(isClient ? "responses" : "management");
   const [selectedLocation, setSelectedLocation] = useState("default");
   const [responseLocation, setResponseLocation] = useState("default");
   
   const userLocations = accessibleLocations();
 
-  // Force clients to the responses tab if they land on management
   useEffect(() => {
     if (isClient && activeTab === "management") {
       setActiveTab("responses");
@@ -37,6 +34,17 @@ const Questionnaire = () => {
   const responseLocationName = responseLocation && responseLocation !== "default" 
     ? locations.find(loc => loc.id === responseLocation)?.name
     : "";
+
+  const getActiveAssignmentId = (locId: string): number | undefined => {
+      if (!locId || locId === 'default') return undefined;
+      const assignment = assignments.find(a => 
+         a.locationId === locId && 
+         (a.status === 'active' || a.status === 'pending' || a.status === 'submitted')
+      );
+      return assignment?.id;
+  };
+  
+  const activeAssignmentId = getActiveAssignmentId(selectedLocation);
   
   return (
     <AppLayout>
@@ -57,14 +65,13 @@ const Questionnaire = () => {
           <TabsList className="grid grid-cols-2 w-[400px] bg-gray-100">
             <TabsTrigger 
               value="management" 
-              disabled={isClient} // Disable answering/managing for clients
+              disabled={isClient} 
               className="data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-sm"
             >
               {canManageQuestions ? "Manage Questions" : "Answer Questions"}
             </TabsTrigger>
             <TabsTrigger 
               value="responses" 
-              // Enabled for everyone (removed the client restriction)
               disabled={!userRole}
               className="data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-sm"
             >
@@ -73,7 +80,6 @@ const Questionnaire = () => {
           </TabsList>
           
           <TabsContent value="management" className="space-y-6 mt-6">
-            {/* Double check to ensure clients don't see form content even if tab is forced */}
             {!isClient && (
               canManageQuestions ? (
                 <QuestionList />
@@ -91,10 +97,17 @@ const Questionnaire = () => {
                   </div>
                   
                   {selectedLocation && selectedLocation !== "default" ? (
-                    <QuestionnaireForm 
-                      locationId={selectedLocation} 
-                      locationName={locationName}
-                    />
+                    activeAssignmentId ? (
+                        <QuestionnaireForm 
+                          locationId={selectedLocation} 
+                          assignmentId={activeAssignmentId}
+                          locationName={locationName}
+                        />
+                    ) : (
+                        <div className="p-4 bg-yellow-50 text-yellow-800 rounded-md border border-yellow-200">
+                            No active assignment found for this location. Please start an audit assignment first.
+                        </div>
+                    )
                   ) : (
                     <p className="text-gray-500">Please select a location to view and answer questions</p>
                   )}
@@ -107,7 +120,6 @@ const Questionnaire = () => {
             <div className="space-y-6">
               <div className="max-w-md">
                 <LocationSelector
-                  
                   locations={canManageQuestions ? locations : userLocations}
                   selectedLocation={responseLocation}
                   onLocationChange={setResponseLocation}

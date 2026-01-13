@@ -32,7 +32,7 @@ const AdminOverview = () => {
     : 0;
 
   return (
-    <AppLayout>
+    <AppLayout showSidebar={false}>
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-gray-900">Admin Overview</h1>

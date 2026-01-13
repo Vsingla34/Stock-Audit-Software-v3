@@ -3,7 +3,6 @@ import { FileUploader } from "@/components/upload/FileUploader";
 import { ExampleData } from "@/components/upload/ExampleData";
 import { ClearDataButton } from "@/components/upload/ClearDataButton";
 import { UploadHistory } from "@/components/upload/UploadHistory";
-import { LocationUploadCard } from "@/components/upload/LocationUploadCard"; 
 
 import {
   Card,
@@ -41,9 +40,6 @@ const Upload = () => {
     try {
       const data = await SupabaseDataService.getUploadHistory(selectedCompanyId);
       
-      // FILTERING LOGIC:
-      // 1. Always show 'item_master' (Company Wide)
-      // 2. Only show 'closing_stock' if it belongs to the CURRENT Assignment
       const filtered = data.filter(item => {
         if (item.upload_type === 'item_master') return true;
         if (item.upload_type === 'closing_stock') {
@@ -137,20 +133,6 @@ const Upload = () => {
                 />
               </CardContent>
             </Card>
-
-            {isAdminCanUploadItemMaster && (
-              <Card className="shadow-sm border-gray-200">
-                <CardHeader>
-                  <CardTitle className="text-gray-900">Upload Locations (Optional)</CardTitle>
-                  <CardDescription>
-                    Upload a CSV / Excel file to bulk create locations.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <LocationUploadCard />
-                </CardContent>
-              </Card>
-            )}
 
             <Card className="p-6 border-indigo-200 bg-indigo-50 shadow-sm">
               <h3 className="text-md font-semibold text-indigo-900 mb-2">

@@ -6,9 +6,6 @@ import {
   FileSpreadsheet,
   Home,
   Search,
-  Settings,
-  Building,
-  Users,
   UserCircle,
   ScanBarcode,
   LogOut,
@@ -98,14 +95,10 @@ export function Sidebar({
     if (["super_admin", "admin", "auditor"].includes(userRole)) {
       nav.push({ name: "Upload Data", href: "/upload", icon: Upload });
     }
-    nav.push({ name: "Locations", href: "/locations", icon: Building });
-  
-    if (["super_admin", "admin", "client"].includes(userRole)) {
-      nav.push({ name: "Admin Overview", href: "/admin-overview", icon: Settings });
-    }
-    if (["super_admin", "admin"].includes(userRole)) {
-      nav.push({ name: "User Management", href: "/users", icon: Users });
-    }
+    // Location page removed from sidebar
+    // Admin Overview removed from sidebar
+    // User Management removed from sidebar
+    
     if (userRole === "super_admin") {
       nav.push({ name: "Company", href: "/add-company", icon: Building2 });
     }

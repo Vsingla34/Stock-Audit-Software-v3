@@ -120,7 +120,6 @@ class SupabaseDataService {
   // --- OTP LOGIC (Supabase Auth Based) ---
 
   public async sendAssignmentOtp(assignmentId: number): Promise<string> {
-    // 1. Get Company ID from Assignment
     const { data: assignment, error: assignError } = await supabase
       .from("assignments")
       .select("company_id")
@@ -129,8 +128,6 @@ class SupabaseDataService {
 
     if (assignError || !assignment) throw new Error("Assignment not found");
 
-    // 2. Find a Client for this Company
-    // We look for a user profile with role 'client' who is assigned to this company
     const { data: clients, error: clientError } = await supabase
       .from("user_profiles")
       .select("email")
@@ -143,16 +140,13 @@ class SupabaseDataService {
       throw new Error("No client account found associated with this company.");
     }
 
-    // Pick the first client found
     const targetEmail = clients[0].email;
     this.pendingVerificationEmail = targetEmail;
 
-    // 3. Trigger Supabase Auth OTP (Standard Login Code)
-    // This sends the standard "Your login code is XXXXXX" email
     const { error } = await supabase.auth.signInWithOtp({
       email: targetEmail,
       options: {
-        shouldCreateUser: false, // Only allow existing users
+        shouldCreateUser: false, 
       }
     });
 
@@ -166,11 +160,6 @@ class SupabaseDataService {
       throw new Error("Session expired or invalid. Please resend code.");
     }
 
-    // 4. Verify WITHOUT switching session
-    // We create a temporary client instance so that verifying the OTP 
-    // doesn't log the Auditor out and the Client in on this browser.
-    
-    // NOTE: This assumes Supabase URL/Key are available in the env or existing client
     const supabaseUrl = (supabase as any).supabaseUrl || process.env.VITE_SUPABASE_URL;
     const supabaseKey = (supabase as any).supabaseKey || process.env.VITE_SUPABASE_ANON_KEY;
 
@@ -190,7 +179,6 @@ class SupabaseDataService {
       return false;
     }
 
-    // Verification successful (The OTP was valid for that email)
     this.pendingVerificationEmail = null;
     return true;
   }
@@ -392,7 +380,6 @@ class SupabaseDataService {
 
     if (error) throw error;
 
-    // Collect user IDs for resolution (Both Finalizers and Auditors)
     const userIds = new Set<string>();
     data?.forEach((r: any) => {
         if (r.finalized_by) userIds.add(r.finalized_by);
@@ -423,7 +410,6 @@ class SupabaseDataService {
       const finalizer = userMap[report.finalized_by];
       const finalizerName = finalizer ? (finalizer.name || finalizer.email) : "Unknown Client";
 
-      // Resolve Auditor Name(s) from Assignment
       let auditorName = "Unknown Auditor";
       const rawAuditors = report.assignments?.auditor_ids;
       let audIds: string[] = [];
@@ -440,7 +426,7 @@ class SupabaseDataService {
 
       return {
         id: report.id,
-        assignment_id: report.assignment_id, // ADDED THIS
+        assignment_id: report.assignment_id, 
         finalized_at: report.created_at,
         finalized_by_name: finalizerName, 
         auditor_name: auditorName, 
@@ -523,8 +509,32 @@ class SupabaseDataService {
   public async addQuestion(q:any) { await supabase.from("questions").insert({text:q.text,type:q.type,required:q.required,options:q.options,company_id:q.companyId} as any); }
   public async updateQuestion(q:any) { await supabase.from("questions").update(q as any).eq("id",q.id); }
   public async deleteQuestion(id:string) { await supabase.from("questions").delete().eq("id",id); }
-  public async getQuestionnaireAnswers(cId:string) { const {data}=await supabase.from("questionnaire_answers").select("*").eq("company_id",cId); return data?.map((a:any)=>({questionId:a.question_id,locationId:a.location_id,answer:a.answer,answeredBy:a.answered_by,answeredOn:a.answered_on,companyId:a.company_id}))||[]; }
-  public async upsertQuestionnaireAnswer(a:any) { await supabase.from("questionnaire_answers").upsert({question_id:a.questionId,location_id:a.locationId,company_id:a.companyId,answer:a.answer,answered_by:a.answeredBy,answered_on:a.answeredOn} as any, {onConflict:'question_id,location_id' as any}); }
+  
+  // UPDATED FOR ASSIGNMENT BASED ANSWERS
+  public async getQuestionnaireAnswers(cId:string) { 
+    const {data}=await supabase.from("questionnaire_answers").select("*").eq("company_id",cId); 
+    return data?.map((a:any)=>({
+      questionId:a.question_id,
+      locationId:a.location_id,
+      answer:a.answer,
+      answeredBy:a.answered_by,
+      answeredOn:a.answered_on,
+      companyId:a.company_id,
+      assignmentId: a.assignment_id // Map new field
+    }))||[]; 
+  }
+
+  public async upsertQuestionnaireAnswer(a:any) { 
+    await supabase.from("questionnaire_answers").upsert({
+      question_id:a.questionId,
+      location_id:a.locationId,
+      company_id:a.companyId,
+      answer:a.answer,
+      answered_by:a.answeredBy,
+      answered_on:a.answeredOn,
+      assignment_id: a.assignmentId // Insert new field
+    } as any, {onConflict:'question_id,assignment_id' as any}); // Updated conflict constraint
+  }
   
   public async updateLocationAuditStatus(locationId: string, status: AuditStatus): Promise<void> {
     const { error } = await supabase

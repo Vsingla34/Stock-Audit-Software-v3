@@ -77,6 +77,7 @@ export interface QuestionnaireAnswer {
   answeredBy?: string;
   answeredOn: string;
   companyId?: string; 
+  assignmentId?: number; 
 }
 
 interface InventoryContextType {
@@ -148,6 +149,7 @@ interface InventoryContextType {
     answer: Omit<QuestionnaireAnswer, "answeredOn">
   ) => Promise<void>;
   getLocationQuestionnaireAnswers: (locationId: string) => QuestionnaireAnswer[];
+  getAssignmentQuestionnaireAnswers: (assignmentId: number) => QuestionnaireAnswer[]; 
   getQuestionsForLocation: (locationId: string) => Question[];
   getQuestionById: (questionId: string) => Question | undefined;
 }
@@ -268,7 +270,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     auditorId?: string,
     auditorName?: string
   ) => {
-    // 1. CHECK STATUS
     let statusToCheck: AuditStatus | undefined;
     if (selectedAssignmentId) {
       const assignment = assignments.find(a => a.id === selectedAssignmentId);
@@ -278,16 +279,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       statusToCheck = loc?.auditStatus;
     }
 
-    if (statusToCheck === 'submitted' || statusToCheck === 'finalized') {
-      const isSuperAdmin = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
-      if (!isSuperAdmin) {
-        throw new Error(`Audit is ${statusToCheck}. Modifications are disabled.`);
-      }
+    // STRICT FINALIZATION CHECK
+    if (statusToCheck === 'finalized') {
+       throw new Error("Audit is finalized. No further modifications allowed.");
     }
 
-    // 2. DETECT FORK (GLOBAL -> ASSIGNMENT)
-    // If we are active in an assignment, but the item we are scanning has no assignmentId,
-    // it means it's a global Master Item. We must create a new record (Fork) for this assignment.
+    if (statusToCheck === 'submitted') {
+      const isSuperAdmin = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
+      if (!isSuperAdmin) {
+        throw new Error(`Audit is ${statusToCheck}. Modifications are restricted to Admins.`);
+      }
+    }
     
     let targetId = item.id;
     let targetAssignmentId = item.assignmentId;
@@ -295,10 +297,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     if (selectedAssignmentId) {
         const selectedIdNum = parseInt(selectedAssignmentId);
         
-        // If the current item is NOT assigned to this assignment...
         if (targetAssignmentId !== selectedIdNum) {
             
-            // Check if we ALREADY have a fork for this assignment
             const existingFork = auditedItems.find(i => 
                 i.sku === item.sku && 
                 i.location === item.location && 
@@ -306,23 +306,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
             );
             
             if (existingFork) {
-                // Use the existing fork's ID
                 targetId = existingFork.id;
                 targetAssignmentId = selectedIdNum;
-                // Inherit existing entries from the fork, NOT the master
                 item.auditorEntries = existingFork.auditorEntries;
             } else {
-                // CREATE NEW FORK
-                // We deliberately set ID to undefined so Supabase generates a new one
                 targetId = undefined as any; 
                 targetAssignmentId = selectedIdNum;
-                // Start with empty entries since this is a new fork
                 item.auditorEntries = []; 
             }
         }
     }
 
-    // 3. UPDATE ENTRIES
     let auditorEntries: AuditorEntry[] = item.auditorEntries || [];
     let totalPhysicalQuantity = 0;
 
@@ -357,8 +351,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
     const itemToUpdate: InventoryItem = {
       ...item,
-      id: targetId, // Updated (or undefined)
-      assignmentId: targetAssignmentId, // Updated
+      id: targetId, 
+      assignmentId: targetAssignmentId, 
       physicalQuantity: totalPhysicalQuantity,
       status:
         totalPhysicalQuantity !== undefined &&
@@ -373,7 +367,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
     await SupabaseDataService.setAuditedItems([itemToUpdate]);
     
-    // RELOAD to get real ID if we just inserted
     if (!targetId) {
         await loadData();
     } else {
@@ -390,6 +383,23 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const updateItemRemark = async (itemId: string, remark: string) => {
+    // Check status first
+    const item = itemMaster.find(i => i.id === itemId);
+    if (item) {
+        let statusToCheck: AuditStatus | undefined;
+        if (selectedAssignmentId) {
+            const assignment = assignments.find(a => a.id === selectedAssignmentId);
+            statusToCheck = assignment?.status;
+        } else {
+            const loc = locations.find(l => l.name === item.location);
+            statusToCheck = loc?.auditStatus;
+        }
+
+        if (statusToCheck === 'finalized') {
+            throw new Error("Audit is finalized. Remarks cannot be edited.");
+        }
+    }
+
     const updatedItems = itemMaster.map(item => 
       item.id === itemId ? { ...item, clientRemarks: remark } : item
     );
@@ -525,8 +535,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       report_data: reportData,
       finalized_by: currentUser?.id
     });
-
-    await SupabaseDataService.resetInventoryCounts(selectedCompanyId, loc.name, assignmentId);
 
     await updateAssignment(assignmentId, "finalized");
     await updateLocationAuditStatus(loc.id, "finalized");
@@ -680,6 +688,20 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
  const saveQuestionnaireAnswer = async (
   answer: Omit<QuestionnaireAnswer, "answeredOn" | "answeredBy">
 ) => {
+    // CHECK STATUS
+    let statusToCheck: AuditStatus | undefined;
+    if (answer.assignmentId) {
+        const assignment = assignments.find(a => a.id === answer.assignmentId);
+        statusToCheck = assignment?.status;
+    } else if (answer.locationId) {
+        const loc = locations.find(l => l.id === answer.locationId);
+        statusToCheck = loc?.auditStatus;
+    }
+
+    if (statusToCheck === 'finalized') {
+        throw new Error("Audit is finalized. Cannot edit questionnaire.");
+    }
+
     const answeredBy = (currentUser as any)?.name || currentUser?.email;
     const location = locations.find(loc => loc.id === answer.locationId);
     const companyId = location?.companyId;
@@ -695,7 +717,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       const existingIndex = prev.findIndex(
         (a) =>
           a.questionId === answer.questionId &&
-          a.locationId === answer.locationId
+          a.assignmentId === answer.assignmentId 
       );
       if (existingIndex !== -1) {
         const updated = [...prev];
@@ -710,6 +732,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const getLocationQuestionnaireAnswers = (locationId: string): QuestionnaireAnswer[] => {
     return questionnaireAnswers.filter((answer) => answer.locationId === locationId);
+  };
+  
+  const getAssignmentQuestionnaireAnswers = (assignmentId: number): QuestionnaireAnswer[] => {
+    return questionnaireAnswers.filter((answer) => answer.assignmentId === assignmentId);
   };
 
   const getQuestionsForLocation = (locationId: string): Question[] => {
@@ -763,6 +789,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         deleteQuestion,
         saveQuestionnaireAnswer,
         getLocationQuestionnaireAnswers,
+        getAssignmentQuestionnaireAnswers,
         getQuestionsForLocation,
         getQuestionById,
         createAssignment, 
