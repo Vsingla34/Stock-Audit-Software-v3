@@ -1,110 +1,72 @@
 import { useEffect, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { User, Mail, Shield, Building2, CalendarDays } from "lucide-react";
+import { useUser } from "@/context/UserContext";
 import { supabase } from "@/integrations/supabase/client";
-import { toast } from "sonner";
-import { User, Mail, Building2, MapPin, Shield, CheckCircle2, Loader2 } from "lucide-react";
+import { format } from "date-fns";
+import { Separator } from "@/components/ui/separator";
 
-interface UserProfileRow {
+interface UserProfileDetails {
   id: string;
-  email: string;
   name: string;
-  role: "super_admin" | "admin" | "auditor" | "client";
+  email: string;
+  role: string;
+  created_at: string;
   assigned_companies: string[] | null;
-  assigned_locations: string[] | null;
+  // assigned_locations removed
 }
 
-export default function Profile() {
-  const [profile, setProfile] = useState<UserProfileRow | null>(null);
-  const [companyNames, setCompanyNames] = useState<string>("All Companies");
-  const [locationNames, setLocationNames] = useState<string>("All Locations");
+const Profile = () => {
+  const { user } = useUser();
+  const [profile, setProfile] = useState<UserProfileDetails | null>(null);
   const [loading, setLoading] = useState(true);
+  const [companyNames, setCompanyNames] = useState<string[]>([]);
 
   useEffect(() => {
-    const loadProfile = async () => {
+    const fetchProfile = async () => {
+      if (!user) return;
+
       try {
-        const {
-          data: { user },
-          error: userError,
-        } = await supabase.auth.getUser();
-
-        if (userError) throw userError;
-        if (!user) return;
-
+        // 1. Fetch Profile (Removed assigned_locations to fix 400 Error)
         const { data, error } = await supabase
           .from("user_profiles")
-          .select(
-            "id, email, name, role, assigned_companies, assigned_locations"
-          )
+          .select("id, name, email, role, created_at, assigned_companies")
           .eq("id", user.id)
           .single();
 
         if (error) throw error;
+        setProfile(data);
 
-        const profileRow = data as UserProfileRow;
-        setProfile(profileRow);
-
-        
-        if (
-          profileRow.role === "super_admin" || 
-          profileRow.role === "admin" ||
-          !profileRow.assigned_companies ||
-          profileRow.assigned_companies.length === 0
-        ) {
-          setCompanyNames("All Companies");
-        } else {
-          const { data: companyData, error: companyError } = await supabase
+        // 2. Fetch Company Names if assigned
+        if (data.assigned_companies && data.assigned_companies.length > 0) {
+          const { data: companies, error: companyError } = await supabase
             .from("companies")
-            .select("id, name")
-            .in("id", profileRow.assigned_companies);
-
-          if (companyError) throw companyError;
-
-          const names =
-            companyData?.map((c: any) => c.name).join(", ") ||
-            "Assigned companies";
-          setCompanyNames(names);
+            .select("name")
+            .in("id", data.assigned_companies);
+          
+          if (!companyError && companies) {
+            setCompanyNames(companies.map(c => c.name));
+          }
         }
 
-        
-        if (
-          profileRow.role === "super_admin" || 
-          profileRow.role === "admin" ||
-          !profileRow.assigned_locations ||
-          profileRow.assigned_locations.length === 0
-        ) {
-          setLocationNames("All Locations");
-        } else {
-          const { data: locationData, error: locationError } = await supabase
-            .from("locations")
-            .select("id, name")
-            .in("id", profileRow.assigned_locations);
-
-          if (locationError) throw locationError;
-
-          const names =
-            locationData?.map((l: any) => l.name).join(", ") ||
-            "Assigned locations";
-          setLocationNames(names);
-        }
-      } catch (err) {
-        console.error("Error loading profile:", err);
-        toast.error("Failed to load profile");
+      } catch (error) {
+        console.error("Error loading profile:", error);
       } finally {
         setLoading(false);
       }
     };
 
-    loadProfile();
-  }, []);
+    fetchProfile();
+  }, [user]);
 
   if (loading) {
     return (
       <AppLayout>
-        <div className="flex flex-col items-center justify-center min-h-[60vh]">
-          <Loader2 className="h-10 w-10 text-indigo-600 animate-spin mb-4" />
-          <p className="text-gray-500 font-medium">Loading profile...</p>
+        <div className="flex h-[50vh] items-center justify-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-indigo-600 border-t-transparent"></div>
         </div>
       </AppLayout>
     );
@@ -113,121 +75,118 @@ export default function Profile() {
   if (!profile) {
     return (
       <AppLayout>
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <p className="text-gray-500">Profile not found.</p>
+        <div className="flex h-[50vh] flex-col items-center justify-center gap-4 text-center">
+          <div className="rounded-full bg-red-100 p-3">
+            <User className="h-6 w-6 text-red-600" />
+          </div>
+          <h2 className="text-xl font-semibold text-gray-900">Profile not found</h2>
+          <p className="text-gray-500">Could not load user information.</p>
         </div>
       </AppLayout>
     );
   }
 
-  
-  const niceRoleLabel =
-    profile.role === "super_admin"
-      ? "Super Administrator"
-      : profile.role === "admin"
-      ? "Admin"
-      : profile.role === "client"
-      ? "Client"
-      : "Inventory Auditor";
-
-  
-  const accessText =
-    profile.role === "super_admin"
-      ? "As a Super Admin, you have full system access, including creating companies and managing all users."
-      : profile.role === "admin"
-      ? "As an admin, you can manage users, locations, and reports for your assigned companies."
-      : profile.role === "client"
-      ? "As a client, you can view analytics, reports and audit results for your companies."
-      : "As an auditor, you can conduct stock audits and view reports for your assigned locations.";
-
   return (
     <AppLayout>
-      <div className="max-w-4xl mx-auto space-y-6">
+      <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900">
-            User Profile
-          </h1>
-          <p className="text-gray-500">
-            View and manage your account information
-          </p>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900">My Profile</h1>
+          <p className="text-gray-500">Manage your account settings and preferences.</p>
         </div>
 
-        <Card className="shadow-sm border-gray-200">
-          <CardHeader className="bg-gradient-to-r from-gray-50 to-white border-b border-gray-100 pb-8">
-            <div className="flex items-center gap-5">
-                <div className="h-16 w-16 rounded-full bg-indigo-100 flex items-center justify-center border-2 border-white shadow-md">
-                    <User className="h-8 w-8 text-indigo-600" />
-                </div>
-                <div>
-                    <CardTitle className="text-2xl font-bold text-gray-900">{profile.name}</CardTitle>
-                    <div className="flex items-center gap-2 mt-1">
-                        <Mail className="h-4 w-4 text-gray-400" />
-                        <span className="text-sm text-gray-600 font-medium">{profile.email}</span>
-                    </div>
-                </div>
-            </div>
-          </CardHeader>
+        <div className="grid gap-6 md:grid-cols-2">
+          {/* Main Profile Card */}
+          <Card className="shadow-sm border-gray-200 md:col-span-2 lg:col-span-1">
+            <CardHeader className="bg-gray-50/50 border-b border-gray-100">
+              <CardTitle className="text-gray-900">Personal Information</CardTitle>
+            </CardHeader>
+            <CardContent className="p-6">
+              <div className="flex flex-col items-center sm:flex-row sm:items-start gap-6">
+                <Avatar className="h-24 w-24 border-4 border-white shadow-lg ring-1 ring-gray-100">
+                  <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${profile.name}`} />
+                  <AvatarFallback className="bg-indigo-100 text-indigo-700 text-xl">
+                    {profile.name?.charAt(0)}
+                  </AvatarFallback>
+                </Avatar>
+                
+                <div className="space-y-4 flex-1 w-full text-center sm:text-left">
+                  <div>
+                    <h2 className="text-xl font-bold text-gray-900">{profile.name}</h2>
+                    <p className="text-sm text-gray-500 flex items-center justify-center sm:justify-start gap-1.5 mt-1">
+                      <Mail className="h-3.5 w-3.5" />
+                      {profile.email}
+                    </p>
+                  </div>
 
-          <CardContent className="pt-8 space-y-8">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                  <div className="flex flex-wrap justify-center sm:justify-start gap-2">
+                    <Badge variant="secondary" className="bg-indigo-50 text-indigo-700 border-indigo-100 px-3 py-1">
+                      <Shield className="mr-1.5 h-3.5 w-3.5" />
+                      {profile.role.replace('_', ' ').toUpperCase()}
+                    </Badge>
+                    <Badge variant="outline" className="text-gray-600 border-gray-200 px-3 py-1">
+                      <CalendarDays className="mr-1.5 h-3.5 w-3.5" />
+                      Joined {format(new Date(profile.created_at), 'MMMM yyyy')}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Access & Assignments Card */}
+          <Card className="shadow-sm border-gray-200 md:col-span-2 lg:col-span-1">
+            <CardHeader className="bg-gray-50/50 border-b border-gray-100">
+              <CardTitle className="text-gray-900">Access & Assignments</CardTitle>
+            </CardHeader>
+            <CardContent className="p-6 space-y-6">
               
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                  <Shield className="h-3.5 w-3.5 text-indigo-600" /> Role
-                </label>
-                <div>
-                  <Badge
-                    variant="outline"
-                    className={`
-                      px-3 py-1 text-sm font-medium
-                      ${profile.role === "super_admin" ? "bg-purple-50 text-purple-700 border-purple-200" : ""}
-                      ${profile.role === "admin" ? "bg-indigo-50 text-indigo-700 border-indigo-200" : ""}
-                      ${profile.role === "client" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : ""}
-                      ${profile.role === "auditor" ? "bg-blue-50 text-blue-700 border-blue-200" : ""}
-                    `}
-                  >
-                    {niceRoleLabel}
-                  </Badge>
+              {/* Companies Section */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                  <Building2 className="h-4 w-4 text-indigo-600" />
+                  Assigned Companies
+                </div>
+                <div className="bg-gray-50 rounded-lg p-4 border border-gray-100">
+                  {companyNames.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {companyNames.map((name, i) => (
+                        <Badge key={i} variant="outline" className="bg-white hover:bg-white text-gray-700 border-gray-200">
+                          {name}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-400 italic">No specific companies assigned.</p>
+                  )}
                 </div>
               </div>
 
-              
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                  <Building2 className="h-3.5 w-3.5 text-indigo-600" /> Assigned Company
-                </label>
-                <p className="text-sm text-gray-900 font-medium bg-gray-50 p-2.5 rounded-md border border-gray-100">
-                    {companyNames}
-                </p>
-              </div>
+              <Separator className="bg-gray-100" />
 
-              
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                  <MapPin className="h-3.5 w-3.5 text-indigo-600" /> Assigned Locations
-                </label>
-                <p className="text-sm text-gray-700 leading-relaxed bg-gray-50 p-3 rounded-md border border-gray-100">
-                    {locationNames}
-                </p>
-              </div>
-            </div>
-
-            <div className="rounded-lg bg-indigo-50 p-4 border border-indigo-100">
-                <div className="flex items-start gap-3">
-                    <div className="p-1 bg-indigo-100 rounded-full">
-                        <CheckCircle2 className="h-4 w-4 text-indigo-600" />
+              {/* Note about Locations */}
+              <div className="rounded-md bg-blue-50 p-4">
+                <div className="flex">
+                  <div className="flex-shrink-0">
+                    <Shield className="h-5 w-5 text-blue-400" aria-hidden="true" />
+                  </div>
+                  <div className="ml-3">
+                    <h3 className="text-sm font-medium text-blue-800">Access Control</h3>
+                    <div className="mt-2 text-sm text-blue-700">
+                      <p>
+                        Your location access is determined dynamically based on your active assignments and company roles. 
+                        Check the <strong>Assignments</strong> page to see your current tasks.
+                      </p>
                     </div>
-                    <div>
-                        <h4 className="text-sm font-semibold text-indigo-900">Access Level Permissions</h4>
-                        <p className="text-sm text-indigo-700 mt-1 leading-relaxed">
-                            {accessText}
-                        </p>
-                    </div>
+                  </div>
                 </div>
-            </div>
-          </CardContent>
-        </Card>
+              </div>
+
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </AppLayout>
   );
-}
+};
+
+export default Profile;

@@ -29,7 +29,23 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { ClipboardList, Plus, Pencil, Trash2, UserCircle, X, ExternalLink, CheckCircle, Mail, Lock } from "lucide-react";
+import { 
+  ClipboardList, 
+  Plus, 
+  Pencil, 
+  Trash2, 
+  UserCircle, 
+  X, 
+  ExternalLink, 
+  CheckCircle, 
+  Mail, 
+  Lock,
+  UploadCloud,
+  FileSpreadsheet,
+  Loader2,
+  Download,
+  ArrowLeft
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -39,6 +55,7 @@ import { useCompany } from "@/context/CompanyContext";
 import SupabaseDataService from "@/services/SupabaseDataService";
 import { Checkbox } from "@/components/ui/checkbox";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
+import { processCSV } from "@/components/upload/utils/csvUtils";
 
 interface AssignmentRow {
   dbId: number;
@@ -98,6 +115,11 @@ const AssignmentPage = () => {
   const [otpCode, setOtpCode] = useState("");
   const [verificationPendingRow, setVerificationPendingRow] = useState<AssignmentRow | null>(null);
   const [verificationStatus, setVerificationStatus] = useState<"idle" | "sending" | "verifying">("idle");
+
+  // Import State
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
 
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
   const [companyUuidMap, setCompanyUuidMap] = useState<Map<string, string>>(new Map());
@@ -513,6 +535,139 @@ const AssignmentPage = () => {
     setSelectedAuditorIds(prev => prev.filter(id => id !== auditorId));
   };
 
+  // --- BULK IMPORT LOGIC ---
+
+  const handleImportFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setImportFile(e.target.files[0]);
+    }
+  };
+
+  const parseDate = (dateStr: string): string => {
+    if (!dateStr) return new Date().toISOString();
+    
+    const ddmmyyyy = dateStr.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+    if (ddmmyyyy) {
+      const day = parseInt(ddmmyyyy[1], 10);
+      const month = parseInt(ddmmyyyy[2], 10);
+      const year = parseInt(ddmmyyyy[3], 10);
+      const date = new Date(year, month - 1, day);
+      if (!isNaN(date.getTime())) {
+        return date.toISOString();
+      }
+    }
+
+    const date = new Date(dateStr);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+
+    console.warn(`Invalid date format: ${dateStr}, defaulting to today.`);
+    return new Date().toISOString();
+  };
+
+  const handleBulkImport = async () => {
+    if (!importFile) {
+      toast.error("Please select a file first.");
+      return;
+    }
+    
+    setIsImporting(true);
+
+    try {
+       const text = await importFile.text();
+       const rows = processCSV(text);
+
+       if (rows.length === 0) throw new Error("File is empty");
+
+       let successCount = 0;
+       let failCount = 0;
+       
+       for (const row of rows) {
+          const companyName = row['company'] || row['company name'];
+          const locationName = row['location'] || row['location name'] || row['store'];
+          const auditorNamesStr = row['auditors'] || row['auditor'] || "";
+          
+          const rawDate = row['date'] || row['scheduled date'];
+          const scheduledDate = parseDate(rawDate);
+          
+          const statusStr = row['status'] || "pending";
+
+          if (!companyName || !locationName) {
+             console.warn("Skipping row: missing company or location", row);
+             failCount++;
+             continue;
+          }
+
+          const company = companies.find(c => c.name.toLowerCase() === companyName.toLowerCase());
+          if (!company) {
+             console.warn(`Skipping row: Company '${companyName}' not found`);
+             failCount++;
+             continue;
+          }
+
+          const locs = globalLocations.length > 0 ? globalLocations : (contextLocations || []);
+          const location = locs.find(l => 
+             l.companyId === company.id && 
+             l.name.toLowerCase() === locationName.toLowerCase()
+          );
+
+          if (!location) {
+             console.warn(`Skipping row: Location '${locationName}' not found for company '${companyName}'`);
+             failCount++;
+             continue;
+          }
+
+          const auditorIds: string[] = [];
+          if (auditorNamesStr) {
+             const names = auditorNamesStr.split(/[;,|]+/).map((n: string) => n.trim().toLowerCase());
+             auditors.forEach(a => {
+                if (names.includes(a.name.toLowerCase()) || names.includes(a.email.toLowerCase())) {
+                   auditorIds.push(a.id);
+                }
+             });
+          }
+
+          await SupabaseDataService.createAssignment({
+             locationId: location.id,
+             companyId: company.id,
+             status: statusStr.toLowerCase() as AuditStatus,
+             scheduledDate: scheduledDate,
+             auditorIds: auditorIds
+          });
+
+          successCount++;
+       }
+
+       toast.success(`Import complete`, {
+         description: `Created ${successCount} assignments. Failed/Skipped: ${failCount}`
+       });
+       
+       setIsImportDialogOpen(false);
+       setImportFile(null);
+       window.location.reload();
+
+    } catch (error: any) {
+      console.error("Import error:", error);
+      toast.error("Failed to process file", { description: error.message });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const downloadTemplate = () => {
+    const headers = ["Company,Location,Auditors,Date,Status"];
+    const example = ["My Company,Warehouse A,John Doe;Jane Smith,15-02-2026,pending"];
+    const csvContent = "data:text/csv;charset=utf-8," + headers.join("\n") + "\n" + example.join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "assignment_import_template.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "pending": return <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">Pending</Badge>;
@@ -543,19 +698,33 @@ const AssignmentPage = () => {
 
   const pageContent = (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex items-center gap-4">
+        {/* ADDED BACK BUTTON */}
+        <Button 
+          variant="ghost" 
+          onClick={() => navigate(-1)} 
+          className="p-0 hover:bg-transparent"
+        >
+          <ArrowLeft className="h-6 w-6 text-gray-500 hover:text-gray-900" />
+        </Button>
+        <div className="flex-1">
           <h1 className="text-3xl font-bold tracking-tight text-gray-900">Assignments</h1>
           <p className="text-gray-500">Manage audit assignments across all companies.</p>
         </div>
         {(isSuperAdmin || isAdmin) && (
-          <Button onClick={handleOpenCreate} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-            <Plus className="mr-2 h-4 w-4" /> Create Assignment
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={() => setIsImportDialogOpen(true)} variant="outline" className="bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50">
+              <UploadCloud className="mr-2 h-4 w-4" /> Import CSV
+            </Button>
+            <Button onClick={handleOpenCreate} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+              <Plus className="mr-2 h-4 w-4" /> Create Assignment
+            </Button>
+          </div>
         )}
       </div>
 
       <Card className="shadow-sm border-gray-200">
+        {/* ... Rest of the component remains the same ... */}
         <CardHeader className="bg-gray-50/50 border-b border-gray-100">
           <CardTitle className="flex items-center gap-2 text-gray-900">
             <ClipboardList className="h-5 w-5 text-indigo-600" />
@@ -832,6 +1001,71 @@ const AssignmentPage = () => {
              </Button>
            </DialogFooter>
          </DialogContent>
+      </Dialog>
+
+      {/* IMPORT ASSIGNMENTS DIALOG */}
+      <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="text-gray-900 flex items-center gap-2">
+              <UploadCloud className="h-5 w-5 text-indigo-600" />
+              Import Assignments
+            </DialogTitle>
+            <DialogDescription className="text-gray-500">
+              Upload a CSV file to create assignments in bulk.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-lg space-y-2">
+              <h4 className="text-sm font-medium text-indigo-900 flex items-center gap-2">
+                 <FileSpreadsheet className="h-4 w-4" />
+                 CSV Format Guide
+              </h4>
+              <p className="text-xs text-indigo-700">
+                 Required: <code className="bg-white px-1 rounded">Company</code>, <code className="bg-white px-1 rounded">Location</code>
+              </p>
+              <p className="text-xs text-indigo-700">
+                 Optional: <code className="bg-white px-1 rounded">Auditors</code> (semicolon separated), <code className="bg-white px-1 rounded">Date</code>, <code className="bg-white px-1 rounded">Status</code>
+              </p>
+              <Button 
+                 variant="ghost" 
+                 size="sm" 
+                 onClick={downloadTemplate}
+                 className="h-6 text-xs text-indigo-700 hover:bg-indigo-100 px-0 hover:px-2 transition-all"
+              >
+                 <Download className="h-3 w-3 mr-1" /> Download Template
+              </Button>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="file-upload">Select CSV File</Label>
+              <Input
+                id="file-upload"
+                type="file"
+                accept=".csv"
+                onChange={handleImportFileChange}
+                className="cursor-pointer"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsImportDialogOpen(false)} disabled={isImporting}>
+              Cancel
+            </Button>
+            <Button onClick={handleBulkImport} disabled={!importFile || isImporting} className="bg-indigo-600 hover:bg-indigo-700">
+              {isImporting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Importing...
+                </>
+              ) : (
+                "Start Import"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
     </div>
   );

@@ -12,7 +12,6 @@ export const RecentActivity = () => {
   const { auditedItems, locations, assignments } = useInventory();
   const { currentUser } = useUser();
   const { accessibleLocations } = useUserAccess();
-  // FIX: Import selectedAssignmentId to ensure strict filtering
   const { selectedCompanyId, selectedAssignmentId } = useCompany();
   const { selectedLocation } = useLocationFilter();
 
@@ -34,7 +33,7 @@ export const RecentActivity = () => {
     // Determine strict assignment location constraint
     let assignmentLocationName: string | null = null;
     if (selectedAssignmentId) {
-       const ass = assignments.find((a: Assignment) => a.id === selectedAssignmentId);
+       const ass = assignments.find((a: Assignment) => a.id === Number(selectedAssignmentId));
        if (ass) {
           const loc = locations.find(l => l.id === ass.locationId);
           if (loc) assignmentLocationName = loc.name;
@@ -42,37 +41,41 @@ export const RecentActivity = () => {
     }
 
     return auditedItems.filter((item) => {
+      // Basic Status Check
       if (!item.status || item.status === "pending") return false;
 
-      // FIX: If assignment is selected, ONLY show items from that location
+      // Assignment Filter (Strict)
       if (assignmentLocationName && item.location !== assignmentLocationName) {
+        return false;
+      }
+      
+      // Assignment ID Filter (Double check if item belongs to this assignment)
+      if (selectedAssignmentId && item.assignmentId && item.assignmentId !== Number(selectedAssignmentId)) {
         return false;
       }
 
       const itemLocation = locationByName.get(item.location);
       if (!itemLocation) return false;
 
+      // Company Filter
       if (selectedCompanyId && itemLocation.companyId !== selectedCompanyId) {
         return false;
       }
 
-      if (currentUser?.role === "admin") {
-        if (selectedLocation && selectedLocation !== "all") {
-          const locationObj = locations.find((loc) => loc.id === selectedLocation);
-          return item.location === locationObj?.name;
-        }
-        return true;
-      }
+      // Role-Based Location Access Check
+      const hasAccess = 
+        currentUser?.role === "admin" || 
+        accessibleLocationNames.includes(item.location);
 
+      if (!hasAccess) return false;
+
+      // Dashboard Location Filter
       if (selectedLocation && selectedLocation !== "all") {
         const locationObj = locations.find((loc) => loc.id === selectedLocation);
-        return (
-          item.location === locationObj?.name &&
-          accessibleLocationNames.includes(item.location)
-        );
+        return item.location === locationObj?.name;
       }
 
-      return accessibleLocationNames.includes(item.location);
+      return true;
     });
   }, [
     auditedItems,
@@ -82,17 +85,18 @@ export const RecentActivity = () => {
     selectedLocation,
     accessibleLocationNames,
     locations,
-    selectedAssignmentId, // Added dependency
+    selectedAssignmentId, 
     assignments
   ]);
 
+  // FIX: Flatten logic to show individual scan events if multiple occur
+  // But keeping your exact UI structure (Item centric)
   const recentItems = useMemo(() => {
     return [...filteredItems]
       .sort((a, b) => {
-        if (!a.lastAudited || !b.lastAudited) return 0;
-        return (
-          new Date(b.lastAudited).getTime() - new Date(a.lastAudited).getTime()
-        );
+        const dateA = a.lastAudited ? new Date(a.lastAudited).getTime() : 0;
+        const dateB = b.lastAudited ? new Date(b.lastAudited).getTime() : 0;
+        return dateB - dateA;
       })
       .slice(0, 5);
   }, [filteredItems]);
@@ -146,7 +150,7 @@ export const RecentActivity = () => {
               </div>
 
               <div className="flex-1 min-w-0">
-                <p className="font-medium truncate text-gray-900">{item.name}</p>
+                <p className="font-medium truncate text-gray-900">{item.name || "Unnamed Item"}</p>
                 <p className="text-sm text-gray-500">
                   {item.sku} - {item.location}
                 </p>
@@ -163,8 +167,7 @@ export const RecentActivity = () => {
                   {item.physicalQuantity} / {item.systemQuantity}
                 </p>
                 <p className="text-xs text-gray-400">
-                  {item.lastAudited &&
-                    format(new Date(item.lastAudited), "dd MMM, HH:mm")}
+                  {item.lastAudited ? format(new Date(item.lastAudited), "dd MMM, HH:mm") : "Just now"}
                 </p>
               </div>
             </div>

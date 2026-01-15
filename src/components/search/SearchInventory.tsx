@@ -3,17 +3,36 @@ import { useInventory, InventoryItem } from "@/context/InventoryContext";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Search, Plus, Minus, MapPin } from "lucide-react";
+import { Search, Plus, Minus, MapPin, AlertCircle, PackagePlus } from "lucide-react";
 import { toast } from "sonner";
 import { useUser } from "@/context/UserContext";
 import { useCompany } from "@/context/CompanyContext";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 
 export const SearchInventory = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<InventoryItem[]>([]);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   
-  const { searchItem, addItemToAudit, assignments, locations } = useInventory();
+  // New State for Add Dialog
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [newItem, setNewItem] = useState({
+    sku: "",
+    name: "",
+    category: "",
+    physicalQuantity: 1
+  });
+
+  const { searchItem, addItemToAudit, addSurplusItem, assignments, locations } = useInventory();
   const { currentUser } = useUser();
   const { selectedAssignmentId } = useCompany();
 
@@ -23,25 +42,20 @@ export const SearchInventory = () => {
   const activeLocationName = locations.find(l => l.id === activeLocationId)?.name;
 
   const performSearch = useCallback((query: string) => {
-    // Clear results if query is empty or too short
     if (!query || query.length < 2) {
       setSearchResults([]);
       return;
     }
 
     const results = searchItem(query);
-    // Since itemMaster is already scoped to the assignment/global, 
-    // we just need to ensure we show items relevant to the current location if they are global
     let filteredResults = results;
     
-    // Explicitly filter by the active location name if it exists to be safe
     if (activeLocationName) {
         filteredResults = results.filter(item => item.location === activeLocationName);
     }
     
     setSearchResults(filteredResults);
     
-    // Preserve existing quantity inputs for items that are still in the results
     const newQuantities: Record<string, number> = {};
     filteredResults.forEach(item => {
       const key = `${item.id}-${item.location}`;
@@ -51,11 +65,10 @@ export const SearchInventory = () => {
 
   }, [searchItem, activeLocationName, quantities]);
 
-  // Auto-search effect with debounce
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
       performSearch(searchQuery);
-    }, 300); // Wait 300ms after user stops typing
+    }, 300); 
 
     return () => clearTimeout(delayDebounceFn);
   }, [searchQuery, performSearch]);
@@ -107,6 +120,23 @@ export const SearchInventory = () => {
     }
   };
 
+  const handleAddSurplus = async () => {
+    if (!newItem.sku || !newItem.name) return;
+    try {
+      await addSurplusItem(newItem);
+      toast.success("Surplus item added successfully");
+      setIsAddOpen(false);
+      setSearchQuery(newItem.sku); 
+      setNewItem({ sku: "", name: "", category: "", physicalQuantity: 1 });
+    } catch (error: any) {
+      toast.error("Failed to add surplus item", {
+        description: error.message
+      });
+    }
+  };
+
+  const hasNoResults = searchQuery.length >= 2 && searchResults.length === 0;
+
   return (
     <Card className="w-full shadow-sm border-gray-200">
       <CardHeader>
@@ -128,7 +158,6 @@ export const SearchInventory = () => {
           </p>
         </div>
 
-        {/* LOCATION DROPDOWN REMOVED */}
         {activeLocationName && (
             <div className="flex items-center gap-2 mb-4 p-2 bg-gray-50 rounded border border-gray-200 text-sm text-gray-600">
                 <MapPin className="h-4 w-4" />
@@ -158,6 +187,9 @@ export const SearchInventory = () => {
               const auditorEntries = item.auditorEntries || [];
               const currentUserEntry = auditorEntries.find(e => e.auditorId === currentUser?.id);
               
+              // FIX: Calculate total dynamically from auditor entries
+              const calculatedTotal = auditorEntries.reduce((sum, entry) => sum + (entry.quantityFound || 0), 0);
+
               return (
                 <div key={itemKey} className="grid grid-cols-[1fr_auto] gap-4 p-4 border-b border-gray-100 last:border-0">
                   <div>
@@ -176,7 +208,8 @@ export const SearchInventory = () => {
                           </div>
                         ))}
                         <div className="mt-1 font-medium text-gray-900">
-                          Total Physical: {item.physicalQuantity || 0}
+                          {/* FIX: Using calculated total */}
+                          Total Physical: {calculatedTotal}
                         </div>
                       </div>
                     )}
@@ -223,12 +256,85 @@ export const SearchInventory = () => {
               );
             })}
           </div>
-        ) : searchQuery.length >= 2 ? (
-          <div className="text-center p-8 text-gray-500">
-            No results found for "{searchQuery}"
-            {activeLocationName && (
-                <div className="text-sm mt-1">in {activeLocationName}</div>
-            )}
+        ) : hasNoResults ? (
+          <div className="flex flex-col items-center justify-center py-12 bg-gray-50 rounded-lg border border-dashed border-gray-300">
+            <div className="bg-white p-3 rounded-full shadow-sm mb-3">
+              <AlertCircle className="h-8 w-8 text-orange-500" />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900">Item not found in this audit</h3>
+            <p className="text-gray-500 max-w-md text-center mb-6">
+              This item does not exist in the current closing stock list. 
+              If you found it physically, you can add it as a surplus item.
+            </p>
+            
+            <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+              <DialogTrigger asChild>
+                <Button className="bg-indigo-600 hover:bg-indigo-700">
+                  <PackagePlus className="mr-2 h-4 w-4" />
+                  Add New Item
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Add Surplus Item</DialogTitle>
+                  <DialogDescription>
+                    Add an item that was missing from the closing stock but found physically.
+                  </DialogDescription>
+                </DialogHeader>
+                
+                <div className="grid gap-4 py-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="sku">SKU / Barcode</Label>
+                    <Input 
+                      id="sku" 
+                      value={newItem.sku} 
+                      onChange={(e) => setNewItem({...newItem, sku: e.target.value})}
+                      placeholder="e.g. 100256"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="name">Item Name</Label>
+                    <Input 
+                      id="name" 
+                      value={newItem.name} 
+                      onChange={(e) => setNewItem({...newItem, name: e.target.value})}
+                      placeholder="e.g. Wireless Mouse"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="category">Category</Label>
+                    <Input 
+                      id="category" 
+                      value={newItem.category} 
+                      onChange={(e) => setNewItem({...newItem, category: e.target.value})}
+                      placeholder="e.g. Electronics"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="qty">Physical Quantity Found</Label>
+                    <Input 
+                      id="qty" 
+                      type="number"
+                      min="1"
+                      value={newItem.physicalQuantity} 
+                      onChange={(e) => setNewItem({...newItem, physicalQuantity: parseInt(e.target.value) || 0})}
+                    />
+                  </div>
+                  
+                  <div className="bg-yellow-50 p-3 rounded-md border border-yellow-200 text-xs text-yellow-800">
+                    <strong>Note:</strong> System Quantity will be set to 0. 
+                    Remark "This item was not in the closing stock but it was there" will be added automatically.
+                  </div>
+                </div>
+
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setIsAddOpen(false)}>Cancel</Button>
+                  <Button onClick={handleAddSurplus} disabled={!newItem.sku || !newItem.name}>
+                    Add Item
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         ) : (
           <div className="text-center p-8 text-gray-500">

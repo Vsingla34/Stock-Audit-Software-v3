@@ -1,163 +1,127 @@
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  ReactNode,
-} from "react";
+import React, { createContext, useContext, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { Session, User } from "@supabase/supabase-js";
+import { toast } from "sonner";
 
-export type UserRole = "super_admin" | "admin" | "auditor" | "client";
-
+// Updated Interface: removed 'assigned_locations'
 export interface UserProfile {
   id: string;
   email: string;
   name: string;
-  role: UserRole;
-  assigned_locations?: string[];
-  assigned_companies?: string[];
+  role: "super_admin" | "admin" | "auditor" | "client";
+  assigned_companies: string[] | null;
 }
 
 interface UserContextType {
+  user: User | null;
   currentUser: UserProfile | null;
-  isAuthenticated: boolean;
+  session: Session | null;
   loading: boolean;
+  isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  hasPermission: (permission: string) => boolean;
   refreshProfile: () => Promise<void>;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
-export const UserProvider = ({ children }: { children: ReactNode }) => {
+export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
+  const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // REMOVED: useCompany dependency to prevent circular loops
-  
   useEffect(() => {
-    const init = async () => {
-      try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        if (!session?.user) {
-          setIsAuthenticated(false);
-          setCurrentUser(null);
-          setLoading(false);
-          return;
-        }
-
-        const { data: profile, error } = await supabase
-          .from("user_profiles")
-          .select("id, email, name, role, assigned_locations, assigned_companies")
-          .eq("id", session.user.id)
-          .single();
-
-        if (error || !profile) {
-          setIsAuthenticated(false);
-          setCurrentUser(null);
-        } else {
-          setCurrentUser(profile as UserProfile);
-          setIsAuthenticated(true);
-        }
-      } catch (err) {
-        console.error("Error initializing auth:", err);
-        setIsAuthenticated(false);
-        setCurrentUser(null);
-      } finally {
+    // 1. Check active session on mount
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        fetchUserProfile(session.user.id);
+      } else {
         setLoading(false);
       }
-    };
+    });
 
-    init();
+    // 2. Listen for auth changes (login, logout, token refresh)
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      
+      if (session?.user) {
+        // Only fetch profile if we don't have it or if the user changed
+        if (!currentUser || currentUser.id !== session.user.id) {
+           fetchUserProfile(session.user.id);
+        }
+      } else {
+        setCurrentUser(null);
+        setLoading(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
+  const fetchUserProfile = async (userId: string) => {
+    try {
+      // Query updated: removed assigned_locations
+      const { data, error } = await supabase
+        .from("user_profiles")
+        .select("id, email, name, role, assigned_companies")
+        .eq("id", userId)
+        .single();
+
+      if (error) {
+        console.error("Error fetching profile:", error);
+        // Don't throw here to avoid crashing the UI loop, just set null
+        setCurrentUser(null);
+      } else {
+        setCurrentUser(data as UserProfile);
+      }
+    } catch (error) {
+      console.error("Unexpected error fetching user profile:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const login = async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
-
     if (error) throw error;
-    if (!data.user) throw new Error("No user received from Supabase.");
-
-    const { data: profile, error: profileError } = await supabase
-      .from("user_profiles")
-      .select("id, email, name, role, assigned_locations, assigned_companies")
-      .eq("id", data.user.id)
-      .single();
-
-    if (profileError || !profile) throw profileError || new Error("Profile not found");
-
-    setCurrentUser(profile as UserProfile);
-    setIsAuthenticated(true);
-    
-    // Note: Company context will auto-reset because we clear sessionStorage on logout
   };
 
   const logout = async () => {
-    try {
-      await supabase.auth.signOut();
-    } catch (error) {
-      console.error("Error signing out:", error);
-    } finally {
-      // 1. Clear State
-      setCurrentUser(null);
-      setIsAuthenticated(false);
-
-      // 2. Clear Storage (This handles clearing the Company Selection indirectly)
-      localStorage.clear();
-      sessionStorage.clear();
-
-      // 3. HARD REDIRECT
-      // This forces the browser to reload the page, guaranteeing that no 
-      // old React components try to render with null user data.
-      window.location.href = '/login';
-    }
-  };
-
-  const hasPermission = (permission: string) => {
-    if (!currentUser) return false;
-
-    switch (permission) {
-      case "manageCompanies":
-        return currentUser.role === "super_admin";
-      case "manageUsers":
-        return currentUser.role === "super_admin" || currentUser.role === "admin";
-      case "conductAudits":
-        return ["super_admin", "admin", "auditor"].includes(currentUser.role);
-      default:
-        return true;
-    }
+    await supabase.auth.signOut();
+    setUser(null);
+    setSession(null);
+    setCurrentUser(null);
+    toast.success("Logged out successfully");
   };
 
   const refreshProfile = async () => {
-    if (!currentUser) return;
-    const { data: profile, error } = await supabase
-      .from("user_profiles")
-      .select("id, email, name, role, assigned_locations, assigned_companies")
-      .eq("id", currentUser.id)
-      .single();
-
-    if (!error && profile) {
-      setCurrentUser(profile as UserProfile);
+    if (user) {
+      await fetchUserProfile(user.id);
     }
   };
 
   return (
     <UserContext.Provider
       value={{
+        user,
         currentUser,
-        isAuthenticated,
+        session,
         loading,
+        isAuthenticated: !!user,
         login,
         logout,
-        hasPermission,
-        refreshProfile,
+        refreshProfile
       }}
     >
       {children}
@@ -166,7 +130,9 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
 };
 
 export const useUser = () => {
-  const ctx = useContext(UserContext);
-  if (!ctx) throw new Error("useUser must be used within a UserProvider");
-  return ctx;
+  const context = useContext(UserContext);
+  if (context === undefined) {
+    throw new Error("useUser must be used within a UserProvider");
+  }
+  return context;
 };

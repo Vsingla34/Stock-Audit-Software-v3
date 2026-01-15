@@ -24,7 +24,7 @@ import { Label } from "@/components/ui/label";
 import { format } from "date-fns";
 
 export interface FileUploaderProps {
-  userRole: "admin" | "auditor" | "client";
+  userRole: "super_admin" | "admin" | "auditor" | "client" | string; // Updated to include super_admin
   assignedLocations?: string[];
   canUploadItemMaster?: boolean;
   canUploadClosingStock?: boolean;
@@ -66,7 +66,8 @@ export const FileUploader = ({
   const activeAssignments = useMemo(() => {
     return assignments.filter(a => {
       if (a.status === 'finalized') return false;
-      if (userRole === 'admin') return true;
+      // FIX: Added 'super_admin' to the check
+      if (userRole === 'super_admin' || userRole === 'admin') return true;
       if (userRole === 'auditor') {
          // Assumes auditor has access to loaded assignments
          return true; 

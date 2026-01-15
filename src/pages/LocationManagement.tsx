@@ -1,16 +1,31 @@
+import { useNavigate } from "react-router-dom"; // Import useNavigate
 import { AppLayout } from "@/components/layout/AppLayout";
 import { LocationMaster } from "@/components/locations/LocationMaster";
 import { LocationAuditSummary } from "@/components/locations/LocationAuditSummary";
 import { LocationUploadCard } from "@/components/upload/LocationUploadCard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button"; // Import Button
+import { ArrowLeft } from "lucide-react"; // Import ArrowLeft
 
 const LocationManagement = () => {
+  const navigate = useNavigate(); // Initialize hook
+
   return (
     <AppLayout showSidebar={false}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Location Management</h1>
-          <p className="text-muted-foreground">Manage inventory locations and view location-specific audit data</p>
+        <div className="flex items-center gap-4">
+          {/* ADDED BACK BUTTON */}
+          <Button 
+            variant="ghost" 
+            onClick={() => navigate(-1)} 
+            className="p-0 hover:bg-transparent"
+          >
+            <ArrowLeft className="h-6 w-6 text-gray-500 hover:text-gray-900" />
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Location Management</h1>
+            <p className="text-muted-foreground">Manage inventory locations and view location-specific audit data</p>
+          </div>
         </div>
         
         <Tabs defaultValue="manage" className="w-full">

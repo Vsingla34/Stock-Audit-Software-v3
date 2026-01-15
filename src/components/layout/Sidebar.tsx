@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useCallback } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom"; 
 import { useUserAccess } from "@/hooks/useUserAccess";
 import {
   BarChart3,
@@ -13,6 +13,7 @@ import {
   ListChecks,
   Building2,
   History,
+  ArrowLeftRight,
 } from "lucide-react";
 import { useUser } from "@/context/UserContext";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ export function Sidebar({
   setMobileOpen?: (open: boolean) => void;
 }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const { isAuthenticated, logout } = useUser();
   const { accessibleLocations, userRole, userRoleDisplay } = useUserAccess();
   const { selectedCompanyId } = useCompany();
@@ -78,26 +80,37 @@ export function Sidebar({
 
   const navigation = useMemo(() => {
     const nav = [{ name: "Dashboard", href: "/", icon: Home }];
+    
+    // Scanner: Visible to Super Admin, Admin, Auditor
     if (["super_admin", "admin", "auditor"].includes(userRole)) {
       nav.push({ name: "Scanner", href: "/scanner", icon: ScanBarcode });
     }
+
+    // Search: Hidden for Clients
+    if (userRole !== "client") {
+      nav.push({ name: "Search", href: "/search", icon: Search });
+    }
+
+    // Reports and History: Visible to everyone
     nav.push(
-      { name: "Search", href: "/search", icon: Search },
       { name: "Reports", href: "/reports", icon: FileSpreadsheet },
-      { name: "History", href: "/history", icon: History },
-      { name: "Analytics", href: "/analytics", icon: BarChart3 }
+      { name: "History", href: "/history", icon: History }
     );
+
+    // Analytics: Hidden for Auditors
+    if (userRole !== "auditor") {
+      nav.push({ name: "Analytics", href: "/analytics", icon: BarChart3 });
+    }
+
     nav.push({
       name: "Questionnaire",
       href: "/questionnaire",
       icon: ListChecks,
     });
+
     if (["super_admin", "admin", "auditor"].includes(userRole)) {
       nav.push({ name: "Upload Data", href: "/upload", icon: Upload });
     }
-    // Location page removed from sidebar
-    // Admin Overview removed from sidebar
-    // User Management removed from sidebar
     
     if (userRole === "super_admin") {
       nav.push({ name: "Company", href: "/add-company", icon: Building2 });
@@ -181,7 +194,18 @@ export function Sidebar({
           </nav>
         </div>
 
-        <div className="mt-auto pt-6 border-t border-indigo-500">
+        {/* Footer Actions */}
+        <div className="mt-auto pt-6 border-t border-indigo-500 space-y-2">
+          
+          <Button
+            variant="ghost"
+            className="w-full justify-start text-indigo-100 hover:bg-indigo-700 hover:text-white transition-colors"
+            onClick={() => navigate("/assignment-selection")}
+          >
+            <ArrowLeftRight className="mr-3 h-5 w-5" />
+            <span>Exit Assignment</span>
+          </Button>
+
           <Button
             variant="ghost"
             className="w-full justify-start text-indigo-100 hover:bg-indigo-700 hover:text-white transition-colors"
@@ -190,6 +214,7 @@ export function Sidebar({
             <LogOut className="mr-3 h-5 w-5" />
             <span>Log out</span>
           </Button>
+          
           <div className="mt-4 px-2 text-center">
             <p className="text-xs text-indigo-300 font-medium">
               &copy; {new Date().getFullYear()} StockCheck360

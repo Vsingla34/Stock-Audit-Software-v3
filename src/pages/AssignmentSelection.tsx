@@ -2,9 +2,6 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
   CardContent,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,16 +11,14 @@ import {
   ArrowRight,
   CheckCircle2,
   CalendarDays,
-  MapPin,
   LogOut,
   ArrowLeft,
   Hash,
-  History,
+  Building2,
   Building,
   Settings,
   Users,
-  LayoutDashboard,
-  Building2
+  LayoutDashboard
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -74,7 +69,6 @@ const AssignmentSelection = () => {
   const fetchAssignments = async () => {
     if (!currentUser || !selectedCompanyId) return;
     try {
-      // 1. Fetch Active Assignments
       const { data: activeData, error: activeError } = await supabase
         .from("assignments")
         .select(`
@@ -83,6 +77,7 @@ const AssignmentSelection = () => {
           scheduled_date,
           company_id,
           location_id,
+          auditor_ids, 
           companies (name),
           locations (name)
         `)
@@ -92,7 +87,18 @@ const AssignmentSelection = () => {
 
       if (activeError) throw activeError;
 
-      const formattedActive: AssignmentDisplay[] = (activeData || []).map((a: any) => ({
+      let relevantActiveData = activeData || [];
+      if (currentUser.role === 'auditor') {
+         relevantActiveData = relevantActiveData.filter((a: any) => {
+            const auditorIds = Array.isArray(a.auditor_ids) ? a.auditor_ids : [];
+            if (typeof a.auditor_ids === 'string') {
+                return a.auditor_ids === currentUser.id;
+            }
+            return auditorIds.includes(currentUser.id);
+         });
+      }
+
+      const formattedActive: AssignmentDisplay[] = relevantActiveData.map((a: any) => ({
         id: a.id,
         companyName: a.companies?.name || "Unknown Company",
         locationName: a.locations?.name || "Unknown Location",
@@ -104,7 +110,6 @@ const AssignmentSelection = () => {
 
       setActiveAssignments(formattedActive);
 
-      // 2. Fetch History Assignments (Admin Only)
       if (isAdminOrSuper) {
         const { data: historyData, error: historyError } = await supabase
           .from("assignments")
@@ -145,14 +150,19 @@ const AssignmentSelection = () => {
   };
 
   const handleAssignmentSelect = (assignment: AssignmentDisplay) => {
+    // 1. Update Context State
     setSelectedCompanyId(assignment.companyId);
     setSelectedAssignmentId(assignment.id);
     setSelectedLocationFilter(assignment.locationId); 
     
-    localStorage.setItem("selectedCompanyId", assignment.companyId);
+    // 2. Force Session Storage Update (Redundancy for safety)
+    sessionStorage.setItem("selectedCompanyId", assignment.companyId);
     sessionStorage.setItem("selectedAssignmentId", assignment.id.toString());
     
-    navigate("/");
+    // 3. Navigate with a safer delay to ensure Context propagates
+    setTimeout(() => {
+        navigate("/");
+    }, 150);
   };
 
   const handleLogout = async () => {
@@ -160,7 +170,6 @@ const AssignmentSelection = () => {
     navigate('/login');
   };
 
-  // Status Badge Helper
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "active":
@@ -222,12 +231,12 @@ const AssignmentSelection = () => {
 
   return (
     <div className="min-h-screen bg-gray-50/50">
-      
-      {/* 1. Top Navigation Bar */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            
+            <div className="bg-indigo-600 p-1.5 rounded-lg">
+              <LayoutDashboard className="h-5 w-5 text-white" />
+            </div>
             <div>
               <h1 className="text-lg font-bold text-gray-900 tracking-tight leading-none">
                 StockCheck<span className="text-indigo-600">360</span>
@@ -264,7 +273,6 @@ const AssignmentSelection = () => {
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         
-        {/* 2. Page Header & Admin Toolbar */}
         <div className="space-y-6">
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
             <div>
@@ -273,7 +281,6 @@ const AssignmentSelection = () => {
             </div>
           </div>
 
-          {/* Admin Tools Grid */}
           {(isAdminOrSuper || canViewAdminOverview) && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {isAdminOrSuper && (
@@ -302,7 +309,6 @@ const AssignmentSelection = () => {
           )}
         </div>
 
-        {/* 3. Active Assignments Section */}
         <section className="space-y-4">
           <div className="flex items-center gap-2 pb-2 border-b border-gray-200">
             <div className="h-2.5 w-2.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]"></div>
@@ -330,7 +336,9 @@ const AssignmentSelection = () => {
                 </div>
                 <h3 className="font-medium text-gray-900">No Active Assignments</h3>
                 <p className="text-sm text-gray-500 mt-1 max-w-xs mx-auto">
-                  All caught up! There are no pending audits for {companyName}.
+                  {currentUser?.role === 'auditor' 
+                    ? "You haven't been assigned to any active audits yet." 
+                    : `There are no pending audits for ${companyName}.`}
                 </p>
                 <Button variant="outline" size="sm" onClick={() => navigate("/company-selection")} className="mt-4">
                   Select Different Company
@@ -340,7 +348,6 @@ const AssignmentSelection = () => {
           )}
         </section>
 
-        {/* 4. History Assignments Section (Admin Only) */}
         {isAdminOrSuper && (
           <section className="space-y-4 pt-4">
             <div className="flex items-center gap-2 pb-2 border-b border-gray-200">

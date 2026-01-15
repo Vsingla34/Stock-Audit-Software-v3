@@ -142,6 +142,12 @@ interface InventoryContextType {
     auditorId?: string,
     auditorName?: string
   ) => void;
+  
+  // New Surplus Function
+  addSurplusItem: (
+    item: { sku: string; name: string; category: string; physicalQuantity: number }
+  ) => Promise<void>;
+
   addQuestion: (question: Omit<Question, "id">) => Promise<void>;
   updateQuestion: (question: Question) => Promise<void>;
   deleteQuestion: (questionId: string) => Promise<void>;
@@ -383,7 +389,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const updateItemRemark = async (itemId: string, remark: string) => {
-    // Check status first
+    
     const item = itemMaster.find(i => i.id === itemId);
     if (item) {
         let statusToCheck: AuditStatus | undefined;
@@ -610,6 +616,30 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     );
   };
 
+  
+  const addSurplusItem = async (item: { sku: string; name: string; category: string; physicalQuantity: number }) => {
+    if (!selectedCompanyId || !selectedAssignmentId) throw new Error("No active assignment selected.");
+    
+    const assignment = assignments.find(a => a.id === selectedAssignmentId);
+    if (!assignment) throw new Error("Assignment not found.");
+    
+    const loc = locations.find(l => l.id === assignment.locationId);
+    if (!loc) throw new Error("Location not found.");
+
+    const userName = (currentUser as any)?.name || currentUser?.email || "Unknown Auditor";
+
+    await SupabaseDataService.addSurplusItem({
+        item,
+        companyId: selectedCompanyId,
+        assignmentId: selectedAssignmentId,
+        locationName: loc.name,
+        userId: currentUser?.id,
+        userName
+    });
+    
+    await loadData();
+  };
+
   const getInventorySummary = () => {
     const totalItems = itemMaster.filter((item) => item.location !== "").length;
     const activeAuditedItems = auditedItems.filter(
@@ -688,7 +718,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
  const saveQuestionnaireAnswer = async (
   answer: Omit<QuestionnaireAnswer, "answeredOn" | "answeredBy">
 ) => {
-    // CHECK STATUS
+   
     let statusToCheck: AuditStatus | undefined;
     if (answer.assignmentId) {
         const assignment = assignments.find(a => a.id === answer.assignmentId);
@@ -784,6 +814,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         scanItem,
         searchItem,
         addItemToAudit,
+        addSurplusItem,
         addQuestion,
         updateQuestion,
         deleteQuestion,

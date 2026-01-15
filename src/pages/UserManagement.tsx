@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom"; 
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,25 +30,31 @@ import {
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { Users, Plus, Edit, Trash, Building2, MapPin, Filter, AlertCircle } from "lucide-react";
+import { 
+  Users, 
+  Plus, 
+  Edit, 
+  Trash, 
+  Building2, 
+  Filter, 
+  UploadCloud, 
+  FileSpreadsheet,
+  Loader2,
+  Download,
+  ArrowLeft 
+} from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useUser } from "@/context/UserContext";
 import { createClient } from "@supabase/supabase-js";
+import { processCSV } from "@/components/upload/utils/csvUtils";
 
 interface UserProfile {
   id: string;
   email: string;
   name: string;
   role: string;
-  assigned_locations: string[] | null;
   assigned_companies: string[] | null;
-}
-
-interface Location {
-  id: string;
-  name: string;
-  companyId?: string | null;
 }
 
 interface Company {
@@ -56,11 +63,11 @@ interface Company {
 }
 
 const UserManagement = () => {
+  const navigate = useNavigate(); 
   const { currentUser } = useUser();
   const isSuperAdmin = currentUser?.role === "super_admin";
 
   const [users, setUsers] = useState<UserProfile[]>([]);
-  const [locations, setLocations] = useState<Location[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   
@@ -69,14 +76,18 @@ const UserManagement = () => {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
+
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
 
   const [formData, setFormData] = useState({
     email: "",
     password: "",
     name: "",
     role: "auditor" as "super_admin" | "admin" | "auditor" | "client",
-    assignedLocations: [] as string[],
     assignedCompanies: [] as string[],
   });
 
@@ -88,26 +99,12 @@ const UserManagement = () => {
     try {
       let usersQuery = supabase
         .from("user_profiles")
-        .select("*")
+        .select("id, email, name, role, assigned_companies, created_at")
         .order("created_at", { ascending: false });
 
       const { data: usersData, error: usersError } = await usersQuery;
       if (usersError) throw usersError;
       setUsers(usersData || []);
-
-      const { data: locationsData, error: locationsError } = await supabase
-        .from("locations")
-        .select("id, name, company_id")
-        .eq("active", true)
-        .order("name");
-
-      if (locationsError) throw locationsError;
-      
-      const allLocations: Location[] = (locationsData || []).map((loc: any) => ({
-        id: loc.id,
-        name: loc.name,
-        companyId: loc.company_id ?? null,
-      }));
 
       const { data: companiesData, error: companiesError } = await supabase
         .from("companies")
@@ -118,12 +115,10 @@ const UserManagement = () => {
       if (companiesError) throw companiesError;
       
       if (isSuperAdmin) {
-        setLocations(allLocations);
         setCompanies(companiesData || []);
       } else {
         const myCompanyIds = currentUser?.assigned_companies || [];
         setCompanies((companiesData || []).filter(c => myCompanyIds.includes(c.id)));
-        setLocations(allLocations.filter(l => l.companyId && myCompanyIds.includes(l.companyId)));
       }
 
     } catch (error: any) {
@@ -140,7 +135,6 @@ const UserManagement = () => {
       password: "",
       name: "",
       role: "auditor",
-      assignedLocations: [],
       assignedCompanies: [],
     });
   };
@@ -163,7 +157,6 @@ const UserManagement = () => {
       password: "", 
       name: user.name,
       role: user.role as any,
-      assignedLocations: user.assigned_locations || [],
       assignedCompanies: user.assigned_companies || [],
     });
     setIsEditDialogOpen(true);
@@ -178,88 +171,22 @@ const UserManagement = () => {
     setIsDeleteDialogOpen(true);
   };
 
-  const getAllLocationsForCompanies = (companyIds: string[]) => {
-    return locations
-      .filter(loc => loc.companyId && companyIds.includes(loc.companyId))
-      .map(loc => loc.id);
-  };
-
-  const toggleLocation = (locationId: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      assignedLocations: prev.assignedLocations.includes(locationId)
-        ? prev.assignedLocations.filter((id) => id !== locationId)
-        : [...prev.assignedLocations, locationId],
-    }));
-  };
-
-  // ✅ UPDATED: Strict Logic for Company Selection
   const toggleCompany = (companyId: string) => {
-    // 1. If we are REMOVING a company
-    if (formData.assignedCompanies.includes(companyId)) {
-      setFormData((prev) => {
-        const newAssignedCompanies = prev.assignedCompanies.filter((id) => id !== companyId);
-        
-        // Remove locations associated with the removed company
-        const newAssignedLocations = prev.assignedLocations.filter(locId => {
-           const loc = locations.find(l => l.id === locId);
-           return loc?.companyId !== companyId;
-        });
-
-        return {
-          ...prev,
-          assignedCompanies: newAssignedCompanies,
-          assignedLocations: newAssignedLocations,
-        };
-      });
-      return;
-    }
-
-    // 2. If we are ADDING a company
-    // Strict Rule: Check if ALL currently selected companies have at least one location selected
-    const companiesWithoutLocations = formData.assignedCompanies.filter(existingCompanyId => {
-      const hasLocation = formData.assignedLocations.some(locId => {
-        const loc = locations.find(l => l.id === locId);
-        return loc?.companyId === existingCompanyId;
-      });
-      return !hasLocation;
-    });
-
-    if (companiesWithoutLocations.length > 0 && formData.role !== 'admin') {
-      const missingCompanyName = companies.find(c => c.id === companiesWithoutLocations[0])?.name || "Selected Company";
-      toast.error(`Please select a location for "${missingCompanyName}" before adding another company.`, {
-        description: "Selecting one location is compulsory for selecting the second company."
-      });
-      return;
-    }
-
-    // If validation passes, add the new company
     setFormData((prev) => {
-      const newAssignedCompanies = [...prev.assignedCompanies, companyId];
-      
-      let newAssignedLocations = prev.assignedLocations;
-
-      // If role is admin, auto-select locations (bypass manual selection logic)
-      if (prev.role === 'admin') {
-        newAssignedLocations = getAllLocationsForCompanies(newAssignedCompanies);
-      }
+      const isSelected = prev.assignedCompanies.includes(companyId);
+      const newAssignedCompanies = isSelected
+        ? prev.assignedCompanies.filter((id) => id !== companyId)
+        : [...prev.assignedCompanies, companyId];
 
       return {
         ...prev,
         assignedCompanies: newAssignedCompanies,
-        assignedLocations: newAssignedLocations,
       };
     });
   };
 
   const handleRoleChange = (value: "super_admin" | "admin" | "auditor" | "client") => {
-    setFormData(prev => {
-      let newLocations = prev.assignedLocations;
-      if (value === 'admin') {
-        newLocations = getAllLocationsForCompanies(prev.assignedCompanies);
-      }
-      return { ...prev, role: value, assignedLocations: newLocations };
-    });
+    setFormData(prev => ({ ...prev, role: value }));
   };
 
   const getCompanyNames = (companyIds: string[] | null) => {
@@ -268,14 +195,6 @@ const UserManagement = () => {
         const c = companies.find(comp => comp.id === id);
         return c ? c.name : null; 
     }).filter(Boolean).join(", ");
-  };
-
-  const getLocationNames = (locationIds: string[] | null) => {
-    if (!locationIds || locationIds.length === 0) return "-";
-    const names = locations
-      .filter((l) => locationIds.includes(l.id))
-      .map((l) => l.name);
-    return names.length ? names.join(", ") : "-";
   };
 
   const filteredUsers = users.filter(user => {
@@ -307,22 +226,6 @@ const UserManagement = () => {
       if (formData.assignedCompanies.length === 0) {
         toast.error("Please assign at least one company");
         return false;
-      }
-
-      // Check if every assigned company has at least one location assigned (unless role is admin who gets all)
-      if (formData.role !== 'admin') {
-        for (const companyId of formData.assignedCompanies) {
-          const hasLocation = formData.assignedLocations.some(locId => {
-            const loc = locations.find(l => l.id === locId);
-            return loc?.companyId === companyId;
-          });
-
-          if (!hasLocation) {
-            const cName = companies.find(c => c.id === companyId)?.name || "selected company";
-            toast.error(`Please select at least one location for ${cName}`);
-            return false;
-          }
-        }
       }
     }
     return true;
@@ -366,10 +269,6 @@ const UserManagement = () => {
               email: formData.email,
               name: formData.name,
               role: formData.role,
-              assigned_locations:
-                formData.assignedLocations.length > 0
-                  ? formData.assignedLocations
-                  : null,
               assigned_companies:
                 formData.assignedCompanies.length > 0
                   ? formData.assignedCompanies
@@ -402,10 +301,6 @@ const UserManagement = () => {
         .update({
           name: formData.name,
           role: formData.role,
-          assigned_locations:
-            formData.assignedLocations.length > 0
-              ? formData.assignedLocations
-              : null,
           assigned_companies:
             formData.assignedCompanies.length > 0
               ? formData.assignedCompanies
@@ -449,7 +344,120 @@ const UserManagement = () => {
     }
   };
 
-  // Helper to render form content (shared between add and edit)
+  const handleImportFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setImportFile(e.target.files[0]);
+    }
+  };
+
+  const handleBulkImport = async () => {
+    if (!importFile) {
+      toast.error("Please select a file first.");
+      return;
+    }
+
+    setIsImporting(true);
+
+    try {
+      const text = await importFile.text();
+      const rows = processCSV(text); 
+
+      if (rows.length === 0) throw new Error("File is empty");
+
+      const tempSupabase = createClient(
+        import.meta.env.VITE_SUPABASE_URL,
+        import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        {
+          auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+            detectSessionInUrl: false,
+          },
+        }
+      );
+
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const row of rows) {
+        const name = row['name'] || row['full name'];
+        const email = row['email'] || row['email address'];
+        const password = row['password'];
+        const role = (row['role'] || 'auditor').toLowerCase();
+        
+        const companyNamesStr = row['companies'] || row['company'] || "";
+
+        if (!name || !email || !password) {
+           console.warn("Skipping row due to missing required fields:", row);
+           failCount++;
+           continue; 
+        }
+
+        const assignedCompanies: string[] = [];
+        const companyNames = companyNamesStr.split(/[;,|]+/).map((n:string) => n.trim().toLowerCase());
+        
+        if (companyNames.length > 0 && companyNames[0] !== "") {
+           companies.forEach(c => {
+              if (companyNames.includes(c.name.toLowerCase())) {
+                 assignedCompanies.push(c.id);
+              }
+           });
+        }
+
+        try {
+           const { data: authData, error: authError } = await tempSupabase.auth.signUp({
+            email,
+            password,
+            options: { data: { name, role } }
+           });
+
+           if (authError) throw authError;
+
+           if (authData.user) {
+             const { error: profileError } = await supabase.from("user_profiles").insert([{
+               id: authData.user.id,
+               email,
+               name,
+               role,
+               assigned_companies: assignedCompanies.length > 0 ? assignedCompanies : null
+             }]);
+             if (profileError) throw profileError;
+             successCount++;
+           }
+        } catch (err) {
+           console.error("Failed to import user:", email, err);
+           failCount++;
+        }
+      }
+
+      toast.success(`Import complete`, {
+         description: `Successfully added ${successCount} users. Failed: ${failCount}`
+      });
+      setIsImportDialogOpen(false);
+      setImportFile(null);
+      fetchData();
+
+    } catch (error: any) {
+      console.error("Import error:", error);
+      toast.error("Failed to process file", { description: error.message });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const downloadTemplate = () => {
+    const headers = ["Name,Email,Password,Role,Companies"];
+    const example = ["John Doe,john@example.com,SecurePass123,auditor,Company A;Company B"];
+    const csvContent = "data:text/csv;charset=utf-8," + headers.join("\n") + "\n" + example.join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "user_import_template.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const renderFormContent = () => (
     <div className="grid gap-4 py-4">
       <div className="grid grid-cols-2 gap-4">
@@ -556,86 +564,27 @@ const UserManagement = () => {
           </Card>
         </div>
       )}
-
-      {formData.role !== "super_admin" && (
-      <div className="space-y-2">
-        <Label className="flex items-center gap-2">
-          <MapPin className="h-4 w-4 text-indigo-600" />
-          Assign Locations {formData.role === 'admin' ? '(Auto-selected)' : '(Optional)'}
-        </Label>
-        
-        <Card className="p-4 max-h-60 overflow-y-auto border-gray-200 bg-gray-50/50">
-          {formData.assignedCompanies.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-20 text-gray-500 text-sm">
-              <AlertCircle className="h-5 w-5 mb-2 opacity-50" />
-              Select a company above to view locations
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {/* ✅ Grouped Locations by Company for Better UX */}
-              {formData.assignedCompanies.map((companyId) => {
-                const companyName = companies.find(c => c.id === companyId)?.name || "Unknown Company";
-                const companyLocations = locations.filter(l => l.companyId === companyId);
-
-                return (
-                  <div key={companyId} className="border-b last:border-0 pb-3 last:pb-0 border-gray-100">
-                    <h4 className="text-xs font-semibold text-indigo-600 uppercase mb-2 sticky top-0 bg-gray-50 py-1">
-                      {companyName}
-                    </h4>
-                    
-                    {companyLocations.length === 0 ? (
-                      <p className="text-xs text-gray-400 italic pl-2">No locations available</p>
-                    ) : (
-                      <div className="grid grid-cols-1 gap-2 pl-2">
-                        {companyLocations.map((location) => (
-                          <div
-                            key={location.id}
-                            className="flex items-center space-x-2"
-                          >
-                            <Checkbox
-                              id={`location-${location.id}`}
-                              checked={formData.assignedLocations.includes(location.id)}
-                              disabled={formData.role === 'admin'}
-                              onCheckedChange={() => toggleLocation(location.id)}
-                              className="data-[state=checked]:bg-indigo-600 data-[state=checked]:border-indigo-600 border-gray-300 disabled:opacity-50"
-                            />
-                            <label
-                              htmlFor={`location-${location.id}`}
-                              className="text-sm cursor-pointer flex-1 text-gray-700"
-                            >
-                              {location.name}
-                            </label>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Card>
-        
-        {formData.role === 'admin' && (
-          <p className="text-xs text-indigo-600/80">
-            Admins are automatically assigned all locations for their companies.
-          </p>
-        )}
-      </div>
-      )}
     </div>
   );
 
   return (
     <AppLayout showSidebar={false}>
       <div className="space-y-6">
-        {/* Header with Filter and Add Button */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-900">User Management</h1>
-            <p className="text-gray-500">
-              Manage user accounts, roles, and access permissions.
-            </p>
+          <div className="flex items-center gap-4">
+            <Button 
+              variant="ghost" 
+              onClick={() => navigate(-1)} 
+              className="p-0 hover:bg-transparent"
+            >
+              <ArrowLeft className="h-6 w-6 text-gray-500 hover:text-gray-900" />
+            </Button>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-gray-900">User Management</h1>
+              <p className="text-gray-500">
+                Manage user accounts, roles, and access permissions.
+              </p>
+            </div>
           </div>
           
           <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -657,6 +606,11 @@ const UserManagement = () => {
                 </SelectContent>
               </Select>
             </div>
+
+            <Button onClick={() => setIsImportDialogOpen(true)} variant="outline" className="whitespace-nowrap bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50">
+              <UploadCloud className="mr-2 h-4 w-4" />
+              Import CSV
+            </Button>
 
             <Button onClick={openAddDialog} className="whitespace-nowrap bg-indigo-600 hover:bg-indigo-700 text-white">
               <Plus className="mr-2 h-4 w-4" />
@@ -680,7 +634,6 @@ const UserManagement = () => {
                   <TableHead className="font-semibold text-gray-700">Email</TableHead>
                   <TableHead className="font-semibold text-gray-700">Role</TableHead>
                   <TableHead className="font-semibold text-gray-700">Companies</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Locations</TableHead>
                   <TableHead className="text-right font-semibold text-gray-700">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -688,7 +641,7 @@ const UserManagement = () => {
                 {!loading && filteredUsers.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={6}
+                      colSpan={5} 
                       className="text-center py-8 text-gray-500"
                     >
                       No users found.
@@ -715,11 +668,6 @@ const UserManagement = () => {
                       <TableCell className="max-w-xs">
                         <span className="line-clamp-2 text-sm text-gray-600" title={getCompanyNames(user.assigned_companies)}>
                           {getCompanyNames(user.assigned_companies)}
-                        </span>
-                      </TableCell>
-                      <TableCell className="max-w-xs">
-                        <span className="line-clamp-2 text-sm text-gray-600" title={getLocationNames(user.assigned_locations)}>
-                          {getLocationNames(user.assigned_locations)}
                         </span>
                       </TableCell>
                       <TableCell className="text-right space-x-2">
@@ -756,7 +704,7 @@ const UserManagement = () => {
             <DialogHeader>
               <DialogTitle className="text-gray-900">Add New User</DialogTitle>
               <DialogDescription className="text-gray-500">
-                Create a new user account with company and location assignments.
+                Create a new user account with company assignments.
               </DialogDescription>
             </DialogHeader>
             {renderFormContent()}
@@ -772,13 +720,13 @@ const UserManagement = () => {
           </DialogContent>
         </Dialog>
 
-       
+        {/* Edit User Dialog */}
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
           <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="text-gray-900">Edit User</DialogTitle>
               <DialogDescription className="text-gray-500">
-                Update user information and assignments.
+                Update user information and company assignments.
               </DialogDescription>
             </DialogHeader>
             {renderFormContent()}
@@ -794,7 +742,7 @@ const UserManagement = () => {
           </DialogContent>
         </Dialog>
 
-       
+        {/* Delete User Dialog */}
         <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
           <DialogContent>
             <DialogHeader>
@@ -810,6 +758,71 @@ const UserManagement = () => {
               </Button>
               <Button variant="destructive" onClick={handleDeleteUser} className="bg-red-600 hover:bg-red-700 text-white">
                 Delete
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Import Users Dialog */}
+        <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle className="text-gray-900 flex items-center gap-2">
+                <UploadCloud className="h-5 w-5 text-indigo-600" />
+                Import Users
+              </DialogTitle>
+              <DialogDescription className="text-gray-500">
+                Upload a CSV file to create users in bulk.
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-4 py-4">
+              <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-lg space-y-2">
+                <h4 className="text-sm font-medium text-indigo-900 flex items-center gap-2">
+                   <FileSpreadsheet className="h-4 w-4" />
+                   CSV Format Guide
+                </h4>
+                <p className="text-xs text-indigo-700">
+                   Required columns: <code className="bg-white px-1 rounded">Name</code>, <code className="bg-white px-1 rounded">Email</code>, <code className="bg-white px-1 rounded">Password</code>, <code className="bg-white px-1 rounded">Role</code>
+                </p>
+                <p className="text-xs text-indigo-700">
+                   Optional: <code className="bg-white px-1 rounded">Companies</code> (Use semicolons ; to separate multiple)
+                </p>
+                <Button 
+                   variant="ghost" 
+                   size="sm" 
+                   onClick={downloadTemplate}
+                   className="h-6 text-xs text-indigo-700 hover:bg-indigo-100 px-0 hover:px-2 transition-all"
+                >
+                   <Download className="h-3 w-3 mr-1" /> Download Template
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="file-upload">Select CSV File</Label>
+                <Input
+                  id="file-upload"
+                  type="file"
+                  accept=".csv"
+                  onChange={handleImportFileChange}
+                  className="cursor-pointer"
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsImportDialogOpen(false)} disabled={isImporting}>
+                Cancel
+              </Button>
+              <Button onClick={handleBulkImport} disabled={!importFile || isImporting} className="bg-indigo-600 hover:bg-indigo-700">
+                {isImporting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Importing...
+                  </>
+                ) : (
+                  "Start Import"
+                )}
               </Button>
             </DialogFooter>
           </DialogContent>

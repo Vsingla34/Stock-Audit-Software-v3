@@ -316,6 +316,46 @@ class SupabaseDataService {
     if (error) throw error;
   }
 
+  // --- NEW: ADD SURPLUS ITEM LOGIC ---
+  public async addSurplusItem(params: {
+    item: { sku: string; name: string; category: string; physicalQuantity: number };
+    companyId: string;
+    assignmentId: number;
+    locationName: string;
+    userId?: string;
+    userName?: string;
+  }): Promise<void> {
+    const { item, companyId, assignmentId, locationName, userId, userName } = params;
+
+    const auditorEntry = {
+      auditorId: userId || 'unknown',
+      auditorName: userName || 'Unknown',
+      quantityFound: item.physicalQuantity,
+      auditedAt: new Date().toISOString()
+    };
+
+    const payload = {
+      company_id: companyId,
+      assignment_id: assignmentId,
+      sku: item.sku,
+      name: item.name,
+      category: item.category,
+      location: locationName,
+      system_quantity: 0, // Not in closing stock
+      physical_quantity: item.physicalQuantity,
+      status: 'discrepancy', // Always a discrepancy
+      client_remarks: "This item was not in the closing stock but it was there",
+      auditor_entries: [auditorEntry],
+      last_audited: new Date().toISOString()
+    };
+
+    const { error } = await supabase
+      .from("inventory_items")
+      .insert(payload);
+
+    if (error) throw error;
+  }
+
   public async updateItemRemark(itemId: string, remark: string): Promise<void> {
     const { error } = await supabase
       .from("inventory_items")

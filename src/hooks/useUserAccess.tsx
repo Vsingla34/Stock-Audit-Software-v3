@@ -1,112 +1,109 @@
 import { useUser } from "@/context/UserContext";
 import { useInventory } from "@/context/InventoryContext";
+import { useCompany } from "@/context/CompanyContext";
 
 export const useUserAccess = () => {
-  const { currentUser, hasPermission } = useUser();
-  const { locations } = useInventory();
-  
-  
+  const { currentUser } = useUser();
+  const { locations, assignments } = useInventory(); 
+  const { selectedCompanyId } = useCompany();
+
+  const userRole = currentUser?.role || "client";
+
+  const userRoleDisplay = () => {
+    switch (userRole) {
+      case "super_admin": return "Super Admin";
+      case "admin": return "Admin";
+      case "auditor": return "Auditor";
+      case "client": return "Client";
+      default: return "User";
+    }
+  };
+
   const accessibleLocations = () => {
     if (!currentUser) return [];
-    
-    
-    if (currentUser.role === "super_admin" || currentUser.role === "admin") {
+
+    if (userRole === "super_admin") {
+      if (selectedCompanyId) {
+        return locations.filter(l => l.companyId === selectedCompanyId);
+      }
       return locations;
     }
-    
-    
-    if (currentUser.assigned_locations?.length) {
-      return locations.filter((location) =>
-        currentUser.assigned_locations?.includes(location.id)
-      );
+
+    if (userRole === "admin" || userRole === "client") {
+      const myCompanies = currentUser.assigned_companies || [];
+      let allowed = locations.filter(l => l.companyId && myCompanies.includes(l.companyId));
+      if (selectedCompanyId) {
+        allowed = allowed.filter(l => l.companyId === selectedCompanyId);
+      }
+      return allowed;
     }
-    
+
+    if (userRole === "auditor") {
+      const myAssignments = assignments.filter(a => {
+        const auditorIds = (a as any).auditorIds || []; 
+        if (Array.isArray(auditorIds)) {
+            return auditorIds.includes(currentUser.id);
+        }
+        return (a.auditorId === currentUser.id);
+      });
+
+      const myLocationIds = myAssignments.map(a => a.locationId);
+      let allowed = locations.filter(l => myLocationIds.includes(l.id));
+
+      if (selectedCompanyId) {
+         allowed = allowed.filter(l => l.companyId === selectedCompanyId);
+      }
+      return allowed;
+    }
+
     return [];
   };
-  
-  
-  const canAccessLocation = (locationId: string): boolean => {
-    if (!currentUser) return false;
-    
-    
-    if (currentUser.role === "super_admin" || currentUser.role === "admin") return true;
-    
-    
-    return currentUser.assigned_locations?.includes(locationId) || false;
-  };
-  
-  
-  const canPerformAudits = (): boolean => {
-    if (!currentUser) return false;
-    return ["super_admin", "admin", "auditor"].includes(currentUser.role);
-  };
-  
-  
-  const canUploadData = (): boolean => {
-    if (!currentUser) return false;
-    
-    
-    if (["super_admin", "admin"].includes(currentUser.role)) return true;
-    
-    
-    if (currentUser.role === "auditor") return true;
-    
-    return false;
-  };
-  
-  
-  const canUploadItemMaster = (): boolean => {
-    if (!currentUser) return false;
-    return ["super_admin", "admin"].includes(currentUser.role);
-  };
-  
 
-  const canUploadClosingStock = (): boolean => {
-    if (!currentUser) return false;
-    return ["super_admin", "admin", "auditor"].includes(currentUser.role);
-  };
+  // --- IDENTITY HELPERS ---
+  const isSuperAdmin = () => userRole === "super_admin";
+  const isAdmin = () => userRole === "admin";
+  const isAuditor = () => userRole === "auditor";
+  const isClientUser = () => userRole === "client";
+
+  // --- PERMISSION HELPERS ---
   
+  // FIX: Removed 'client' - they cannot scan anymore
+  const canPerformAudits = () => ["super_admin", "admin", "auditor"].includes(userRole);
   
-  const canViewReports = (): boolean => {
-    if (!currentUser) return false;
-    return true; 
-  };
+  const canViewAnalytics = () => ["super_admin", "admin", "client"].includes(userRole);
   
-  
-  const isClientUser = (): boolean => {
-    if (!currentUser) return false;
-    return currentUser.role === "client";
-  };
-  
-  
-  const userRoleDisplay = (): string => {
-    if (!currentUser) return "";
-    
-    switch (currentUser.role) {
-      case "super_admin":
-        return "Super Administrator";
-      case "admin":
-        return "Admin";
-      case "auditor":
-        return "Inventory Auditor";
-      case "client":
-        return "Client User";
-      default:
-        return currentUser.role;
-    }
-  };
+  // FIX: New permission for finalizing reports (Spectator role)
+  const canFinalizeReports = () => ["super_admin", "admin", "client"].includes(userRole);
+
+  const canUploadData = () => ["super_admin", "admin", "auditor"].includes(userRole);
+  const canUploadItemMaster = () => ["super_admin", "admin"].includes(userRole);
+  const canUploadClosingStock = () => ["super_admin", "admin", "auditor"].includes(userRole);
+  const canModifyInventory = () => ["super_admin", "admin", "auditor"].includes(userRole);
+  const canDeleteInventory = () => ["super_admin", "admin"].includes(userRole);
+  const canManageUsers = () => ["super_admin", "admin"].includes(userRole);
+  const canManageLocations = () => ["super_admin", "admin"].includes(userRole);
 
   return {
+    userRole,
+    userRoleDisplay,
     accessibleLocations,
-    canAccessLocation,
+    
+    // Roles
+    isSuperAdmin,
+    isAdmin,
+    isAuditor,
+    isClientUser,
+
+    // Permissions
     canPerformAudits,
+    canViewAnalytics,
+    canFinalizeReports, // Exported
     canUploadData,
     canUploadItemMaster,
     canUploadClosingStock,
-    canViewReports,
-    isClientUser,
-    userRoleDisplay,
-    hasPermission,
-    userRole: currentUser?.role,
+    canModifyInventory,
+    canDeleteInventory,
+    canManageUsers,
+    canManageLocations
   };
 };
