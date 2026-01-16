@@ -88,6 +88,7 @@ interface InventoryContextType {
   questions: Question[];
   assignments: Assignment[];
   questionnaireAnswers: QuestionnaireAnswer[];
+  closingStockUploaded: boolean; 
   selectedLocationFilter: string;
   setSelectedLocationFilter: (locationId: string) => void;
   setItemMaster: (
@@ -143,7 +144,6 @@ interface InventoryContextType {
     auditorName?: string
   ) => void;
   
-  // New Surplus Function
   addSurplusItem: (
     item: { sku: string; name: string; category: string; physicalQuantity: number }
   ) => Promise<void>;
@@ -158,6 +158,8 @@ interface InventoryContextType {
   getAssignmentQuestionnaireAnswers: (assignmentId: number) => QuestionnaireAnswer[]; 
   getQuestionsForLocation: (locationId: string) => Question[];
   getQuestionById: (questionId: string) => Question | undefined;
+  
+  refreshData: () => Promise<void>; // EXPORTED HERE
 }
 
 const InventoryContext = createContext<InventoryContextType | undefined>(
@@ -172,6 +174,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
   const [locations, setLocations] = useState<Location[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [closingStockUploaded, setClosingStockUploaded] = useState(false); 
   const [selectedLocationFilter, setSelectedLocationFilter] = useState<string>("all");
   const { currentUser } = useUser();   
   const [questionnaireAnswers, setQuestionnaireAnswers] = useState<
@@ -209,6 +212,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       const fetchedAssignments = await SupabaseDataService.getAssignments(selectedCompanyId);
       setAssignments(fetchedAssignments);
 
+      if (selectedAssignmentId) {
+        const hasStock = await SupabaseDataService.hasClosingStockForAssignment(selectedAssignmentId);
+        setClosingStockUploaded(hasStock);
+      } else {
+        setClosingStockUploaded(false);
+      }
+
     } catch (error) {
       console.error(error);
     }
@@ -226,9 +236,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       ...item,
       auditorEntries: [],
     }));
-
     if (!companyId) throw new Error("No company selected.");
-
     await SupabaseDataService.setItemMaster(itemsWithAuditors, companyId);
     await loadData();
   };
@@ -240,7 +248,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
   ): Promise<void> => {
     if (!companyId) throw new Error("No company selected.");
     if (!assignmentId) throw new Error("No assignment selected.");
-
     if (itemMaster.length === 0) throw new Error("Item master is empty.");
 
     const finalItemsToUpsert: Partial<InventoryItem>[] = [];
@@ -251,7 +258,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
     for (const stockItem of items) {
        const metadataSource = masterMap.get(stockItem.sku as string);
-       
        finalItemsToUpsert.push({
           sku: stockItem.sku,
           name: metadataSource?.name || stockItem.name || "Unnamed Item",
@@ -285,7 +291,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       statusToCheck = loc?.auditStatus;
     }
 
-    // STRICT FINALIZATION CHECK
     if (statusToCheck === 'finalized') {
        throw new Error("Audit is finalized. No further modifications allowed.");
     }
@@ -302,15 +307,12 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
     if (selectedAssignmentId) {
         const selectedIdNum = parseInt(selectedAssignmentId);
-        
         if (targetAssignmentId !== selectedIdNum) {
-            
             const existingFork = auditedItems.find(i => 
                 i.sku === item.sku && 
                 i.location === item.location && 
                 i.assignmentId === selectedIdNum
             );
-            
             if (existingFork) {
                 targetId = existingFork.id;
                 targetAssignmentId = selectedIdNum;
@@ -330,7 +332,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       const existingEntryIndex = auditorEntries.findIndex(
         (e) => e.auditorId === auditorId
       );
-
       if (existingEntryIndex >= 0) {
         auditorEntries[existingEntryIndex] = {
           auditorId,
@@ -346,7 +347,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
           auditedAt: new Date().toISOString(),
         });
       }
-
       totalPhysicalQuantity = auditorEntries.reduce(
         (sum, entry) => sum + entry.quantityFound,
         0
@@ -389,7 +389,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const updateItemRemark = async (itemId: string, remark: string) => {
-    
     const item = itemMaster.find(i => i.id === itemId);
     if (item) {
         let statusToCheck: AuditStatus | undefined;
@@ -400,12 +399,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
             const loc = locations.find(l => l.name === item.location);
             statusToCheck = loc?.auditStatus;
         }
-
         if (statusToCheck === 'finalized') {
             throw new Error("Audit is finalized. Remarks cannot be edited.");
         }
     }
-
     const updatedItems = itemMaster.map(item => 
       item.id === itemId ? { ...item, clientRemarks: remark } : item
     );
@@ -423,7 +420,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const createAssignment = async (locationId: string, companyId: string, status: AuditStatus, date?: string, auditorIds?: string[]) => {
     const scheduledDate = date || new Date().toISOString();
-    
     const newAssignment = await SupabaseDataService.createAssignment({
       locationId,
       companyId,
@@ -432,19 +428,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       auditorIds
     });
     setAssignments(prev => [newAssignment, ...prev]);
-
     if (status === 'active' || status === 'pending') {
        await updateLocationAuditStatus(locationId, 'active');
     }
   };
 
   const updateAssignment = async (id: number, status: AuditStatus, date?: string, auditorIds?: string[]) => {
-    await SupabaseDataService.updateAssignment(id, { 
-      status, 
-      scheduledDate: date, 
-      auditorIds
-    });
-    
+    await SupabaseDataService.updateAssignment(id, { status, scheduledDate: date, auditorIds });
     setAssignments(prev => prev.map(a => 
       a.id === id ? { 
         ...a, 
@@ -475,13 +465,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const finalizeAudit = async (assignmentId: number, otp: string) => {
     if (!selectedCompanyId) throw new Error("No company selected");
-    
     const isValid = await SupabaseDataService.verifyAssignmentOtp(assignmentId, otp);
     if (!isValid) throw new Error("Invalid Verification Code");
     
     const assignment = assignments.find(a => a.id === assignmentId);
     if (!assignment) throw new Error("Assignment not found");
-    
     const loc = locations.find(l => l.id === assignment.locationId);
     if (!loc) throw new Error("Location not found");
 
@@ -507,14 +495,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         }
     });
 
-    const summary = {
-      totalItems,
-      auditedItems: auditedCount,
-      pendingItems: totalItems - auditedCount,
-      matched,
-      discrepancies
-    };
-
+    const summary = { totalItems, auditedItems: auditedCount, pendingItems: totalItems - auditedCount, matched, discrepancies };
     const reportData = {
       summary,
       items: locationItems.map(item => {
@@ -544,7 +525,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
     await updateAssignment(assignmentId, "finalized");
     await updateLocationAuditStatus(loc.id, "finalized");
-
     await loadData();
   };
 
@@ -567,12 +547,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const scanItem = async (barcode: string, locationName: string) => {
     const item = itemMaster.find(
-      (i) =>
-        (i.id === barcode || i.sku === barcode) && i.location === locationName
+      (i) => (i.id === barcode || i.sku === barcode) && i.location === locationName
     );
-
     if (!item) throw new Error(`Item not found`);
-
     await updateAuditedItem({
       ...item,
       physicalQuantity: (item.physicalQuantity ?? 0) + 1,
@@ -603,7 +580,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       (i) => i.sku === item.sku && i.location === item.location
     );
     if (!masterItem) throw new Error(`Item not in master list`);
-
     await updateAuditedItem(
       {
         ...masterItem,
@@ -616,18 +592,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     );
   };
 
-  
   const addSurplusItem = async (item: { sku: string; name: string; category: string; physicalQuantity: number }) => {
     if (!selectedCompanyId || !selectedAssignmentId) throw new Error("No active assignment selected.");
-    
     const assignment = assignments.find(a => a.id === selectedAssignmentId);
     if (!assignment) throw new Error("Assignment not found.");
-    
     const loc = locations.find(l => l.id === assignment.locationId);
     if (!loc) throw new Error("Location not found.");
-
     const userName = (currentUser as any)?.name || currentUser?.email || "Unknown Auditor";
-
     await SupabaseDataService.addSurplusItem({
         item,
         companyId: selectedCompanyId,
@@ -636,7 +607,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         userId: currentUser?.id,
         userName
     });
-    
     await loadData();
   };
 
@@ -661,13 +631,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         else if (audited.status === "discrepancy") discrepancies++;
       }
     });
-    return {
-      totalItems,
-      auditedItems: auditedItemsCount,
-      pendingItems: totalItems - auditedItemsCount,
-      matched,
-      discrepancies,
-    };
+    return { totalItems, auditedItems: auditedItemsCount, pendingItems: totalItems - auditedItemsCount, matched, discrepancies };
   };
 
   const getLocationSummary = (locationName: string) => {
@@ -690,13 +654,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         else if (audited.status === "discrepancy") discrepancies++;
       }
     });
-    return {
-      totalItems,
-      auditedItems: auditedItemsCount,
-      pendingItems: totalItems - auditedItemsCount,
-      matched,
-      discrepancies,
-    };
+    return { totalItems, auditedItems: auditedItemsCount, pendingItems: totalItems - auditedItemsCount, matched, discrepancies };
   };
 
   const addQuestion = async (question: Omit<Question, "id">) => {
@@ -718,7 +676,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
  const saveQuestionnaireAnswer = async (
   answer: Omit<QuestionnaireAnswer, "answeredOn" | "answeredBy">
 ) => {
-   
     let statusToCheck: AuditStatus | undefined;
     if (answer.assignmentId) {
         const assignment = assignments.find(a => a.id === answer.assignmentId);
@@ -798,6 +755,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         locations,
         questions,
         questionnaireAnswers,
+        closingStockUploaded, 
         selectedLocationFilter,
         setSelectedLocationFilter,
         setItemMaster,
@@ -814,7 +772,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         scanItem,
         searchItem,
         addItemToAudit,
-        addSurplusItem,
+        addSurplusItem, 
         addQuestion,
         updateQuestion,
         deleteQuestion,
@@ -828,7 +786,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         deleteAssignment,
         submitAudit, 
         sendFinalizationOtp,
-        finalizeAudit
+        finalizeAudit,
+        refreshData: loadData, // EXPORTED HERE
       }}
     >
       {children}

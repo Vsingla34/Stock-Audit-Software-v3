@@ -109,6 +109,35 @@ class SupabaseDataService {
   }
 
   public async deleteAssignment(id: number): Promise<void> {
+    // 1. Delete Questionnaire Answers linked to this assignment
+    const { error: qaError } = await supabase
+      .from("questionnaire_answers")
+      .delete()
+      .eq("assignment_id", id);
+    if (qaError) throw qaError;
+
+    // 2. Delete Upload History (Closing Stock uploads for this assignment)
+    const { error: uploadError } = await supabase
+      .from("inventory_upload_history")
+      .delete()
+      .eq("assignment_id", id);
+    if (uploadError) throw uploadError;
+
+    // 3. Delete Audit Reports linked to this assignment
+    const { error: reportError } = await supabase
+      .from("audit_reports" as any)
+      .delete()
+      .eq("assignment_id", id);
+    if (reportError) throw reportError;
+
+    // 4. Delete Inventory Items linked to this assignment (e.g. Closing Stock, Surplus)
+    const { error: itemError } = await supabase
+      .from("inventory_items")
+      .delete()
+      .eq("assignment_id", id);
+    if (itemError) throw itemError;
+
+    // 5. Finally, Delete the Assignment itself
     const { error } = await supabase
       .from("assignments")
       .delete()
@@ -316,7 +345,6 @@ class SupabaseDataService {
     if (error) throw error;
   }
 
-  // --- NEW: ADD SURPLUS ITEM LOGIC ---
   public async addSurplusItem(params: {
     item: { sku: string; name: string; category: string; physicalQuantity: number };
     companyId: string;
@@ -341,9 +369,9 @@ class SupabaseDataService {
       name: item.name,
       category: item.category,
       location: locationName,
-      system_quantity: 0, // Not in closing stock
+      system_quantity: 0, 
       physical_quantity: item.physicalQuantity,
-      status: 'discrepancy', // Always a discrepancy
+      status: 'discrepancy', 
       client_remarks: "This item was not in the closing stock but it was there",
       auditor_entries: [auditorEntry],
       last_audited: new Date().toISOString()
@@ -504,6 +532,17 @@ class SupabaseDataService {
     return data || [];
   }
 
+  public async hasClosingStockForAssignment(assignmentId: number): Promise<boolean> {
+    const { count, error } = await supabase
+      .from("inventory_upload_history")
+      .select("*", { count: 'exact', head: true })
+      .eq("assignment_id", assignmentId)
+      .eq("upload_type", "closing_stock");
+
+    if (error) throw error;
+    return (count || 0) > 0;
+  }
+
   public async logUploadBatch(params: any): Promise<void> {
      const { data: { user } } = await supabase.auth.getUser();
      const payload = {
@@ -540,7 +579,6 @@ class SupabaseDataService {
   }
 
   // --- HELPER METHODS ---
-  
   public async getLocations() { const { data } = await supabase.from("locations").select("*").eq("active", true); return data?.map((l:any)=>({id:l.id,name:l.name,description:l.description,active:l.active,companyId:l.company_id,auditStatus:l.audit_status})) || []; }
   public async addLocation(l:any) { await supabase.from("locations").insert({name:l.name,description:l.description,company_id:l.companyId,active:true}); }
   public async updateLocation(l:any) { await supabase.from("locations").update(l).eq("id",l.id); }
@@ -550,7 +588,6 @@ class SupabaseDataService {
   public async updateQuestion(q:any) { await supabase.from("questions").update(q as any).eq("id",q.id); }
   public async deleteQuestion(id:string) { await supabase.from("questions").delete().eq("id",id); }
   
-  // UPDATED FOR ASSIGNMENT BASED ANSWERS
   public async getQuestionnaireAnswers(cId:string) { 
     const {data}=await supabase.from("questionnaire_answers").select("*").eq("company_id",cId); 
     return data?.map((a:any)=>({
@@ -560,7 +597,7 @@ class SupabaseDataService {
       answeredBy:a.answered_by,
       answeredOn:a.answered_on,
       companyId:a.company_id,
-      assignmentId: a.assignment_id // Map new field
+      assignmentId: a.assignment_id 
     }))||[]; 
   }
 
@@ -572,8 +609,8 @@ class SupabaseDataService {
       answer:a.answer,
       answered_by:a.answeredBy,
       answered_on:a.answeredOn,
-      assignment_id: a.assignmentId // Insert new field
-    } as any, {onConflict:'question_id,assignment_id' as any}); // Updated conflict constraint
+      assignment_id: a.assignmentId 
+    } as any, {onConflict:'question_id,assignment_id' as any}); 
   }
   
   public async updateLocationAuditStatus(locationId: string, status: AuditStatus): Promise<void> {

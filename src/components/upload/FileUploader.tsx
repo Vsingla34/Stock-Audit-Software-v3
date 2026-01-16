@@ -9,7 +9,7 @@ import {
   processClosingStockData,
 } from "./utils/csvUtils";
 import { Button } from "@/components/ui/button";
-import { Loader2, AlertCircle, MapPin, Lock } from "lucide-react";
+import { Loader2, AlertCircle, MapPin, Lock, CheckCircle2 } from "lucide-react"; 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useCompany } from "@/context/CompanyContext";
 import SupabaseDataService from "@/services/SupabaseDataService";
@@ -24,7 +24,7 @@ import { Label } from "@/components/ui/label";
 import { format } from "date-fns";
 
 export interface FileUploaderProps {
-  userRole: "super_admin" | "admin" | "auditor" | "client" | string; // Updated to include super_admin
+  userRole: "super_admin" | "admin" | "auditor" | "client" | string;
   assignedLocations?: string[];
   canUploadItemMaster?: boolean;
   canUploadClosingStock?: boolean;
@@ -48,28 +48,50 @@ export const FileUploader = ({
   const [itemMasterFile, setItemMasterFile] = useState<File | null>(null);
   const [closingStockFile, setClosingStockFile] = useState<File | null>(null);
 
-  const { setItemMaster, setClosingStock, locations, itemMaster, assignments } = useInventory();
+  // FIX: Destructure closingStockUploaded and refreshData
+  const { setItemMaster, setClosingStock, locations, itemMaster, assignments, closingStockUploaded, refreshData } = useInventory();
   const { selectedCompanyId, selectedAssignmentId: contextAssignmentId } = useCompany();
 
-  // Initialize selected assignment from context
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string>(
     contextAssignmentId ? String(contextAssignmentId) : ""
   );
 
-  // Sync state if context changes
+  // Local state for dropdown/immediate update checks
+  const [localAssignmentUploaded, setLocalAssignmentUploaded] = useState(false);
+
   useEffect(() => {
     if (contextAssignmentId) {
       setSelectedAssignmentId(String(contextAssignmentId));
     }
   }, [contextAssignmentId]);
 
+  // NEW: Check upload status whenever assignment selection changes
+  useEffect(() => {
+    const checkStatus = async () => {
+      if (selectedAssignmentId) {
+        const id = parseInt(selectedAssignmentId);
+        if (!isNaN(id)) {
+          // If context ID matches selection, sync with global state initially
+          if (contextAssignmentId && String(contextAssignmentId) === String(selectedAssignmentId)) {
+             setLocalAssignmentUploaded(closingStockUploaded);
+          } else {
+             // Otherwise fetch explicitly
+             const hasStock = await SupabaseDataService.hasClosingStockForAssignment(id);
+             setLocalAssignmentUploaded(hasStock);
+          }
+        }
+      } else {
+        setLocalAssignmentUploaded(false);
+      }
+    };
+    checkStatus();
+  }, [selectedAssignmentId, closingStockUploaded, contextAssignmentId]);
+
   const activeAssignments = useMemo(() => {
     return assignments.filter(a => {
       if (a.status === 'finalized') return false;
-      // FIX: Added 'super_admin' to the check
       if (userRole === 'super_admin' || userRole === 'admin') return true;
       if (userRole === 'auditor') {
-         // Assumes auditor has access to loaded assignments
          return true; 
       }
       return false;
@@ -78,13 +100,16 @@ export const FileUploader = ({
 
   const hasItemMaster = itemMaster.length > 0;
 
-  // Determine current active assignment object based on selection/context
   const currentActiveAssignment = useMemo(() => {
      return activeAssignments.find(a => String(a.id) === selectedAssignmentId);
   }, [activeAssignments, selectedAssignmentId]);
 
   const targetLocationId = currentActiveAssignment ? currentActiveAssignment.locationId : null;
   const isAssignmentActive = !!currentActiveAssignment;
+  
+  // Combine logic: If context ID is present, we trust the sync effect. 
+  // Basically 'localAssignmentUploaded' is our source of truth now since the effect syncs it.
+  const isStockUploadedForCurrentSelection = localAssignmentUploaded;
 
   const handleFileChange = (file: File | null, setFile: (f: File | null) => void) => {
     if (file && !file.name.toLowerCase().endsWith(".csv")) {
@@ -100,7 +125,6 @@ export const FileUploader = ({
     setIsImporting(true);
 
     try {
-      // --- ITEM MASTER UPLOAD (Company Wide) ---
       if (canUploadItemMaster && itemMasterFile) {
         if (!selectedCompanyId) throw new Error("Select a company first.");
         
@@ -129,15 +153,17 @@ export const FileUploader = ({
 
         toast.success("Item Master Uploaded", { description: `${itemsWithKey.length} items added.` });
         setItemMasterFile(null);
+        await refreshData(); 
         if (onUploadComplete) onUploadComplete();
       }
 
-      // --- CLOSING STOCK UPLOAD (Assignment Specific) ---
       else if (canUploadClosingStock && closingStockFile) {
         if (!selectedCompanyId) throw new Error("Select a company first.");
         if (!hasItemMaster) throw new Error("Item Master missing. Please upload it first.");
         
-        // Validation for Assignment
+        // Validation
+        if (isStockUploadedForCurrentSelection) throw new Error("Closing stock already uploaded for this assignment.");
+
         if (!selectedAssignmentId) throw new Error("No assignment selected.");
         if (!currentActiveAssignment) throw new Error("The selected assignment is not active or valid.");
         if (!targetLocationId) throw new Error("Selected Assignment has no valid Location linked.");
@@ -192,7 +218,6 @@ export const FileUploader = ({
 
         if (itemsWithDetails.length === 0) throw new Error("No valid items matched with Item Master.");
 
-        // PASS THE ASSIGNMENT ID HERE
         await setClosingStock(itemsWithDetails, selectedCompanyId, selectedAssignmentId);
 
         const locName = locations.find(l => l.id === targetLocationId)?.name || "Unknown";
@@ -210,6 +235,11 @@ export const FileUploader = ({
 
         toast.success("Closing Stock Uploaded", { description: `${itemsWithDetails.length} items added for ${locName}` });
         setClosingStockFile(null);
+        
+        // FIX: Force immediate refresh and local state update
+        await refreshData();
+        setLocalAssignmentUploaded(true); 
+        
         if (onUploadComplete) onUploadComplete();
       }
     } catch (error: any) {
@@ -233,6 +263,16 @@ export const FileUploader = ({
         </Alert>
       )}
 
+      {/* Warning Alert if Closing Stock is already uploaded */}
+      {canUploadClosingStock && isStockUploadedForCurrentSelection && (
+         <Alert className="border-yellow-200 bg-yellow-50 text-yellow-800">
+           <CheckCircle2 className="h-4 w-4 text-yellow-600" />
+           <AlertDescription>
+             <strong>Already Uploaded:</strong> Closing stock data exists for this assignment. Delete it from the history tab to re-upload.
+           </AlertDescription>
+         </Alert>
+      )}
+
       <div className="grid md:grid-cols-2 gap-6">
         {canUploadItemMaster && (
           <FileInputCard
@@ -246,11 +286,9 @@ export const FileUploader = ({
 
         {canUploadClosingStock && (
           <div className="space-y-4">
-            {/* ASSIGNMENT SELECTION LOGIC */}
             <div className="bg-white p-4 rounded-lg border shadow-sm space-y-3">
                <Label>Target Assignment</Label>
                
-               {/* CASE 1: Context ID exists (User came from Dashboard/Assignment Selection) */}
                {contextAssignmentId ? (
                   <div className={`p-3 rounded-md border ${isAssignmentActive ? 'bg-indigo-50 border-indigo-100' : 'bg-red-50 border-red-100'}`}>
                       {isAssignmentActive ? (
@@ -275,7 +313,6 @@ export const FileUploader = ({
                       )}
                   </div>
                ) : (
-                  /* CASE 2: No Context (Fallback for Admin direct access) */
                   <>
                     {activeAssignments.length === 0 ? (
                       <p className="text-sm text-yellow-600 bg-yellow-50 p-2 rounded">
@@ -313,7 +350,8 @@ export const FileUploader = ({
               fileInputId="closingStockUpload"
               file={closingStockFile}
               onFileChange={(e) => handleFileChange(e.target.files?.[0] || null, setClosingStockFile)}
-              disabled={!hasItemMaster || !selectedAssignmentId || !isAssignmentActive} 
+              // FIX: Disable if closing stock already uploaded
+              disabled={!hasItemMaster || !selectedAssignmentId || !isAssignmentActive || isStockUploadedForCurrentSelection} 
             />
           </div>
         )}
