@@ -71,6 +71,7 @@ export function Sidebar({
       setCurrentCompanyName(null);
     }
   }, [selectedCompanyId]);
+  
   useEffect(() => {
     fetchCompanyName();
   }, [fetchCompanyName]);
@@ -112,9 +113,9 @@ export function Sidebar({
       nav.push({ name: "Upload Data", href: "/upload", icon: Upload });
     }
     
-    if (userRole === "super_admin") {
-      nav.push({ name: "Company", href: "/add-company", icon: Building2 });
-    }
+    // REMOVED: "Company" / Add Company link from Sidebar
+    // Users access this via the Company Selection screen now.
+
     nav.push({ name: "My Profile", href: "/profile", icon: UserCircle });
     return nav;
   }, [userRole]);

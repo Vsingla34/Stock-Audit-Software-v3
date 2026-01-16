@@ -20,7 +20,8 @@ import {
   PlusCircle,
   CheckCircle2,
   Briefcase,
-  LogOut 
+  LogOut,
+  Settings 
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -166,15 +167,26 @@ const CompanySelection = () => {
             </p>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
              {isSuperAdmin && (
-                <Button 
-                  onClick={() => setIsAddDialogOpen(true)}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-all"
-                >
-                  <PlusCircle className="mr-2 h-4 w-4" />
-                  Add Company
-                </Button>
+                <>
+                  <Button 
+                    variant="outline"
+                    onClick={() => navigate("/add-company")}
+                    className="bg-white hover:bg-gray-50 text-gray-700 border-gray-200 shadow-sm transition-all"
+                  >
+                    <Settings className="mr-2 h-4 w-4" />
+                    Manage Companies
+                  </Button>
+                  
+                  <Button 
+                    onClick={() => setIsAddDialogOpen(true)}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-all"
+                  >
+                    <PlusCircle className="mr-2 h-4 w-4" />
+                    Add Company
+                  </Button>
+                </>
               )}
 
              <Button 

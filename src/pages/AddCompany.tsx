@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { AppLayout } from "@/components/layout/AppLayout";
+import { useNavigate } from "react-router-dom"; 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -7,12 +7,13 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Save, Building2, Edit, Trash, Plus } from "lucide-react";
+import { Save, Building2, Edit, Trash, Plus, ArrowLeft, LogOut } from "lucide-react"; 
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { useUserAccess } from "@/hooks/useUserAccess"; 
+import { useUser } from "@/context/UserContext"; 
 
 interface Company {
   id: string;
@@ -23,7 +24,10 @@ interface Company {
 }
 
 const AddCompany = () => {
+  const navigate = useNavigate();
   const { userRole } = useUserAccess(); 
+  const { logout } = useUser();
+  
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -137,10 +141,10 @@ const AddCompany = () => {
         .select('*', { count: 'exact', head: true })
         .eq('company_id', selectedCompany.id);
 
+      // Just checking if data exists, but we rely on Super Admin role to force delete
       const hasAssociatedData = (itemCount || 0) > 0 || (locationCount || 0) > 0;
 
       if (hasAssociatedData) {
-        // If NOT Super Admin, block delete
         if (userRole !== "super_admin") {
           toast.error("Cannot delete company", {
             description: "This company has associated inventory items or locations. Please remove them first."
@@ -148,33 +152,34 @@ const AddCompany = () => {
           return;
         }
 
-        // ✅ If SUPER ADMIN, perform Cascade Delete
         toast.info("Deleting associated data...", { duration: 2000 });
 
-        // A. Delete Inventory Items & Upload History
+        // --- ORDER IS IMPORTANT TO PREVENT FOREIGN KEY CONSTRAINTS ---
+
+        // 1. Delete Audit Reports (Dependent on Assignments & Companies)
+        await supabase.from('audit_reports' as any).delete().eq('company_id', selectedCompany.id);
+
+        // 2. Delete Inventory Items (Dependent on Assignments & Companies)
         await supabase.from('inventory_items').delete().eq('company_id', selectedCompany.id);
+
+        // 3. Delete Upload History (Dependent on Companies)
         await supabase.from('inventory_upload_history').delete().eq('company_id', selectedCompany.id);
         
-        // B. Delete Questionnaire Answers (linked to Locations)
-        // First get all location IDs for this company
-        const { data: locs } = await supabase
-          .from('locations')
-          .select('id')
-          .eq('company_id', selectedCompany.id);
-        
-        if (locs && locs.length > 0) {
-          const locIds = locs.map(l => l.id);
-          await supabase.from('questionnaire_answers').delete().in('location_id', locIds);
-        }
+        // 4. Delete Questionnaire Answers (Dependent on Assignments & Locations)
+        // (We can delete by company_id directly if the column exists, otherwise via locations)
+        await supabase.from('questionnaire_answers').delete().eq('company_id', selectedCompany.id);
 
-        // C. Delete Locations
-        await supabase.from('locations').delete().eq('company_id', selectedCompany.id);
+        // 5. Delete Assignments (FIX: This was missing and caused the error!)
+        await supabase.from('assignments').delete().eq('company_id', selectedCompany.id);
 
-        // D. Delete Questions
+        // 6. Delete Questions (Dependent on Companies)
         await supabase.from('questions').delete().eq('company_id', selectedCompany.id);
+
+        // 7. Delete Locations (Assignments are gone, so now this is safe)
+        await supabase.from('locations').delete().eq('company_id', selectedCompany.id);
       }
 
-      // 2. Finally delete the Company
+      // 8. Finally delete the Company
       const { error } = await supabase
         .from('companies')
         .delete()
@@ -214,31 +219,63 @@ const AddCompany = () => {
     setIsDeleteDialogOpen(true);
   };
 
+  const handleLogout = async () => {
+    await logout();
+    navigate('/login');
+  };
+
   if (loading) {
     return (
-      <AppLayout>
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Loading companies...</p>
-          </div>
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading companies...</p>
         </div>
-      </AppLayout>
+      </div>
     );
   }
 
+  // Standalone Layout (No AppLayout/Sidebar)
   return (
-    <AppLayout>
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
+    <div className="min-h-screen bg-gray-50 p-4 md:p-8">
+      <div className="max-w-6xl mx-auto space-y-8">
+        
+        {/* Header Section with Back Button */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-gray-200">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 mb-2">
+               <Button 
+                 variant="ghost" 
+                 size="sm" 
+                 className="p-0 h-auto hover:bg-transparent text-gray-500 hover:text-indigo-600"
+                 onClick={() => navigate("/company-selection")}
+               >
+                 <ArrowLeft className="h-4 w-4 mr-1" />
+                 Back to Selection
+               </Button>
+            </div>
             <h1 className="text-3xl font-bold tracking-tight text-gray-900">Company Management</h1>
-            <p className="text-gray-500">Manage companies and their information</p>
+            <p className="text-gray-500 text-lg">Manage companies and their information</p>
           </div>
-          <Button onClick={openAddDialog} className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-all">
-            <Plus className="mr-2 h-4 w-4" />
-            Add Company
-          </Button>
+
+          <div className="flex items-center gap-3">
+             <Button 
+                onClick={openAddDialog} 
+                className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-all"
+             >
+                <Plus className="mr-2 h-4 w-4" />
+                Add Company
+             </Button>
+             
+             <Button 
+               variant="ghost" 
+               onClick={handleLogout}
+               className="text-gray-500 hover:text-red-600 hover:bg-red-50"
+             >
+               <LogOut className="h-4 w-4 mr-2" />
+               Log out
+             </Button>
+          </div>
         </div>
 
         <Card className="shadow-sm border-gray-200">
@@ -422,7 +459,7 @@ const AddCompany = () => {
           </DialogContent>
         </Dialog>
       </div>
-    </AppLayout>
+    </div>
   );
 };
 
