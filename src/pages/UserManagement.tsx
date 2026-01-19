@@ -325,7 +325,44 @@ const UserManagement = () => {
   const handleDeleteUser = async () => {
     if (!selectedUser) return;
 
+    if (selectedUser.id === currentUser?.id) {
+        toast.error("Cannot delete your own account.");
+        return;
+    }
+
     try {
+      toast.info("Unlinking user data...", { duration: 1500 });
+
+      // FIX: Aggressively DELETE dependent records.
+      // NOTE: If these fail to delete rows (count=0), it means RLS blocked it.
+
+      // 1. DELETE Audit Reports
+      const { error: reportError, count: reportCount } = await supabase
+        .from('audit_reports' as any)
+        .delete({ count: 'exact' })
+        .eq('finalized_by', selectedUser.id);
+      
+      if (reportError) {
+         console.error("Report delete error:", reportError);
+      }
+
+      // 2. DELETE Upload History
+      const { error: uploadError } = await supabase
+        .from('inventory_upload_history')
+        .delete({ count: 'exact' })
+        .eq('uploaded_by', selectedUser.id);
+
+      if (uploadError) {
+         console.error("Upload delete error:", uploadError);
+      }
+
+      // 3. DELETE Questionnaire Answers
+      await supabase
+        .from('questionnaire_answers')
+        .delete()
+        .eq('answered_by', selectedUser.id);
+
+      // 4. DELETE User Account via RPC
       const { error } = await supabase.rpc('delete_user_account', { 
         user_id: selectedUser.id 
       });
@@ -336,10 +373,26 @@ const UserManagement = () => {
       setIsDeleteDialogOpen(false);
       setSelectedUser(null);
       fetchData();
+
     } catch (error: any) {
       console.error("Error deleting user:", error);
+      
+      let msg = error.message || "Could not delete user account";
+      
+      // CRITICAL FIX: Specific Guidance for RLS Errors
+      if (msg.includes("foreign key constraint") && msg.includes("audit_reports")) {
+         msg = "Error: Database Permissions (RLS) are preventing deletion of this user's Audit Reports.";
+         
+         // Display specific instruction toast
+         toast.error("PERMISSION BLOCKED", {
+            description: "Go to Supabase SQL Editor and run: ALTER TABLE audit_reports DROP CONSTRAINT audit_reports_finalized_by_fkey, ADD CONSTRAINT audit_reports_finalized_by_fkey FOREIGN KEY (finalized_by) REFERENCES auth.users(id) ON DELETE SET NULL;",
+            duration: 10000,
+         });
+         return;
+      }
+
       toast.error("Failed to delete user", {
-        description: error.message || "Could not delete user account",
+        description: msg,
       });
     }
   };
