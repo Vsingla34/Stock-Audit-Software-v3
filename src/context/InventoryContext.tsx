@@ -31,6 +31,7 @@ export interface InventoryItem {
   uploadBatchKey?: string;
   clientRemarks?: string;
   assignmentId?: number;
+  customAttributes?: Record<string, any>;
 }
 
 export type AuditStatus = "pending" | "active" | "submitted" | "finalized";
@@ -159,7 +160,7 @@ interface InventoryContextType {
   getQuestionsForLocation: (locationId: string) => Question[];
   getQuestionById: (questionId: string) => Question | undefined;
   
-  refreshData: () => Promise<void>; // EXPORTED HERE
+  refreshData: () => Promise<void>;
 }
 
 const InventoryContext = createContext<InventoryContextType | undefined>(
@@ -269,7 +270,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
           auditorEntries: [],
           companyId: companyId,
           uploadBatchKey: stockItem.uploadBatchKey,
-          assignmentId: parseInt(assignmentId)
+          assignmentId: parseInt(assignmentId),
+          customAttributes: metadataSource?.customAttributes || {}
        });
     }
 
@@ -787,7 +789,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         submitAudit, 
         sendFinalizationOtp,
         finalizeAudit,
-        refreshData: loadData, // EXPORTED HERE
+        refreshData: loadData, 
       }}
     >
       {children}

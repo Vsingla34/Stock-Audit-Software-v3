@@ -11,7 +11,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import {
   CheckCircle,
-  AlertCircle,
   Clock,
   Search,
   MessageSquare
@@ -46,7 +45,6 @@ export const InventoryTable = () => {
 
   const canEditRemarks = useMemo(() => {
     if (!currentLocationObj) return false;
-    // Only Client can edit remarks, and only when status is 'submitted'
     return currentUser?.role === 'client' && currentLocationObj.auditStatus === 'submitted';
   }, [currentUser, currentLocationObj]);
 
@@ -64,6 +62,8 @@ export const InventoryTable = () => {
             status: auditedItem.status,
             lastAudited: auditedItem.lastAudited,
             clientRemarks: item.clientRemarks, 
+            // Ensure customAttributes are passed through
+            customAttributes: item.customAttributes || {}
           };
         }
         return {
@@ -73,6 +73,7 @@ export const InventoryTable = () => {
           lastAudited: undefined,
           auditedBy: undefined,
           clientRemarks: item.clientRemarks,
+          customAttributes: item.customAttributes || {}
         };
       });
   }, [itemMaster, auditedItems]);
@@ -107,6 +108,20 @@ export const InventoryTable = () => {
     userLocations,
   ]);
 
+  // --- NEW: Calculate Dynamic Columns ---
+  // We scan all visible items to see what unique keys exist in customAttributes
+  const dynamicColumns = useMemo(() => {
+    const keys = new Set<string>();
+    // Scan a subset (or all) to find keys. 
+    // Scanning filteredData ensures we only show columns relevant to current view.
+    locationFilteredData.forEach(item => {
+      if (item.customAttributes) {
+        Object.keys(item.customAttributes).forEach(k => keys.add(k));
+      }
+    });
+    return Array.from(keys).sort(); // Sort alphabetically for consistency
+  }, [locationFilteredData]);
+
   const filteredData = useMemo(() => {
     if (!searchQuery.trim()) return locationFilteredData;
 
@@ -115,9 +130,13 @@ export const InventoryTable = () => {
       (item) =>
         item.sku.toLowerCase().includes(query) ||
         (item.name && item.name.toLowerCase().includes(query)) ||
-        (item.category && item.category.toLowerCase().includes(query))
+        (item.category && item.category.toLowerCase().includes(query)) ||
+        // SEARCH SUPPORT: Also search inside custom attributes
+        dynamicColumns.some(col => 
+            String(item.customAttributes?.[col] || "").toLowerCase().includes(query)
+        )
     );
-  }, [locationFilteredData, searchQuery]);
+  }, [locationFilteredData, searchQuery, dynamicColumns]);
 
   const [visibleCount, setVisibleCount] = useState(ROW_LIMIT);
 
@@ -227,7 +246,7 @@ export const InventoryTable = () => {
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             type="text"
-            placeholder="Search items by Name, SKU, or Category..."
+            placeholder="Search items..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9"
@@ -235,13 +254,21 @@ export const InventoryTable = () => {
         </div>
       </div>
 
-      <div className="rounded-md border bg-white">
+      <div className="rounded-md border bg-white overflow-x-auto"> {/* Added overflow-x-auto for many columns */}
         <Table>
           <TableHeader>
             <TableRow className="bg-gray-50">
               <TableHead className="font-semibold w-[120px]">SKU</TableHead>
-              <TableHead className="font-semibold max-w-[200px]">Name</TableHead>
+              <TableHead className="font-semibold min-w-[200px]">Name</TableHead>
               <TableHead className="font-semibold">Category</TableHead>
+              
+              {/* --- NEW: Dynamic Headers --- */}
+              {dynamicColumns.map(colKey => (
+                <TableHead key={colKey} className="font-semibold capitalize min-w-[100px]">
+                  {colKey.replace(/_/g, ' ')}
+                </TableHead>
+              ))}
+
               <TableHead className="font-semibold">Location</TableHead>
               <TableHead className="text-center font-semibold w-[80px]">Sys Qty</TableHead>
               <TableHead className="text-center font-semibold w-[80px]">Phy Qty</TableHead>
@@ -275,6 +302,16 @@ export const InventoryTable = () => {
                         {item.category || "-"}
                       </Badge>
                     </TableCell>
+
+                    {/* --- NEW: Dynamic Cells --- */}
+                    {dynamicColumns.map(colKey => (
+                      <TableCell key={colKey} className="text-xs text-gray-600">
+                        {item.customAttributes?.[colKey] !== undefined 
+                          ? String(item.customAttributes[colKey]) 
+                          : "-"}
+                      </TableCell>
+                    ))}
+
                     <TableCell className="text-xs">
                       {item.location}
                     </TableCell>
@@ -334,7 +371,7 @@ export const InventoryTable = () => {
               })
             ) : (
               <TableRow>
-                <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={10 + dynamicColumns.length} className="text-center py-8 text-muted-foreground">
                   No data found.
                 </TableCell>
               </TableRow>

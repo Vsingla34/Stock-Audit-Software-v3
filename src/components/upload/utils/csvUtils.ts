@@ -20,7 +20,6 @@ export const processCSV = (csvText: string): CSVRow[] => {
   const cleanedData = result.data.map((row: any) => {
     const cleanedRow: CSVRow = {};
     Object.keys(row).forEach(key => {
-      // Robust key cleaning
       const cleanKey = key.trim().toLowerCase();
       cleanedRow[cleanKey] = typeof row[key] === 'string' ? row[key].trim() : row[key];
     });
@@ -40,6 +39,15 @@ export const processItemMasterData = (rows: CSVRow[]): Omit<InventoryItem, 'id'>
     const name = row['name'] || row['item name'] || row['description'] || 'Unnamed Item';
     const category = row['category'] || row['type'] || '';
 
+    const knownKeys = ['sku', 'item code', 'name', 'item name', 'description', 'category', 'type'];
+    const customAttributes: Record<string, any> = {};
+    
+    Object.keys(row).forEach(key => {
+        if (!knownKeys.includes(key)) {
+            customAttributes[key] = row[key];
+        }
+    });
+
     return {
       sku,
       name,
@@ -50,6 +58,7 @@ export const processItemMasterData = (rows: CSVRow[]): Omit<InventoryItem, 'id'>
       status: 'pending' as const,
       lastAudited: null,
       notes: '',
+      customAttributes,
     };
   });
 };
@@ -85,7 +94,6 @@ export const processClosingStockData = (
       };
     });
   } else {
-    // Admin workflow logic (unused in current FileUploader but kept for safety)
     return rows.map((row, index) => {
       const sku = row['sku'] || row['item code'];
       if (!sku) throw new Error(`Row ${index + 2} is missing 'sku'.`);

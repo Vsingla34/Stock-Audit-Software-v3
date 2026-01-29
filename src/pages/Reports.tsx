@@ -49,8 +49,6 @@ const Reports = () => {
   const {
     auditedItems,
     itemMaster,
-    getInventorySummary,
-    getLocationSummary,
     questionnaireAnswers,
     getQuestionsForLocation,
     locations,
@@ -87,11 +85,6 @@ const Reports = () => {
   const selectedLocation = currentAssignment?.locationId || "";
   const locationName = locations.find(l => l.id === selectedLocation)?.name || "";
 
-  // Helper to get names for exports
-  const getLocationName = (id: string) => {
-     return locations.find(l => l.id === id)?.name || "";
-  };
-
   useEffect(() => {
     const fetchCompanyName = async () => {
       if (!selectedCompanyId) return;
@@ -117,10 +110,7 @@ const Reports = () => {
   const isClient = currentUser?.role === 'client';
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
 
-  // Auditor can SUBMIT if active
   const canSubmit = currentAssignment?.status === 'active' && (isAuditor || isAdmin);
-
-  // Client can FINALIZE if submitted
   const canFinalize = currentAssignment?.status === 'submitted' && (isClient || isAdmin);
 
   const handleSubmitClick = async () => {
@@ -147,7 +137,6 @@ const Reports = () => {
     setIsSendingOtp(true);
     try {
       const message = await sendFinalizationOtp(selectedAssignmentId);
-      // FIXED: Only show message, NOT the code.
       toast.success(message);
     } catch (e) {
       toast.error("Failed to send OTP");
@@ -181,7 +170,6 @@ const Reports = () => {
     return systemQty > 0 || physicalQty > 0;
   };
 
-  // ... (Rest of the component remains the same: useMemo, exports, rendering) ...
   const { filteredAuditedItems, filteredItemMaster, summary } = useMemo(() => {
     let relevantAuditedItems = auditedItems.filter(item => item.location === locationName);
     let relevantItemMaster = itemMaster.filter(item => item.location === locationName);
@@ -515,7 +503,10 @@ const Reports = () => {
   const generatePDFReport = useCallback(() => {
     const doc = new jsPDF();
     
+    // 1. Initial Cursor Position
     let currentY = 20;
+
+    // 2. Header Information
     doc.setFontSize(20); 
     doc.setTextColor(40); 
     doc.text("Inventory Audit Report", 14, currentY);
@@ -554,6 +545,7 @@ const Reports = () => {
         doc.text(`Phone: ${phone}`, 14, currentY);
     }
 
+    // 3. Audit Summary Table
     currentY += 14;
     doc.setFontSize(14); 
     doc.setTextColor(0); 
@@ -575,8 +567,10 @@ const Reports = () => {
         headStyles: { fillColor: [79, 70, 229] } 
     });
 
+    // Update cursor to bottom of table
     currentY = (doc as any)["lastAutoTable"] ? (doc as any)["lastAutoTable"].finalY + 10 : currentY + 60;
 
+    // 4. Observations Text
     doc.setFontSize(14); 
     doc.text("Observations", 14, currentY);
     
@@ -584,18 +578,26 @@ const Reports = () => {
     if (summary.discrepancies > 0) { observations.push(`There are ${summary.discrepancies} items with quantity discrepancies.`); } else { observations.push("All audited items match their expected quantities."); }
     if (summary.pendingItems > 0) { observations.push(`${summary.pendingItems} items (${Math.round((summary.pendingItems / summary.totalItems) * 100)}%) are still pending audit.`); } else { observations.push("All items have been audited."); }
     
-    let observationY = currentY + 10;
-    observations.forEach((obs) => { doc.setFontSize(11); doc.text(`• ${obs}`, 16, observationY); observationY += 7; });
+    // Render Observations lines and update cursor
+    currentY += 10;
+    observations.forEach((obs) => { 
+      doc.setFontSize(11); 
+      doc.text(`• ${obs}`, 16, currentY); 
+      currentY += 7; 
+    });
 
+    // 5. Discrepancy Table
     const discrepancies = baseTableData.filter((item) => item.status === "discrepancy").map((item) => {
         return [item.sku, item.name, item.location, item.systemQuantity.toString(), item.physicalQuantity.toString(), item.variance.toString(), item.clientRemarks || "-"];
     });
 
     if (discrepancies.length > 0) {
-      const discrepancyY = observationY + 10;
-      doc.setFontSize(14); doc.text("Discrepancy Details", 14, discrepancyY);
+      currentY += 5; // Spacing before header
+      doc.setFontSize(14); 
+      doc.text("Discrepancy Details", 14, currentY);
+      
       autoTable(doc, { 
-        startY: discrepancyY + 5, 
+        startY: currentY + 5, 
         head: [["SKU", "Name", "Location", "System", "Physical", "Variance", "Remarks"]], 
         body: discrepancies, 
         theme: "grid", 
@@ -603,8 +605,14 @@ const Reports = () => {
         styles: { fontSize: 8 }, 
         columnStyles: { 6: { cellWidth: 30 } } 
       });
+
+      // Update cursor to bottom of Discrepancy table
+      currentY = (doc as any)["lastAutoTable"].finalY + 10;
+    } else {
+      currentY += 10; // Extra spacing if table is skipped
     }
 
+    // 6. Questionnaire Table
     if (selectedLocation && selectedLocation !== "all") {
         const validQuestions = getQuestionsForLocation(selectedLocation);
         
@@ -612,23 +620,44 @@ const Reports = () => {
         const displayQuestions = validQuestions.filter(q => !hiddenQuestions.includes(q.text.trim().toLowerCase()));
 
         if (displayQuestions.length > 0) {
-            let questionnaireY = (doc as any)["lastAutoTable"] ? (doc as any)["lastAutoTable"].finalY + 15 : observationY + 15;
-            if (questionnaireY > doc.internal.pageSize.height - 40) { doc.addPage(); questionnaireY = 20; }
-            
-            doc.setFontSize(14); doc.text("Audit Questionnaire Responses", 14, questionnaireY);
+            // Check for page break
+            if (currentY > doc.internal.pageSize.height - 40) {
+              doc.addPage();
+              currentY = 20;
+            }
+
+            doc.setFontSize(14); 
+            doc.text("Audit Questionnaire Responses", 14, currentY);
             
             const answerData = displayQuestions.map((question) => {
                 const answer = questionnaireAnswers.find((a) => a.questionId === question.id && a.locationId === selectedLocation);
                 return [question.text, answer ? formatQuestionnaireAnswer(answer.answer, question) : "-", answer?.answeredBy || "-", answer ? new Date(answer.answeredOn).toLocaleDateString() : "-"];
             });
             
-            autoTable(doc, { startY: questionnaireY + 5, head: [["Question", "Response", "Answered By", "Date"]], body: answerData, theme: "grid", headStyles: { fillColor: [67, 56, 202] }, styles: { fontSize: 9 }, columnStyles: { 0: { cellWidth: 80 }, 1: { cellWidth: 60 } } });
+            autoTable(doc, { 
+              startY: currentY + 5, 
+              head: [["Question", "Response", "Answered By", "Date"]], 
+              body: answerData, 
+              theme: "grid", 
+              headStyles: { fillColor: [67, 56, 202] }, 
+              styles: { fontSize: 9 }, 
+              columnStyles: { 0: { cellWidth: 80 }, 1: { cellWidth: 60 } } 
+            });
+
+            // Update cursor to bottom of Questionnaire table
+            currentY = (doc as any)["lastAutoTable"].finalY + 10;
         }
 
-        const lastPos = (doc as any)["lastAutoTable"] ? (doc as any)["lastAutoTable"].finalY + 20 : doc.internal.pageSize.height - 60;
+        // 7. Sign-off Section
         const pageHeight = doc.internal.pageSize.height;
-        let signOffY = lastPos;
-        if (signOffY + 60 > pageHeight) { doc.addPage(); signOffY = 20; }
+        
+        // Ensure space for sign-off block (approx 40-50 units height)
+        if (currentY + 50 > pageHeight) { 
+            doc.addPage(); 
+            currentY = 20; 
+        } else {
+            currentY += 10; // Add breathing room before sign-off
+        }
 
         const auditorName = questionnaireAnswers.find(a => a.locationId === selectedLocation)?.answeredBy || "N/A";
         let storeManagerName = "N/A";
@@ -638,16 +667,16 @@ const Reports = () => {
         const currentDate = new Date().toLocaleDateString();
 
         doc.setFontSize(12);
-        doc.text("Auditor Sign-off", 14, signOffY);
+        doc.text("Auditor Sign-off", 14, currentY);
         doc.setFontSize(10);
-        doc.text(`Name: ${auditorName}`, 14, signOffY + 10);
-        doc.text("Signature: _____________________", 14, signOffY + 20);
-        doc.text(`Date: ${currentDate}`, 14, signOffY + 30);
+        doc.text(`Name: ${auditorName}`, 14, currentY + 10);
+        doc.text("Signature: _____________________", 14, currentY + 20);
+        doc.text(`Date: ${currentDate}`, 14, currentY + 30);
 
-        doc.text("Store Manager Sign-off", 120, signOffY);
-        doc.text(`Name: ${storeManagerName}`, 120, signOffY + 10);
-        doc.text("Signature: _____________________", 120, signOffY + 20);
-        doc.text(`Date: ${currentDate}`, 120, signOffY + 30);
+        doc.text("Store Manager Sign-off", 120, currentY);
+        doc.text(`Name: ${storeManagerName}`, 120, currentY + 10);
+        doc.text("Signature: _____________________", 120, currentY + 20);
+        doc.text(`Date: ${currentDate}`, 120, currentY + 30);
     }
 
     const locationInfo = locationName ? `_${locationName}` : "";

@@ -20,10 +20,6 @@ class SupabaseDataService {
     this.currentUser = data.user;
   }
 
-  // ---------------------------------------------------------------------------
-  // ASSIGNMENTS
-  // ---------------------------------------------------------------------------
-
   public async getAssignments(companyId?: string): Promise<Assignment[]> {
     let query = supabase.from("assignments").select("*");
     if (companyId) {
@@ -109,35 +105,30 @@ class SupabaseDataService {
   }
 
   public async deleteAssignment(id: number): Promise<void> {
-    // 1. Delete Questionnaire Answers linked to this assignment
     const { error: qaError } = await supabase
       .from("questionnaire_answers")
       .delete()
       .eq("assignment_id", id);
     if (qaError) throw qaError;
 
-    // 2. Delete Upload History (Closing Stock uploads for this assignment)
     const { error: uploadError } = await supabase
       .from("inventory_upload_history")
       .delete()
       .eq("assignment_id", id);
     if (uploadError) throw uploadError;
 
-    // 3. Delete Audit Reports linked to this assignment
     const { error: reportError } = await supabase
       .from("audit_reports" as any)
       .delete()
       .eq("assignment_id", id);
     if (reportError) throw reportError;
 
-    // 4. Delete Inventory Items linked to this assignment (e.g. Closing Stock, Surplus)
     const { error: itemError } = await supabase
       .from("inventory_items")
       .delete()
       .eq("assignment_id", id);
     if (itemError) throw itemError;
 
-    // 5. Finally, Delete the Assignment itself
     const { error } = await supabase
       .from("assignments")
       .delete()
@@ -145,8 +136,6 @@ class SupabaseDataService {
 
     if (error) throw error;
   }
-
-  // --- OTP LOGIC (Supabase Auth Based) ---
 
   public async sendAssignmentOtp(assignmentId: number): Promise<string> {
     const { data: assignment, error: assignError } = await supabase
@@ -212,10 +201,6 @@ class SupabaseDataService {
     return true;
   }
 
-  // ---------------------------------------------------------------------------
-  // INVENTORY ITEMS
-  // ---------------------------------------------------------------------------
-
   public async getItemMaster(companyId: string, assignmentId: number | null = null): Promise<InventoryItem[]> {
     let query = supabase
       .from("inventory_items")
@@ -243,6 +228,13 @@ class SupabaseDataService {
         try { parsedEntries = JSON.parse(item.auditor_entries); } catch { parsedEntries = []; }
       }
 
+      let parsedCustomAttributes = {};
+      if (item.custom_attributes && typeof item.custom_attributes === 'object') {
+          parsedCustomAttributes = item.custom_attributes;
+      } else if (typeof item.custom_attributes === 'string') {
+          try { parsedCustomAttributes = JSON.parse(item.custom_attributes); } catch { parsedCustomAttributes = {}; }
+      }
+
       return {
         id: item.id,
         sku: item.sku,
@@ -258,7 +250,8 @@ class SupabaseDataService {
         auditorEntries: parsedEntries,
         clientRemarks: item.client_remarks,
         uploadBatchKey: item.upload_batch_key,
-        assignmentId: item.assignment_id 
+        assignmentId: item.assignment_id,
+        customAttributes: parsedCustomAttributes
       };
     });
   }
@@ -282,7 +275,8 @@ class SupabaseDataService {
       status: item.status || 'pending',
       client_remarks: item.clientRemarks,
       auditor_entries: item.auditorEntries || [],
-      upload_batch_key: item.uploadBatchKey 
+      upload_batch_key: item.uploadBatchKey,
+      custom_attributes: item.customAttributes || {}
     }));
 
     const { error } = await supabase
@@ -305,7 +299,8 @@ class SupabaseDataService {
        system_quantity: item.systemQuantity,
        physical_quantity: 0, 
        status: 'pending',
-       upload_batch_key: item.uploadBatchKey 
+       upload_batch_key: item.uploadBatchKey,
+       custom_attributes: item.customAttributes || {}
      }));
 
      const { error } = await supabase
@@ -328,7 +323,8 @@ class SupabaseDataService {
         status: item.status,
         last_audited: item.lastAudited,
         auditor_entries: item.auditorEntries,
-        notes: item.notes
+        notes: item.notes,
+        custom_attributes: item.customAttributes || {}
       };
       
       if (item.id) {
@@ -374,7 +370,8 @@ class SupabaseDataService {
       status: 'discrepancy', 
       client_remarks: "This item was not in the closing stock but it was there",
       auditor_entries: [auditorEntry],
-      last_audited: new Date().toISOString()
+      last_audited: new Date().toISOString(),
+      custom_attributes: {}
     };
 
     const { error } = await supabase
@@ -578,7 +575,6 @@ class SupabaseDataService {
       .eq("location", locationName);
   }
 
-  // --- HELPER METHODS ---
   public async getLocations() { const { data } = await supabase.from("locations").select("*").eq("active", true); return data?.map((l:any)=>({id:l.id,name:l.name,description:l.description,active:l.active,companyId:l.company_id,auditStatus:l.audit_status})) || []; }
   public async addLocation(l:any) { await supabase.from("locations").insert({name:l.name,description:l.description,company_id:l.companyId,active:true}); }
   public async updateLocation(l:any) { await supabase.from("locations").update(l).eq("id",l.id); }
