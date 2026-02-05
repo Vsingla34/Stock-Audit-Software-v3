@@ -8,6 +8,14 @@ import { toast } from "sonner";
 import { ClipboardList, Save } from "lucide-react";
 import { QuestionRenderer } from "./QuestionRenderer";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 interface QuestionnaireFormProps {
   locationId: string;
@@ -172,36 +180,56 @@ export const QuestionnaireForm = ({ locationId, assignmentId, locationName, onCo
           Audit Questionnaire {locationName && <span className="text-gray-500 font-normal ml-1">for {locationName}</span>}
         </CardTitle>
       </CardHeader>
-      <CardContent className="pt-6">
-        <div className="space-y-8">
-          {questions.map((question) => {
-            const isError = showErrors && question.required && !isQuestionAnswered(question);
-            const isAutoFilled = getAutoFillType(question.text) !== null;
-            
-            return (
-              <div key={question.id} className={`space-y-2 rounded-lg p-3 transition-colors ${isError ? 'border border-red-200 bg-red-50' : 'hover:bg-gray-50 border border-transparent'}`}>
-                <div className="flex items-center gap-1">
-                  <span className="font-medium text-gray-900">{question.text}</span>
-                  {question.required && <span className="text-red-500">*</span>}
-                  {isAutoFilled && (
-                    <span className="text-xs font-medium text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded ml-2 border border-indigo-100">
-                      Auto-filled
-                    </span>
-                  )}
-                </div>
-                
-                <QuestionRenderer 
-                  question={question}
-                  answer={answers[question.id] || (question.type === "multi_select" ? [] : "")}
-                  isError={isError}
-                  isDisabled={isAutoFilled}
-                  onChange={handleAnswerChange}
-                />
-              </div>
-            );
-          })}
-        </div>
+      
+      <CardContent className="p-0">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-gray-50 hover:bg-gray-50">
+              <TableHead className="w-[40%] pl-6">Question</TableHead>
+              <TableHead className="pl-6">Response</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {questions.map((question) => {
+              const isError = showErrors && question.required && !isQuestionAnswered(question);
+              const isAutoFilled = getAutoFillType(question.text) !== null;
+              
+              return (
+                <TableRow 
+                  key={question.id} 
+                  className={`transition-colors ${isError ? 'bg-red-50 hover:bg-red-50' : 'hover:bg-gray-50/50'}`}
+                >
+                  <TableCell className="align-top font-medium text-gray-900 pl-6 py-4">
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-1">
+                        <span>{question.text}</span>
+                        {question.required && <span className="text-red-500">*</span>}
+                      </div>
+                      
+                      {isAutoFilled && (
+                        <span className="w-fit text-[10px] font-medium text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
+                          Auto-filled
+                        </span>
+                      )}
+                    </div>
+                  </TableCell>
+                  
+                  <TableCell className="align-top pl-6 py-4">
+                    <QuestionRenderer 
+                      question={question}
+                      answer={answers[question.id] || (question.type === "multi_select" ? [] : "")}
+                      isError={isError}
+                      isDisabled={isAutoFilled}
+                      onChange={handleAnswerChange}
+                    />
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
       </CardContent>
+
       <CardFooter className="border-t border-gray-100 p-6 bg-gray-50/50">
         <Button onClick={handleSubmit} className="ml-auto bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-all">
           <Save className="h-4 w-4 mr-2" />

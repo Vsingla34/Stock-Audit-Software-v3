@@ -50,6 +50,7 @@ const Reports = () => {
     auditedItems,
     itemMaster,
     questionnaireAnswers,
+    questions,
     getQuestionsForLocation,
     locations,
     updateItemRemark,
@@ -241,9 +242,62 @@ const Reports = () => {
         lastAudited: auditedItem?.lastAudited || "",
         auditorEntries: auditedItem?.auditorEntries || [],
         clientRemarks: item.clientRemarks,
+        customAttributes: item.customAttributes || {}
       };
     });
   }, [filteredItemMaster, filteredAuditedItems]);
+
+  const parsePrice = useCallback((val: any): number => {
+    if (!val) return 0;
+    if (typeof val === 'number') return val;
+    const cleanStr = String(val).replace(/[^0-9.-]+/g, "");
+    return parseFloat(cleanStr) || 0;
+  }, []);
+
+  const priceKey = useMemo(() => {
+     for (const item of baseTableData) {
+        if (!item.customAttributes) continue;
+        if (item.customAttributes['unit_price'] !== undefined) return 'unit_price';
+        const keys = Object.keys(item.customAttributes);
+        const found = keys.find(k => ['unit price', 'price', 'rate', 'cost', 'mrp', 'unit cost'].includes(k.toLowerCase()));
+        if (found) return found;
+     }
+     return null;
+  }, [baseTableData]);
+
+  const getItemValues = useCallback((item: typeof baseTableData[0]) => {
+     if (!priceKey) return { unitPrice: 0, sysValue: 0, phyValue: 0, valueVariance: 0 };
+
+     const attrs = item.customAttributes || {};
+     let unitPrice = parsePrice(attrs['unit_price']);
+     let sysValue = parsePrice(attrs['system_value']);
+     let phyValue = parsePrice(attrs['physical_value']);
+
+     if (unitPrice === 0 && priceKey !== 'unit_price') {
+         unitPrice = parsePrice(attrs[priceKey]);
+     }
+     if (sysValue === 0 && unitPrice > 0) {
+         sysValue = unitPrice * item.systemQuantity;
+     }
+     if (phyValue === 0 && unitPrice > 0) {
+         phyValue = unitPrice * (item.physicalQuantity || 0);
+     }
+
+     const valueVariance = phyValue - sysValue;
+
+     return { unitPrice, sysValue, phyValue, valueVariance };
+  }, [priceKey, parsePrice]);
+
+  const hasPricing = !!priceKey;
+
+  const formatCurrency = (val: any) => {
+    const num = parseFloat(val);
+    if (isNaN(num)) return "-";
+    return new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(num);
+  };
 
   const filteredTableData = useMemo(() => {
     let data = baseTableData.filter((item) => {
@@ -260,10 +314,16 @@ const Reports = () => {
       data = [...data].sort((a, b) => a.variance - b.variance);
     } else if (sortOrder === "variance-desc") {
       data = [...data].sort((a, b) => b.variance - a.variance);
+    } 
+    // --- NEW: Value Variance Filters ---
+    else if (sortOrder === "val-variance-asc") {
+      data = [...data].sort((a, b) => getItemValues(a).valueVariance - getItemValues(b).valueVariance);
+    } else if (sortOrder === "val-variance-desc") {
+      data = [...data].sort((a, b) => getItemValues(b).valueVariance - getItemValues(a).valueVariance);
     }
 
     return data;
-  }, [baseTableData, statusFilter, categoryFilter, sortOrder]);
+  }, [baseTableData, statusFilter, categoryFilter, sortOrder, getItemValues]);
 
   const uniqueCategories = useMemo(() => {
     const cats = new Set(baseTableData.map(i => i.category).filter(Boolean));
@@ -293,21 +353,28 @@ const Reports = () => {
     setEditingRemark(null);
   };
 
+  const formatQuestionnaireAnswer = useCallback((answer: string | string[], question: Question) => {
+      let val: any = answer;
+      if (typeof val === "string") { try { if (val.trim().startsWith("[") || val.trim().startsWith("{")) { val = JSON.parse(val); } } catch {} }
+      if (question.type === 'file') {
+         return val ? String(val) : "No File";
+      }
+      if (question.type === "yes_no") { const v = Array.isArray(val) ? val[0] : val; const s = String(v ?? "").toLowerCase(); if (["yes", "true", "1"].includes(s)) return "Yes"; if (["no", "false", "0"].includes(s)) return "No"; return String(v ?? ""); }
+      if ((question.type === "single_select" || question.type === "multi_select") && question.options) { const ids = Array.isArray(val) ? val : [val]; const labels = ids.map((id: string) => { const opt = question.options?.find((o) => o.id === id); return opt ? opt.text : id; }); return labels.join(", "); }
+      if (Array.isArray(val)) { return val.join(", "); }
+      return String(val);
+  }, []);
+
   const generateCSV = useCallback((data: any[], filename: string) => {
     const headers = Array.from(new Set(data.flatMap((item) => Object.keys(item))));
     let csvContent = headers.join(",") + "\n";
-
     data.forEach((item) => {
-      const row = headers
-        .map((header) => {
-          const value =
-            item[header] !== undefined ? String(item[header]) : "";
+      const row = headers.map((header) => {
+          const value = item[header] !== undefined ? String(item[header]) : "";
           return value.includes(",") ? `"${value}"` : value;
-        })
-        .join(",");
+        }).join(",");
       csvContent += row + "\n";
     });
-
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -317,7 +384,6 @@ const Reports = () => {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-
     toast.success(`${filename} downloaded`);
   }, []);
 
@@ -326,40 +392,42 @@ const Reports = () => {
       toast.error("No data to export with current filters");
       return;
     }
-
-    const reportData = filteredTableData.map((item) => ({
-      sku: item.sku,
-      name: item.name,
-      category: item.category,
-      location: item.location,
-      systemQuantity: item.systemQuantity,
-      physicalQuantity: item.physicalQuantity,
-      variance: item.variance,
-      status: item.status,
-      remarks: item.clientRemarks || "-",
-      lastAudited: item.lastAudited ? new Date(item.lastAudited).toLocaleString() : "-",
-    }));
-
+    const reportData = filteredTableData.map((item) => {
+      const { unitPrice, sysValue, phyValue, valueVariance } = getItemValues(item);
+      const baseObj: any = {
+        sku: item.sku,
+        name: item.name,
+        category: item.category,
+        location: item.location,
+        systemQuantity: item.systemQuantity,
+        physicalQuantity: item.physicalQuantity,
+        variance: item.variance,
+        status: item.status,
+      };
+      if (hasPricing) {
+         baseObj["Unit Price"] = unitPrice;
+         baseObj["System Value"] = sysValue;
+         baseObj["Physical Value"] = phyValue;
+         baseObj["Value Variance"] = valueVariance;
+      }
+      baseObj.remarks = item.clientRemarks || "-";
+      baseObj.lastAudited = item.lastAudited ? new Date(item.lastAudited).toLocaleString() : "-";
+      return baseObj;
+    });
     const locationTag = locationName ? `_${locationName}` : "";
     const statusTag = statusFilter !== 'all' ? `_${statusFilter}` : "";
     const categoryTag = categoryFilter !== 'all' ? `_${categoryFilter}` : "";
     const sortTag = sortOrder !== 'default' ? `_${sortOrder}` : "";
-
-    generateCSV(
-      reportData,
-      `filtered_inventory_report${locationTag}${statusTag}${categoryTag}${sortTag}.csv`
-    );
-  }, [filteredTableData, locationName, statusFilter, categoryFilter, sortOrder, generateCSV]);
+    generateCSV(reportData, `filtered_inventory_report${locationTag}${statusTag}${categoryTag}${sortTag}.csv`);
+  }, [filteredTableData, locationName, statusFilter, categoryFilter, sortOrder, generateCSV, hasPricing, getItemValues]);
 
   const downloadReconciliationReport = useCallback(() => {
     const allAuditors = new Set<string>();
     baseTableData.forEach((item) => {
-      item.auditorEntries.forEach((entry: any) => {
-        allAuditors.add(entry.auditorName);
-      });
+      item.auditorEntries.forEach((entry: any) => { allAuditors.add(entry.auditorName); });
     });
-
     const reportData = baseTableData.map((item) => {
+      const { unitPrice, sysValue, phyValue, valueVariance } = getItemValues(item);
       const baseData: any = {
         id: item.id,
         sku: item.sku,
@@ -368,43 +436,55 @@ const Reports = () => {
         location: item.location,
         systemQuantity: item.systemQuantity,
       };
-
+      if (hasPricing) {
+         baseData["Unit Price"] = unitPrice;
+         baseData["System Value"] = sysValue;
+      }
       Array.from(allAuditors).forEach((auditorName) => {
-        const auditorEntry = item.auditorEntries.find(
-          (e: any) => e.auditorName === auditorName
-        );
+        const auditorEntry = item.auditorEntries.find((e: any) => e.auditorName === auditorName);
         baseData[auditorName] = auditorEntry ? auditorEntry.quantityFound : 0;
       });
-
       baseData.Total = item.physicalQuantity;
+      if (hasPricing) {
+          baseData["Physical Value"] = phyValue;
+          baseData["Value Variance"] = valueVariance;
+      }
       baseData.variance = item.variance;
       baseData.status = item.status;
       baseData.remarks = item.clientRemarks || "-";
       baseData.lastAudited = item.lastAudited;
-
       return baseData;
     });
-
     const locationInfo = locationName ? `_${locationName}` : "";
     generateCSV(reportData, `inventory_reconciliation_report${locationInfo}.csv`);
-  }, [baseTableData, locationName, generateCSV]);
+  }, [baseTableData, locationName, generateCSV, hasPricing, getItemValues]);
 
   const downloadDiscrepancyReport = useCallback(() => {
     const discrepancies = baseTableData.filter((item) => item.variance !== 0);
-    const reportData = discrepancies.map((item) => ({
-        id: item.id,
-        sku: item.sku,
-        name: item.name,
-        location: item.location,
-        systemQuantity: item.systemQuantity,
-        physicalQuantity: item.physicalQuantity,
-        variance: item.variance,
-        remarks: item.clientRemarks || "-",
-        lastAudited: item.lastAudited,
-    }));
+    const reportData = discrepancies.map((item) => {
+        const { unitPrice, sysValue, phyValue, valueVariance } = getItemValues(item);
+        const baseObj: any = {
+            id: item.id,
+            sku: item.sku,
+            name: item.name,
+            location: item.location,
+            systemQuantity: item.systemQuantity,
+            physicalQuantity: item.physicalQuantity,
+            variance: item.variance,
+        };
+        if (hasPricing) {
+            baseObj["Unit Price"] = unitPrice;
+            baseObj["System Value"] = sysValue;
+            baseObj["Physical Value"] = phyValue;
+            baseObj["Value Variance"] = valueVariance;
+        }
+        baseObj.remarks = item.clientRemarks || "-";
+        baseObj.lastAudited = item.lastAudited;
+        return baseObj;
+    });
     const locationInfo = locationName ? `_${locationName}` : "";
     generateCSV(reportData, `discrepancy_report${locationInfo}.csv`);
-  }, [baseTableData, locationName, generateCSV]);
+  }, [baseTableData, locationName, generateCSV, hasPricing, getItemValues]);
 
   const downloadSummaryReport = useCallback(() => {
     const summaryData = [{
@@ -423,14 +503,11 @@ const Reports = () => {
 
   const downloadCombinedExcelReport = useCallback(() => {
     const allAuditors = new Set<string>();
-    baseTableData.forEach((item) => {
-      item.auditorEntries.forEach((entry: any) => {
-        allAuditors.add(entry.auditorName);
-      });
-    });
+    baseTableData.forEach((item) => { item.auditorEntries.forEach((entry: any) => { allAuditors.add(entry.auditorName); }); });
     const auditorList = Array.from(allAuditors).sort();
 
     const reconciliationData = baseTableData.map((item) => {
+      const { unitPrice, sysValue, phyValue, valueVariance } = getItemValues(item);
       const row: any = {
         SKU: item.sku,
         Name: item.name,
@@ -438,11 +515,19 @@ const Reports = () => {
         Location: item.location,
         "System Qty": item.systemQuantity,
       };
+      if (hasPricing) {
+        row["Unit Price"] = unitPrice;
+        row["System Value"] = sysValue;
+      }
       auditorList.forEach((auditorName) => {
         const entry = item.auditorEntries.find((e: any) => e.auditorName === auditorName);
         row[auditorName] = entry ? entry.quantityFound : 0;
       });
       row["Physical Qty"] = item.physicalQuantity;
+      if (hasPricing) {
+        row["Physical Value"] = phyValue;
+        row["Value Variance"] = valueVariance;
+      }
       row.Variance = item.variance;
       row.Status = item.status;
       row.Remarks = item.clientRemarks || "-";
@@ -452,17 +537,27 @@ const Reports = () => {
 
     const discrepancyData = baseTableData
       .filter((item) => item.variance !== 0)
-      .map((item) => ({
-        SKU: item.sku,
-        Name: item.name,
-        Location: item.location,
-        Category: item.category,
-        "System Qty": item.systemQuantity,
-        "Physical Qty": item.physicalQuantity,
-        Variance: item.variance,
-        Remarks: item.clientRemarks || "-",
-        "Last Audited": item.lastAudited ? new Date(item.lastAudited).toLocaleString() : "-",
-      }));
+      .map((item) => {
+        const { unitPrice, sysValue, phyValue, valueVariance } = getItemValues(item);
+        const row: any = {
+            SKU: item.sku,
+            Name: item.name,
+            Location: item.location,
+            Category: item.category,
+            "System Qty": item.systemQuantity,
+            "Physical Qty": item.physicalQuantity,
+            Variance: item.variance,
+        };
+        if (hasPricing) {
+            row["Unit Price"] = unitPrice;
+            row["System Value"] = sysValue;
+            row["Physical Value"] = phyValue;
+            row["Value Variance"] = valueVariance;
+        }
+        row.Remarks = item.clientRemarks || "-";
+        row["Last Audited"] = item.lastAudited ? new Date(item.lastAudited).toLocaleString() : "-";
+        return row;
+      });
 
     const summaryData = [{
       "Company": companyName,
@@ -476,67 +571,59 @@ const Reports = () => {
       "Completion Rate": summary.totalItems > 0 ? Math.round((summary.auditedItems / summary.totalItems) * 100) + "%" : "0%",
     }];
 
-    const wb = XLSX.utils.book_new();
+    const questionnaireData = questionnaireAnswers.map(ans => {
+        const q = questions.find(q => q.id === ans.questionId);
+        const loc = locations.find(l => l.id === ans.locationId);
+        if (locationName && loc?.name !== locationName) return null;
+        return {
+            "Location": loc?.name || "Unknown",
+            "Question": q?.text || "Unknown Question",
+            "Response": formatQuestionnaireAnswer(ans.answer, q!), 
+            "Answered By": ans.answeredBy,
+            "Date": new Date(ans.answeredOn).toLocaleDateString()
+        };
+    }).filter(Boolean);
 
+    const wb = XLSX.utils.book_new();
     const wsReconciliation = XLSX.utils.json_to_sheet(reconciliationData);
     const wsSummary = XLSX.utils.json_to_sheet(summaryData);
     const wsDiscrepancy = XLSX.utils.json_to_sheet(discrepancyData);
+    const wsQuestionnaire = XLSX.utils.json_to_sheet(questionnaireData);
 
     XLSX.utils.book_append_sheet(wb, wsReconciliation, "Reconciliation");
     XLSX.utils.book_append_sheet(wb, wsSummary, "Audit Summary");
     XLSX.utils.book_append_sheet(wb, wsDiscrepancy, "Discrepancies");
+    XLSX.utils.book_append_sheet(wb, wsQuestionnaire, "Questionnaire");
 
     const locationInfo = locationName ? `_${locationName}` : "";
     XLSX.writeFile(wb, `complete_audit_data${locationInfo}.xlsx`);
     toast.success("Combined Excel report downloaded");
-  }, [baseTableData, summary, locationName, companyName]);
-
-  const formatQuestionnaireAnswer = useCallback((answer: string | string[], question: Question) => {
-      let val: any = answer;
-      if (typeof val === "string") { try { if (val.trim().startsWith("[") || val.trim().startsWith("{")) { val = JSON.parse(val); } } catch {} }
-      if (question.type === "yes_no") { const v = Array.isArray(val) ? val[0] : val; const s = String(v ?? "").toLowerCase(); if (["yes", "true", "1"].includes(s)) return "Yes"; if (["no", "false", "0"].includes(s)) return "No"; return String(v ?? ""); }
-      if ((question.type === "single_select" || question.type === "multi_select") && question.options) { const ids = Array.isArray(val) ? val : [val]; const labels = ids.map((id: string) => { const opt = question.options?.find((o) => o.id === id); return opt ? opt.text : id; }); return labels.join(", "); }
-      if (Array.isArray(val)) { return val.join(", "); }
-      return String(val);
-  }, []);
+  }, [baseTableData, summary, locationName, companyName, questionnaireAnswers, questions, locations, formatQuestionnaireAnswer, hasPricing, getItemValues]);
 
   const generatePDFReport = useCallback(() => {
     const doc = new jsPDF();
-    
-    // 1. Initial Cursor Position
     let currentY = 20;
 
-    // 2. Header Information
-    doc.setFontSize(20); 
-    doc.setTextColor(40); 
-    doc.text("Inventory Audit Report", 14, currentY);
-    
+    doc.setFontSize(20); doc.setTextColor(40); doc.text("Inventory Audit Report", 14, currentY);
     currentY += 10;
-    doc.setFontSize(11); 
-    doc.setTextColor(100);
-    doc.text(`Company: ${companyName || "N/A"}`, 14, currentY);
-    
+    doc.setFontSize(11); doc.setTextColor(100); doc.text(`Company: ${companyName || "N/A"}`, 14, currentY);
     currentY += 7;
     const locationText = locationName ? `Location: ${locationName}` : "Location: All Locations";
     doc.text(locationText, 14, currentY);
-    
     currentY += 7;
     doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, currentY);
 
     if (selectedLocation && selectedLocation !== "all") {
         const questionsForLoc = getQuestionsForLocation(selectedLocation);
-        
         const getAnswerText = (questionText: string) => {
             const q = questionsForLoc.find(xq => xq.text.trim().toLowerCase() === questionText.toLowerCase());
             if (!q) return "N/A";
             const ans = questionnaireAnswers.find(a => a.questionId === q.id && a.locationId === selectedLocation);
             return ans ? formatQuestionnaireAnswer(ans.answer, q) : "N/A";
         };
-
         const locManager = getAnswerText("Location Manager");
         const audName = getAnswerText("Auditor Name");
         const phone = getAnswerText("Phone No.");
-
         currentY += 7;
         doc.text(`Location Manager: ${locManager}`, 14, currentY);
         currentY += 7;
@@ -545,12 +632,8 @@ const Reports = () => {
         doc.text(`Phone: ${phone}`, 14, currentY);
     }
 
-    // 3. Audit Summary Table
     currentY += 14;
-    doc.setFontSize(14); 
-    doc.setTextColor(0); 
-    doc.text("Audit Summary", 14, currentY);
-    
+    doc.setFontSize(14); doc.setTextColor(0); doc.text("Audit Summary", 14, currentY);
     const summaryTableBody = [
       ["Total Items", summary.totalItems.toString()],
       ["Audited Items", summary.auditedItems.toString()],
@@ -558,131 +641,66 @@ const Reports = () => {
       ["Discrepancies", summary.discrepancies.toString()],
       ["Completion Rate", `${summary.totalItems > 0 ? Math.round((summary.auditedItems / summary.totalItems) * 100) : 0}%`],
     ];
-    
-    autoTable(doc, { 
-        startY: currentY + 4, 
-        head: [["Metric", "Value"]], 
-        body: summaryTableBody, 
-        theme: "grid", 
-        headStyles: { fillColor: [79, 70, 229] } 
-    });
-
-    // Update cursor to bottom of table
+    autoTable(doc, { startY: currentY + 4, head: [["Metric", "Value"]], body: summaryTableBody, theme: "grid", headStyles: { fillColor: [79, 70, 229] } });
     currentY = (doc as any)["lastAutoTable"] ? (doc as any)["lastAutoTable"].finalY + 10 : currentY + 60;
 
-    // 4. Observations Text
-    doc.setFontSize(14); 
-    doc.text("Observations", 14, currentY);
-    
+    doc.setFontSize(14); doc.text("Observations", 14, currentY);
     const observations: string[] = [];
     if (summary.discrepancies > 0) { observations.push(`There are ${summary.discrepancies} items with quantity discrepancies.`); } else { observations.push("All audited items match their expected quantities."); }
     if (summary.pendingItems > 0) { observations.push(`${summary.pendingItems} items (${Math.round((summary.pendingItems / summary.totalItems) * 100)}%) are still pending audit.`); } else { observations.push("All items have been audited."); }
-    
-    // Render Observations lines and update cursor
     currentY += 10;
-    observations.forEach((obs) => { 
-      doc.setFontSize(11); 
-      doc.text(`• ${obs}`, 16, currentY); 
-      currentY += 7; 
-    });
+    observations.forEach((obs) => { doc.setFontSize(11); doc.text(`• ${obs}`, 16, currentY); currentY += 7; });
 
-    // 5. Discrepancy Table
     const discrepancies = baseTableData.filter((item) => item.status === "discrepancy").map((item) => {
-        return [item.sku, item.name, item.location, item.systemQuantity.toString(), item.physicalQuantity.toString(), item.variance.toString(), item.clientRemarks || "-"];
+        const { unitPrice, sysValue, phyValue, valueVariance } = getItemValues(item);
+        const row = [item.sku, item.name, item.location, item.systemQuantity.toString(), item.physicalQuantity.toString(), item.variance.toString()];
+        if (hasPricing) {
+            row.push(formatCurrency(valueVariance));
+        }
+        row.push(item.clientRemarks || "-");
+        return row;
     });
 
     if (discrepancies.length > 0) {
-      currentY += 5; // Spacing before header
-      doc.setFontSize(14); 
-      doc.text("Discrepancy Details", 14, currentY);
-      
-      autoTable(doc, { 
-        startY: currentY + 5, 
-        head: [["SKU", "Name", "Location", "System", "Physical", "Variance", "Remarks"]], 
-        body: discrepancies, 
-        theme: "grid", 
-        headStyles: { fillColor: [249, 115, 22] }, 
-        styles: { fontSize: 8 }, 
-        columnStyles: { 6: { cellWidth: 30 } } 
-      });
-
-      // Update cursor to bottom of Discrepancy table
+      currentY += 5; 
+      doc.setFontSize(14); doc.text("Discrepancy Details", 14, currentY);
+      const headRow = ["SKU", "Name", "Location", "Sys", "Phy", "Var"];
+      if (hasPricing) headRow.push("Val Var");
+      headRow.push("Remarks");
+      autoTable(doc, { startY: currentY + 5, head: [headRow], body: discrepancies, theme: "grid", headStyles: { fillColor: [249, 115, 22] }, styles: { fontSize: 8 }, columnStyles: { [headRow.length - 1]: { cellWidth: 30 } } });
       currentY = (doc as any)["lastAutoTable"].finalY + 10;
-    } else {
-      currentY += 10; // Extra spacing if table is skipped
-    }
+    } else { currentY += 10; }
 
-    // 6. Questionnaire Table
     if (selectedLocation && selectedLocation !== "all") {
         const validQuestions = getQuestionsForLocation(selectedLocation);
-        
         const hiddenQuestions = ["company", "location", "location manager", "auditor name", "phone no."];
         const displayQuestions = validQuestions.filter(q => !hiddenQuestions.includes(q.text.trim().toLowerCase()));
-
         if (displayQuestions.length > 0) {
-            // Check for page break
-            if (currentY > doc.internal.pageSize.height - 40) {
-              doc.addPage();
-              currentY = 20;
-            }
-
-            doc.setFontSize(14); 
-            doc.text("Audit Questionnaire Responses", 14, currentY);
-            
+            if (currentY > doc.internal.pageSize.height - 40) { doc.addPage(); currentY = 20; }
+            doc.setFontSize(14); doc.text("Audit Questionnaire Responses", 14, currentY);
             const answerData = displayQuestions.map((question) => {
                 const answer = questionnaireAnswers.find((a) => a.questionId === question.id && a.locationId === selectedLocation);
                 return [question.text, answer ? formatQuestionnaireAnswer(answer.answer, question) : "-", answer?.answeredBy || "-", answer ? new Date(answer.answeredOn).toLocaleDateString() : "-"];
             });
-            
-            autoTable(doc, { 
-              startY: currentY + 5, 
-              head: [["Question", "Response", "Answered By", "Date"]], 
-              body: answerData, 
-              theme: "grid", 
-              headStyles: { fillColor: [67, 56, 202] }, 
-              styles: { fontSize: 9 }, 
-              columnStyles: { 0: { cellWidth: 80 }, 1: { cellWidth: 60 } } 
-            });
-
-            // Update cursor to bottom of Questionnaire table
+            autoTable(doc, { startY: currentY + 5, head: [["Question", "Response", "Answered By", "Date"]], body: answerData, theme: "grid", headStyles: { fillColor: [67, 56, 202] }, styles: { fontSize: 9 }, columnStyles: { 0: { cellWidth: 80 }, 1: { cellWidth: 60, overflow: 'linebreak' } }, });
             currentY = (doc as any)["lastAutoTable"].finalY + 10;
         }
-
-        // 7. Sign-off Section
         const pageHeight = doc.internal.pageSize.height;
-        
-        // Ensure space for sign-off block (approx 40-50 units height)
-        if (currentY + 50 > pageHeight) { 
-            doc.addPage(); 
-            currentY = 20; 
-        } else {
-            currentY += 10; // Add breathing room before sign-off
-        }
-
+        if (currentY + 50 > pageHeight) { doc.addPage(); currentY = 20; } else { currentY += 10; }
         const auditorName = questionnaireAnswers.find(a => a.locationId === selectedLocation)?.answeredBy || "N/A";
         let storeManagerName = "N/A";
         const questionsForSignOff = getQuestionsForLocation(selectedLocation);
         const managerQuestion = questionsForSignOff.find(q => q.text.trim().toLowerCase() === 'location manager');
         if (managerQuestion) { const managerAnswer = questionnaireAnswers.find((a) => a.questionId === managerQuestion.id && a.locationId === selectedLocation); if (managerAnswer) { storeManagerName = formatQuestionnaireAnswer(managerAnswer.answer, managerQuestion); } }
         const currentDate = new Date().toLocaleDateString();
-
-        doc.setFontSize(12);
-        doc.text("Auditor Sign-off", 14, currentY);
-        doc.setFontSize(10);
-        doc.text(`Name: ${auditorName}`, 14, currentY + 10);
-        doc.text("Signature: _____________________", 14, currentY + 20);
-        doc.text(`Date: ${currentDate}`, 14, currentY + 30);
-
-        doc.text("Store Manager Sign-off", 120, currentY);
-        doc.text(`Name: ${storeManagerName}`, 120, currentY + 10);
-        doc.text("Signature: _____________________", 120, currentY + 20);
-        doc.text(`Date: ${currentDate}`, 120, currentY + 30);
+        doc.setFontSize(12); doc.text("Auditor Sign-off", 14, currentY); doc.setFontSize(10);
+        doc.text(`Name: ${auditorName}`, 14, currentY + 10); doc.text("Signature: _____________________", 14, currentY + 20); doc.text(`Date: ${currentDate}`, 14, currentY + 30);
+        doc.text("Store Manager Sign-off", 120, currentY); doc.text(`Name: ${storeManagerName}`, 120, currentY + 10); doc.text("Signature: _____________________", 120, currentY + 20); doc.text(`Date: ${currentDate}`, 120, currentY + 30);
     }
-
     const locationInfo = locationName ? `_${locationName}` : "";
     doc.save(`inventory_audit_report${locationInfo}.pdf`);
     toast.success("PDF Report downloaded");
-  }, [selectedLocation, locationName, summary, baseTableData, questionnaireAnswers, getQuestionsForLocation, formatQuestionnaireAnswer, companyName]);
+  }, [selectedLocation, locationName, summary, baseTableData, questionnaireAnswers, getQuestionsForLocation, formatQuestionnaireAnswer, companyName, hasPricing, getItemValues]);
 
   const handleShowMore = () => { setVisibleCount((prev) => prev + 100); };
   const handleShowAll = () => { setVisibleCount(filteredTableData.length); };
@@ -740,7 +758,6 @@ const Reports = () => {
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <CardTitle className="text-gray-900">Detailed Report with Filters</CardTitle>
                 <div className="flex flex-wrap items-center gap-2">
-                  
                   <div className="w-[150px]">
                     <Select value={statusFilter} onValueChange={(val) => {
                       setStatusFilter(val);
@@ -755,7 +772,6 @@ const Reports = () => {
                       </SelectContent>
                     </Select>
                   </div>
-
                   <div className="w-[180px]">
                     <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                       <SelectTrigger className="focus:ring-indigo-600 border-gray-200"><div className="flex items-center gap-2"><Filter className="h-4 w-4" /><SelectValue placeholder="Category" /></div></SelectTrigger>
@@ -767,7 +783,6 @@ const Reports = () => {
                       </SelectContent>
                     </Select>
                   </div>
-
                   {statusFilter === "discrepancy" && (
                     <div className="w-[180px]">
                       <Select value={sortOrder} onValueChange={setSortOrder}>
@@ -779,13 +794,14 @@ const Reports = () => {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="default">Default Sort</SelectItem>
-                          <SelectItem value="variance-asc">Variance (Low ↑)</SelectItem>
-                          <SelectItem value="variance-desc">Variance (High ↓)</SelectItem>
+                          <SelectItem value="variance-asc">Qty Variance (Low ↑)</SelectItem>
+                          <SelectItem value="variance-desc">Qty Variance (High ↓)</SelectItem>
+                          <SelectItem value="val-variance-asc">Value Var (Low ↑)</SelectItem>
+                          <SelectItem value="val-variance-desc">Value Var (High ↓)</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                   )}
-
                   <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={downloadFilteredReport}>
                     <Download className="mr-2 h-4 w-4" />
                     Export Filtered
@@ -799,7 +815,7 @@ const Reports = () => {
                 {filteredTableData.length > 0 && !showingAll && (<div className="flex gap-2"><Button size="sm" variant="outline" className="hover:text-indigo-600" onClick={handleShowMore}>Show next 100</Button><Button size="sm" variant="ghost" className="hover:text-indigo-600" onClick={handleShowAll}>Show all</Button></div>)}
               </div>
 
-              <div className="rounded-md border border-gray-200">
+              <div className="rounded-md border border-gray-200 overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow className="bg-gray-50">
@@ -807,6 +823,14 @@ const Reports = () => {
                       <TableHead className="w-[180px]">Name</TableHead>
                       <TableHead>Location</TableHead>
                       <TableHead>Category</TableHead>
+                      {hasPricing && (
+                        <>
+                           <TableHead className="text-right w-[100px] bg-indigo-50/50">Price</TableHead>
+                           <TableHead className="text-right w-[100px] bg-indigo-50/50">Sys Val</TableHead>
+                           <TableHead className="text-right w-[100px] bg-indigo-50/50">Phy Val</TableHead>
+                           <TableHead className="text-right w-[100px] bg-indigo-50/50">Val Var</TableHead>
+                        </>
+                      )}
                       <TableHead className="text-center w-[80px]">Sys</TableHead>
                       <TableHead className="text-center w-[80px]">Phy</TableHead>
                       <TableHead className="text-center w-[80px]">Var</TableHead>
@@ -819,13 +843,32 @@ const Reports = () => {
                       visibleTableData.map((item) => {
                         const isDiscrepancy = item.status === "discrepancy";
                         const canEdit = canEditRemarkForItem(item.location);
-
+                        const { unitPrice, sysValue, phyValue, valueVariance } = getItemValues(item);
+                        
                         return (
                           <TableRow key={`${item.id}-${item.location}`}>
                             <TableCell className="font-medium text-gray-900 text-xs">{item.sku}</TableCell>
                             <TableCell className="truncate max-w-[180px] text-sm" title={item.name}>{item.name}</TableCell>
                             <TableCell className="text-xs">{item.location}</TableCell>
                             <TableCell className="text-xs">{item.category}</TableCell>
+                            
+                            {hasPricing && (
+                                <>
+                                  <TableCell className="text-right text-xs font-mono bg-indigo-50/30">
+                                      {formatCurrency(unitPrice)}
+                                  </TableCell>
+                                  <TableCell className="text-right text-xs font-mono bg-indigo-50/30">
+                                      {formatCurrency(sysValue)}
+                                  </TableCell>
+                                  <TableCell className={`text-right text-xs font-mono bg-indigo-50/30 ${item.status === 'discrepancy' ? 'text-red-600 font-bold' : ''}`}>
+                                      {formatCurrency(phyValue)}
+                                  </TableCell>
+                                  <TableCell className={`text-right text-xs font-mono bg-indigo-50/30 font-bold ${valueVariance < 0 ? 'text-red-600' : valueVariance > 0 ? 'text-green-600' : 'text-gray-500'}`}>
+                                      {formatCurrency(valueVariance)}
+                                  </TableCell>
+                                </>
+                            )}
+
                             <TableCell className="text-center font-medium">{item.systemQuantity}</TableCell>
                             <TableCell className="text-center font-medium">{item.physicalQuantity}</TableCell>
                             <TableCell className={`text-center font-bold ${item.variance !== 0 ? "text-red-600" : ""}`}>{item.variance}</TableCell>
@@ -866,7 +909,7 @@ const Reports = () => {
                         );
                       })
                     ) : (
-                      <TableRow><TableCell colSpan={9} className="text-center py-4 text-gray-500">No data available matching filters</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={hasPricing ? 13 : 9} className="text-center py-4 text-gray-500">No data available matching filters</TableCell></TableRow>
                     )}
                   </TableBody>
                 </Table>

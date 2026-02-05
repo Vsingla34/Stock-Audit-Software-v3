@@ -55,7 +55,7 @@ export interface Assignment {
   auditorIds?: string[];
 }
 
-export type QuestionType = "text" | "single_select" | "multi_select" | "yes_no";
+export type QuestionType = "text" | "single_select" | "multi_select" | "yes_no" | "file";
 
 export interface QuestionOption {
   id: string;
@@ -160,6 +160,8 @@ interface InventoryContextType {
   getQuestionsForLocation: (locationId: string) => Question[];
   getQuestionById: (questionId: string) => Question | undefined;
   
+  uploadFile: (file: File, path: string) => Promise<string>;
+
   refreshData: () => Promise<void>;
 }
 
@@ -201,7 +203,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       setQuestions((qs || []).map((q: any) => ({
         id: q.id,
         text: q.text,
-        type: q.type,
+        type: q.type, 
         required: q.required,
         options: q.options || [],
         companyId: q.company_id ?? selectedCompanyId,
@@ -357,6 +359,31 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       totalPhysicalQuantity = item.physicalQuantity || 0;
     }
 
+    // --- NEW: Calculate Physical Value ---
+    const currentAttributes = item.customAttributes || {};
+    let updatedAttributes = { ...currentAttributes };
+
+    // Standardize Unit Price
+    const unitPrice = parseFloat(currentAttributes['unit_price'] || 0);
+    
+    // Fallback search for loose price keys if not standardized yet
+    let effectivePrice = unitPrice;
+    if (!effectivePrice) {
+       const priceKey = Object.keys(currentAttributes).find(k => 
+         ['price', 'rate', 'cost', 'mrp', 'unit price'].includes(k.toLowerCase())
+       );
+       if (priceKey) {
+          const val = String(currentAttributes[priceKey]).replace(/[^0-9.-]+/g, "");
+          effectivePrice = parseFloat(val) || 0;
+          if (effectivePrice > 0) {
+             updatedAttributes['unit_price'] = effectivePrice; 
+          }
+       }
+    }
+
+    // Update physical_value
+    updatedAttributes['physical_value'] = effectivePrice * totalPhysicalQuantity;
+
     const itemToUpdate: InventoryItem = {
       ...item,
       id: targetId, 
@@ -371,6 +398,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
           : "pending",
       lastAudited: new Date().toISOString(),
       auditorEntries,
+      customAttributes: updatedAttributes
     };
 
     await SupabaseDataService.setAuditedItems([itemToUpdate]);
@@ -676,7 +704,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
  const saveQuestionnaireAnswer = async (
-  answer: Omit<QuestionnaireAnswer, "answeredOn" | "answeredBy">
+  answer: Omit<QuestionnaireAnswer, "answeredOn">
 ) => {
     let statusToCheck: AuditStatus | undefined;
     if (answer.assignmentId) {
@@ -747,6 +775,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     setAssignments([]);
   };
 
+  const uploadFile = async (file: File, path: string): Promise<string> => {
+     return await SupabaseDataService.uploadFile(file, path);
+  };
+
   return (
     <InventoryContext.Provider
       value={{
@@ -789,7 +821,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         submitAudit, 
         sendFinalizationOtp,
         finalizeAudit,
-        refreshData: loadData, 
+        refreshData: loadData,
+        uploadFile, 
       }}
     >
       {children}

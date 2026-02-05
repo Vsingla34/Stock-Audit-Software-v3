@@ -1,327 +1,206 @@
-import { useInventory, QuestionnaireAnswer } from "@/context/InventoryContext";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useInventory, Question } from "@/context/InventoryContext";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Download, FileIcon, ExternalLink } from "lucide-react";
+import * as XLSX from "xlsx";
 import { toast } from "sonner";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertCircle, Download, FileText, FileSpreadsheet } from "lucide-react";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
-import * as XLSX from "xlsx"; 
+import { useLocationFilter } from "@/hooks/useLocationFilter";
 
-declare module "jspdf" {
-  interface jsPDF {
-    autoTable: (options: any) => jsPDF;
-  }
-}
-
-interface QuestionnaireResponsesProps {
-  locationId: string;
-  locationName: string;
-}
-
-export const QuestionnaireResponses = ({
-  locationId,
-  locationName,
-}: QuestionnaireResponsesProps) => {
-  const { questions, questionnaireAnswers, getQuestionById } = useInventory();
-
+export const QuestionnaireResponses = () => {
+  const { 
+    questionnaireAnswers, 
+    questions, 
+    locations,
+    selectedLocationFilter 
+  } = useInventory();
   
-  const formatAnswerForDisplay = (answerObj: QuestionnaireAnswer): string => {
-    const question = getQuestionById(answerObj.questionId);
-    let raw: any = answerObj.answer;
+  // Use the filter hook if available, otherwise fallback to context filter
+  const { selectedLocation } = useLocationFilter();
+  const activeFilter = selectedLocation || selectedLocationFilter;
 
-    
-    if (typeof raw === "string") {
+  // 1. Filter answers based on selected location
+  const filteredAnswers = questionnaireAnswers.filter((answer) => {
+    if (!activeFilter || activeFilter === "all") return true;
+    return answer.locationId === activeFilter;
+  });
+
+  if (filteredAnswers.length === 0) {
+    return (
+      <div className="text-center p-8 text-gray-500 bg-gray-50 rounded-lg border border-dashed">
+        No questionnaire responses found for this selection.
+      </div>
+    );
+  }
+
+  // 2. Helper to format answers for Display and Excel
+  const formatAnswer = (answer: string | string[], question?: Question, forExcel = false) => {
+    if (!question) return String(answer);
+
+    let val: any = answer;
+    // Attempt to parse JSON strings if necessary
+    if (typeof val === "string") {
       try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          raw = parsed;
+        if (val.trim().startsWith("[") || val.trim().startsWith("{")) {
+          val = JSON.parse(val);
         }
-      } catch {
-        
-      }
+      } catch {}
     }
 
-    if (!question) {
-      return Array.isArray(raw) ? raw.join(", ") : String(raw ?? "");
+    // --- CASE: FILE UPLOAD ---
+    if (question.type === "file") {
+      const url = val ? String(val) : "";
+      if (!url) return "No File";
+      
+      if (forExcel) return url; // Return raw URL for Excel
+      
+      // Return Link Component for UI
+      return (
+        <a 
+          href={url} 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 underline font-medium"
+        >
+          <FileIcon className="h-3 w-3" /> View File <ExternalLink className="h-3 w-3" />
+        </a>
+      );
     }
 
-
+    // --- CASE: YES/NO ---
     if (question.type === "yes_no") {
-      const v = Array.isArray(raw) ? raw[0] : raw;
+      const v = Array.isArray(val) ? val[0] : val;
       const s = String(v ?? "").toLowerCase();
       if (["yes", "true", "1"].includes(s)) return "Yes";
       if (["no", "false", "0"].includes(s)) return "No";
       return String(v ?? "");
     }
 
-    
-    if (question.type === "single_select") {
-      const optionId = Array.isArray(raw) ? raw[0] : raw;
-      const opt = question.options?.find((o) => o.id === optionId);
-      return opt?.text ?? String(optionId ?? "");
-    }
-
-    
-    if (question.type === "multi_select") {
-      const ids = Array.isArray(raw) ? raw : [raw];
-      const labels = ids
-        .map((id) => {
-          const opt = question.options?.find((o) => o.id === id);
-          return opt?.text ?? String(id ?? "");
-        })
-        .filter(Boolean);
+    // --- CASE: SELECT / MULTI-SELECT ---
+    if ((question.type === "single_select" || question.type === "multi_select") && question.options) {
+      const ids = Array.isArray(val) ? val : [val];
+      const labels = ids.map((id: string) => {
+        const opt = question.options?.find((o) => o.id === id);
+        return opt ? opt.text : id;
+      });
       return labels.join(", ");
     }
 
-    
-    return Array.isArray(raw) ? raw.join(", ") : String(raw ?? "");
+    // --- CASE: ARRAY (Generic) ---
+    if (Array.isArray(val)) {
+      return val.join(", ");
+    }
+
+    return String(val);
   };
 
-
-  const generateExcel = () => {
+  // 3. Handle Excel Export
+  const handleExport = () => {
     try {
-      const filteredAnswers = questionnaireAnswers.filter(
-        (answer) => answer.locationId === locationId
-      );
-
-      if (filteredAnswers.length === 0 && questions.length === 0) {
-        toast.error("No data available to export");
-        return;
-      }
-
-      
-      const excelData = questions.map((question) => {
-        const answer = filteredAnswers.find(
-          (a) => a.questionId === question.id
-        );
+      const exportData = filteredAnswers.map((ans) => {
+        const question = questions.find((q) => q.id === ans.questionId);
+        const location = locations.find((l) => l.id === ans.locationId);
         
-        const answerText = answer 
-          ? formatAnswerForDisplay(answer) 
-          : "-";
-
-        const answeredBy = answer?.answeredBy 
-          ? `${answer.answeredBy} (${new Date(answer.answeredOn).toLocaleDateString()})` 
-          : "-";
-
         return {
-          "Question": question.text,
-          "Answer": answerText,
-          "Answered By": answeredBy
+          "Date": new Date(ans.answeredOn).toLocaleDateString(),
+          "Time": new Date(ans.answeredOn).toLocaleTimeString(),
+          "Location": location?.name || "Unknown Location",
+          "Question": question?.text || "Deleted Question",
+          "Answer": formatAnswer(ans.answer, question, true), // Pass true to get text/url
+          "Answered By": ans.answeredBy || "Unknown User"
         };
       });
 
-      
-      const worksheet = XLSX.utils.json_to_sheet(excelData);
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(exportData);
 
-      
-      const colWidths = [
-        { wch: 40 }, 
-        { wch: 40 }, 
-        { wch: 30 }, 
+      // Auto-width columns
+      const wscols = [
+        { wch: 12 }, // Date
+        { wch: 10 }, // Time
+        { wch: 20 }, // Location
+        { wch: 40 }, // Question
+        { wch: 30 }, // Answer
+        { wch: 20 }, // User
       ];
-      worksheet["!cols"] = colWidths;
+      ws['!cols'] = wscols;
 
+      XLSX.utils.book_append_sheet(wb, ws, "Questionnaire Responses");
       
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, "Questionnaire");
-
+      const fileName = `Questionnaire_Responses_${new Date().toISOString().split('T')[0]}.xlsx`;
+      XLSX.writeFile(wb, fileName);
       
-      const safeName = locationName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-      const fileName = `questionnaire_responses_${safeName}.xlsx`;
-
-      
-      XLSX.writeFile(workbook, fileName);
-
-      toast.success("Excel file downloaded successfully");
+      toast.success("Questionnaire responses exported successfully");
     } catch (error) {
-      console.error("Excel generation error:", error);
-      toast.error("Failed to generate Excel file");
+      console.error("Export failed:", error);
+      toast.error("Failed to export responses");
     }
   };
-
-  
-  const generatePDF = () => {
-    try {
-      const locationAnswers = questionnaireAnswers.filter(
-        (answer) => answer.locationId === locationId
-      );
-
-      if (locationAnswers.length === 0) {
-        toast.error("No responses available for this location");
-        return;
-      }
-
-      const doc = new jsPDF();
-
-      
-      doc.setFontSize(18);
-      doc.setTextColor(40);
-      doc.text(`Audit Questionnaire Responses: ${locationName}`, 14, 22);
-
-      doc.setFontSize(12);
-      doc.setTextColor(100);
-      doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 30);
-
-      
-
-      
-      const head = [['Question', 'Answer', 'Answered By']];
-
-      
-      const body = locationAnswers
-      .map(answer => {
-        const question = getQuestionById(answer.questionId);
-        
-        
-        if (!question) return null;
-        
-        const questionText = doc.splitTextToSize(question.text, 80);
-        const answerText = doc.splitTextToSize(formatAnswerForDisplay(answer) || "-", 70);
-        
-        const answeredOn = new Date(answer.answeredOn).toLocaleString();
-        const answeredBy = answer.answeredBy
-          ? `${answer.answeredBy}\n${answeredOn}`
-          : `${answeredOn}`;
-          
-        return [questionText, answerText, answeredBy];
-      })
-      .filter(row => row !== null);
-
-      
-      autoTable(doc, {
-        head: head,
-        body: body,
-        startY: 40, 
-        theme: "grid",
-        styles: {
-          cellPadding: 3,
-          fontSize: 10,
-          valign: 'middle', 
-        },
-        headStyles: {
-          fillColor: [79, 70, 229], // Updated to Indigo-600
-          textColor: 255,
-          fontStyle: 'bold',
-        },
-        columnStyles: {
-          0: { cellWidth: 80 },  
-          1: { cellWidth: 70 },   
-          2: { cellWidth: 'auto' }, 
-        },
-      });
-
-      
-      
-      doc.addPage();
-      doc.setFontSize(12);
-      doc.setTextColor(0);
-      doc.text("Approval Sign-off", 14, 20);
-
-      doc.setFontSize(11);
-      doc.text("Auditor Signature: _______________________", 14, 40);
-      doc.text("Date: _______________________", 14, 50);
-
-      doc.text("Client Signature: _______________________", 14, 70);
-      doc.text("Date: _______________________", 14, 80);
-
-      doc.text("Approved By: _______________________", 14, 100);
-      doc.text("Role: _______________________", 14, 110);
-      doc.text("Date: _______________________", 14, 120);
-
-      doc.save(
-        `questionnaire-responses-${locationName
-          .replace(/\s+/g, "-")
-          .toLowerCase()}.pdf`
-      );
-
-      toast.success("PDF generated successfully");
-    } catch (error) {
-      console.error("PDF generation error:", error);
-      toast.error("Failed to generate PDF");
-    }
-  };
-
-  const filteredAnswers = questionnaireAnswers.filter(
-    (answer) => answer.locationId === locationId
-  );
 
   return (
-    <Card className="shadow-sm border-gray-200">
-      <CardHeader className="bg-gray-50/50 border-b border-gray-100">
-        <CardTitle className="flex items-center gap-2 text-gray-900">
-          <FileText className="h-5 w-5 text-indigo-600" />
-          Questionnaire Responses for {locationName}
-        </CardTitle>
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle>Recent Responses</CardTitle>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          className="gap-2"
+          onClick={handleExport}
+        >
+          <Download className="h-4 w-4" />
+          Export to Excel
+        </Button>
       </CardHeader>
-      <CardContent className="space-y-6 pt-6">
-        {questions.length > 0 ? (
-          <div className="space-y-6">
-            
-            <div className="flex justify-end gap-2">
-              <Button 
-                onClick={generateExcel} 
-                variant="outline" 
-                className="bg-white hover:bg-green-50 text-green-700 border-green-200 shadow-sm"
-              >
-                <FileSpreadsheet className="h-4 w-4 mr-2" />
-                Export Excel
-              </Button>
-              <Button 
-                onClick={generatePDF}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Export PDF
-              </Button>
-            </div>
+      <CardContent>
+        <div className="rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-gray-50">
+                <TableHead>Location</TableHead>
+                <TableHead className="w-[40%]">Question</TableHead>
+                <TableHead>Answer</TableHead>
+                <TableHead>Auditor</TableHead>
+                <TableHead className="text-right">Date</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredAnswers.map((ans) => {
+                const question = questions.find((q) => q.id === ans.questionId);
+                const location = locations.find((l) => l.id === ans.locationId);
 
-            <div className="space-y-4">
-              {questions.map((question) => {
-                const answer = filteredAnswers.find(
-                  (a) => a.questionId === question.id
-                );
-                
                 return (
-                  <div
-                    key={question.id}
-                    className="border border-gray-200 rounded-lg p-4 space-y-2 bg-gray-50/30 hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="font-medium text-gray-900">{question.text}</div>
-                    <div className="text-xs font-medium text-indigo-600 uppercase tracking-wider mb-2">
-                      {question.type === "text"
-                        ? "Text response"
-                        : question.type === "single_select"
-                        ? "Single choice"
-                        : question.type === "multi_select"
-                        ? "Multiple choice"
-                        : "Yes/No question"}
-                    </div>
-
-                    <div className="bg-white p-3 rounded-md border border-gray-200 shadow-sm">
-                      <p className="text-gray-700">{answer ? formatAnswerForDisplay(answer) : "-"}</p>
-                    </div>
-
-                    {answer && (
-                      <div className="text-xs text-gray-500 mt-2">
-                        {answer.answeredBy && <>Answered by <span className="font-medium">{answer.answeredBy}</span> on </>}
-                        {new Date(answer.answeredOn).toLocaleString()}
-                      </div>
-                    )}
-                  </div>
+                  <TableRow key={`${ans.questionId}-${ans.locationId}-${ans.answeredOn}`}>
+                    <TableCell className="font-medium">
+                      {location?.name || "Unknown"}
+                    </TableCell>
+                    <TableCell>
+                      {question?.text || <span className="text-gray-400 italic">Question Deleted</span>}
+                      {question?.required && <span className="text-red-500 ml-1">*</span>}
+                    </TableCell>
+                    <TableCell>
+                      {/* Render UI Component (Link or Text) */}
+                      {formatAnswer(ans.answer, question, false)}
+                    </TableCell>
+                    <TableCell className="text-sm text-gray-500">
+                      {ans.answeredBy || "-"}
+                    </TableCell>
+                    <TableCell className="text-right text-xs text-gray-400">
+                      {new Date(ans.answeredOn).toLocaleDateString()}
+                    </TableCell>
+                  </TableRow>
                 );
               })}
-            </div>
-          </div>
-        ) : (
-          <Alert className="bg-indigo-50 border-indigo-100 text-indigo-800">
-            <AlertCircle className="h-4 w-4 text-indigo-600" />
-            <AlertTitle>No responses found</AlertTitle>
-            <AlertDescription>
-              There are no questionnaire responses for this location yet.
-            </AlertDescription>
-          </Alert>
-        )}
+            </TableBody>
+          </Table>
+        </div>
       </CardContent>
     </Card>
   );

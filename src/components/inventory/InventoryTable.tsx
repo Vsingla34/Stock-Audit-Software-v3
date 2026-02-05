@@ -62,7 +62,6 @@ export const InventoryTable = () => {
             status: auditedItem.status,
             lastAudited: auditedItem.lastAudited,
             clientRemarks: item.clientRemarks, 
-            // Ensure customAttributes are passed through
             customAttributes: item.customAttributes || {}
           };
         }
@@ -108,19 +107,29 @@ export const InventoryTable = () => {
     userLocations,
   ]);
 
-  // --- NEW: Calculate Dynamic Columns ---
-  // We scan all visible items to see what unique keys exist in customAttributes
-  const dynamicColumns = useMemo(() => {
+  // 1. Identify all dynamic columns
+  const rawDynamicColumns = useMemo(() => {
     const keys = new Set<string>();
-    // Scan a subset (or all) to find keys. 
-    // Scanning filteredData ensures we only show columns relevant to current view.
     locationFilteredData.forEach(item => {
       if (item.customAttributes) {
         Object.keys(item.customAttributes).forEach(k => keys.add(k));
       }
     });
-    return Array.from(keys).sort(); // Sort alphabetically for consistency
+    return Array.from(keys).sort();
   }, [locationFilteredData]);
+
+  // 2. Detect "Unit Price" column
+  const priceColumnKey = useMemo(() => {
+    const priceKeywords = ['unit price', 'unit_price', 'price', 'rate', 'cost', 'mrp', 'unit cost'];
+    return rawDynamicColumns.find(col => priceKeywords.includes(col.toLowerCase()));
+  }, [rawDynamicColumns]);
+
+  // 3. Filter out the price column from generic dynamic columns
+  const displayDynamicColumns = useMemo(() => {
+    // Also filter out system generated value columns to avoid duplication
+    const excluded = [priceColumnKey, 'system_value', 'physical_value'].filter(Boolean);
+    return rawDynamicColumns.filter(col => !excluded.includes(col));
+  }, [rawDynamicColumns, priceColumnKey]);
 
   const filteredData = useMemo(() => {
     if (!searchQuery.trim()) return locationFilteredData;
@@ -131,12 +140,11 @@ export const InventoryTable = () => {
         item.sku.toLowerCase().includes(query) ||
         (item.name && item.name.toLowerCase().includes(query)) ||
         (item.category && item.category.toLowerCase().includes(query)) ||
-        // SEARCH SUPPORT: Also search inside custom attributes
-        dynamicColumns.some(col => 
+        displayDynamicColumns.some(col => 
             String(item.customAttributes?.[col] || "").toLowerCase().includes(query)
         )
     );
-  }, [locationFilteredData, searchQuery, dynamicColumns]);
+  }, [locationFilteredData, searchQuery, displayDynamicColumns]);
 
   const [visibleCount, setVisibleCount] = useState(ROW_LIMIT);
 
@@ -171,6 +179,20 @@ export const InventoryTable = () => {
       await updateItemRemark(id, tempRemark);
     }
     setEditingRemark(null);
+  };
+
+  const parsePrice = (val: any): number => {
+    if (!val) return 0;
+    if (typeof val === 'number') return val;
+    const cleanStr = String(val).replace(/[^0-9.-]+/g, "");
+    return parseFloat(cleanStr) || 0;
+  };
+
+  const formatCurrency = (val: number) => {
+    return new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(val);
   };
 
   const renderStatus = useCallback(
@@ -254,7 +276,7 @@ export const InventoryTable = () => {
         </div>
       </div>
 
-      <div className="rounded-md border bg-white overflow-x-auto"> {/* Added overflow-x-auto for many columns */}
+      <div className="rounded-md border bg-white overflow-x-auto"> 
         <Table>
           <TableHeader>
             <TableRow className="bg-gray-50">
@@ -262,12 +284,21 @@ export const InventoryTable = () => {
               <TableHead className="font-semibold min-w-[200px]">Name</TableHead>
               <TableHead className="font-semibold">Category</TableHead>
               
-              {/* --- NEW: Dynamic Headers --- */}
-              {dynamicColumns.map(colKey => (
+              {displayDynamicColumns.map(colKey => (
                 <TableHead key={colKey} className="font-semibold capitalize min-w-[100px]">
                   {colKey.replace(/_/g, ' ')}
                 </TableHead>
               ))}
+
+              {/* Price Columns (Conditional) */}
+              {priceColumnKey && (
+                <>
+                  <TableHead className="text-right font-semibold w-[100px] bg-indigo-50/50">Unit Price</TableHead>
+                  <TableHead className="text-right font-semibold w-[100px] bg-indigo-50/50">Sys Value</TableHead>
+                  <TableHead className="text-right font-semibold w-[100px] bg-indigo-50/50">Phy Value</TableHead>
+                  <TableHead className="text-right font-semibold w-[100px] bg-indigo-50/50">Val Var</TableHead> 
+                </>
+              )}
 
               <TableHead className="font-semibold">Location</TableHead>
               <TableHead className="text-center font-semibold w-[80px]">Sys Qty</TableHead>
@@ -282,7 +313,26 @@ export const InventoryTable = () => {
             {filteredData.length > 0 ? (
               visibleData.map((item, index) => {
                 const physicalQty = item.physicalQuantity ?? 0;
-                const isDiscrepancy = item.status === "discrepancy";
+                
+                // Price Calculation Logic
+                let unitPrice = 0;
+                let sysValue = 0;
+                let phyValue = 0;
+                let valueVariance = 0;
+
+                if (priceColumnKey) {
+                   const rawPrice = item.customAttributes?.[priceColumnKey];
+                   // Fallback to pre-calculated DB values if available, else calc on fly
+                   unitPrice = parsePrice(item.customAttributes?.['unit_price'] || rawPrice);
+                   sysValue = item.customAttributes?.['system_value'] 
+                      ? parsePrice(item.customAttributes['system_value']) 
+                      : unitPrice * item.systemQuantity;
+                   phyValue = item.customAttributes?.['physical_value'] 
+                      ? parsePrice(item.customAttributes['physical_value']) 
+                      : unitPrice * physicalQty;
+
+                   valueVariance = phyValue - sysValue;
+                }
 
                 return (
                   <TableRow
@@ -303,14 +353,30 @@ export const InventoryTable = () => {
                       </Badge>
                     </TableCell>
 
-                    {/* --- NEW: Dynamic Cells --- */}
-                    {dynamicColumns.map(colKey => (
+                    {displayDynamicColumns.map(colKey => (
                       <TableCell key={colKey} className="text-xs text-gray-600">
                         {item.customAttributes?.[colKey] !== undefined 
                           ? String(item.customAttributes[colKey]) 
                           : "-"}
                       </TableCell>
                     ))}
+
+                    {priceColumnKey && (
+                        <>
+                          <TableCell className="text-right text-xs font-mono bg-indigo-50/30">
+                            {formatCurrency(unitPrice)}
+                          </TableCell>
+                          <TableCell className="text-right text-xs font-mono bg-indigo-50/30 font-medium text-gray-700">
+                            {formatCurrency(sysValue)}
+                          </TableCell>
+                          <TableCell className={`text-right text-xs font-mono bg-indigo-50/30 font-medium ${item.status === 'discrepancy' ? 'text-red-600' : 'text-green-600'}`}>
+                            {formatCurrency(phyValue)}
+                          </TableCell>
+                          <TableCell className={`text-right text-xs font-mono bg-indigo-50/30 font-bold ${valueVariance < 0 ? 'text-red-600' : valueVariance > 0 ? 'text-green-600' : 'text-gray-500'}`}>
+                            {formatCurrency(valueVariance)}
+                          </TableCell>
+                        </>
+                    )}
 
                     <TableCell className="text-xs">
                       {item.location}
@@ -351,12 +417,12 @@ export const InventoryTable = () => {
                         </div>
                       ) : (
                         <div 
-                          className={`text-xs flex items-center gap-2 min-h-[20px] ${canEditRemarks && isDiscrepancy ? "cursor-pointer hover:bg-black/5 rounded px-1 -ml-1" : ""}`}
-                          onClick={() => canEditRemarks && isDiscrepancy ? handleRemarkStart(item.id, item.clientRemarks || "") : undefined}
+                          className={`text-xs flex items-center gap-2 min-h-[20px] ${canEditRemarks && item.status === 'discrepancy' ? "cursor-pointer hover:bg-black/5 rounded px-1 -ml-1" : ""}`}
+                          onClick={() => canEditRemarks && item.status === 'discrepancy' ? handleRemarkStart(item.id, item.clientRemarks || "") : undefined}
                         >
                           {item.clientRemarks ? (
                             <span className="text-gray-700">{item.clientRemarks}</span>
-                          ) : canEditRemarks && isDiscrepancy ? (
+                          ) : canEditRemarks && item.status === 'discrepancy' ? (
                             <span className="text-muted-foreground italic flex items-center gap-1">
                               <MessageSquare className="h-3 w-3" /> Add remark
                             </span>
@@ -371,7 +437,10 @@ export const InventoryTable = () => {
               })
             ) : (
               <TableRow>
-                <TableCell colSpan={10 + dynamicColumns.length} className="text-center py-8 text-muted-foreground">
+                <TableCell 
+                    colSpan={10 + displayDynamicColumns.length + (priceColumnKey ? 4 : 0)} 
+                    className="text-center py-8 text-muted-foreground"
+                >
                   No data found.
                 </TableCell>
               </TableRow>

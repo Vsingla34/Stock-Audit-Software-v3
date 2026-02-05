@@ -22,7 +22,6 @@ interface QuestionFormProps {
   onCancel: () => void;
 }
 
-
 export const QuestionForm = ({ question, onSave, onCancel }: QuestionFormProps) => {
   const { addQuestion, updateQuestion } = useInventory();
 
@@ -132,6 +131,8 @@ export const QuestionForm = ({ question, onSave, onCancel }: QuestionFormProps) 
                 <SelectItem value="single_select">Single Select</SelectItem>
                 <SelectItem value="multi_select">Multiple Select</SelectItem>
                 <SelectItem value="yes_no">Yes/No</SelectItem>
+                {/* --- NEW: File Upload Option --- */}
+                <SelectItem value="file">File Upload (Photo/Doc)</SelectItem>
               </SelectContent>
             </Select>
           </div>

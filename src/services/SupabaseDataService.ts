@@ -20,6 +20,25 @@ class SupabaseDataService {
     this.currentUser = data.user;
   }
 
+  public async uploadFile(file: File, path: string): Promise<string> {
+    const { error } = await supabase.storage
+      .from("audit-attachments")
+      .upload(path, file, {
+        upsert: true,
+      });
+
+    if (error) {
+      console.error("Upload error:", error);
+      throw error;
+    }
+
+    const { data: publicUrlData } = supabase.storage
+      .from("audit-attachments")
+      .getPublicUrl(path);
+
+    return publicUrlData.publicUrl;
+  }
+
   public async getAssignments(companyId?: string): Promise<Assignment[]> {
     let query = supabase.from("assignments").select("*");
     if (companyId) {
