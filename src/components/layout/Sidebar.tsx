@@ -11,9 +11,9 @@ import {
   LogOut,
   Upload,
   ListChecks,
-  Building2,
   History,
   ArrowLeftRight,
+  X, // Close Icon
 } from "lucide-react";
 import { useUser } from "@/context/UserContext";
 import { Button } from "@/components/ui/button";
@@ -23,35 +23,30 @@ import logo from "../../../public/logo.png";
 
 const companyNameCache: Record<string, string> = {};
 
-export function Sidebar({
-  isMobile,
-  setMobileOpen,
-}: {
+interface SidebarProps {
   isMobile?: boolean;
-  setMobileOpen?: (open: boolean) => void;
-}) {
+  onClose?: () => void;
+}
+
+export function Sidebar({ isMobile, onClose }: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { isAuthenticated, logout } = useUser();
   const { accessibleLocations, userRole, userRoleDisplay } = useUserAccess();
   const { selectedCompanyId } = useCompany();
 
-  const [currentCompanyName, setCurrentCompanyName] = useState<string | null>(
-    null
-  );
+  const [currentCompanyName, setCurrentCompanyName] = useState<string | null>(null);
 
   const fetchCompanyName = useCallback(async () => {
     if (!selectedCompanyId) {
       setCurrentCompanyName(null);
       return;
     }
-
     const cached = companyNameCache[selectedCompanyId];
     if (cached) {
       setCurrentCompanyName(cached);
       return;
     }
-
     try {
       const { data, error } = await supabase
         .from("companies")
@@ -60,11 +55,8 @@ export function Sidebar({
         .single();
 
       if (error) throw error;
-
       const name = data?.name || null;
-      if (name) {
-        companyNameCache[selectedCompanyId] = name;
-      }
+      if (name) companyNameCache[selectedCompanyId] = name;
       setCurrentCompanyName(name);
     } catch (err) {
       console.error("Error fetching current company:", err);
@@ -82,23 +74,19 @@ export function Sidebar({
   const navigation = useMemo(() => {
     const nav = [{ name: "Dashboard", href: "/", icon: Home }];
     
-    // Scanner: Visible to Super Admin, Admin, Auditor
     if (["super_admin", "admin", "auditor"].includes(userRole)) {
       nav.push({ name: "Scanner", href: "/scanner", icon: ScanBarcode });
     }
 
-    // Search: Hidden for Clients
     if (userRole !== "client") {
       nav.push({ name: "Search", href: "/search", icon: Search });
     }
 
-    // Reports and History: Visible to everyone
     nav.push(
       { name: "Reports", href: "/reports", icon: FileSpreadsheet },
       { name: "History", href: "/history", icon: History }
     );
 
-    // Analytics: Hidden for Auditors
     if (userRole !== "auditor") {
       nav.push({ name: "Analytics", href: "/analytics", icon: BarChart3 });
     }
@@ -113,24 +101,35 @@ export function Sidebar({
       nav.push({ name: "Upload Data", href: "/upload", icon: Upload });
     }
     
-    // REMOVED: "Company" / Add Company link from Sidebar
-    // Users access this via the Company Selection screen now.
-
     nav.push({ name: "My Profile", href: "/profile", icon: UserCircle });
     return nav;
   }, [userRole]);
 
-  const handleLogout = () => logout();
+  const handleLogout = () => {
+    if (isMobile && onClose) onClose();
+    logout();
+  };
+
   const handleLinkClick = () => {
-    if (isMobile && setMobileOpen) setMobileOpen(false);
+    if (isMobile && onClose) onClose();
   };
 
   return (
-    <aside className="flex h-full w-64 flex-col overflow-y-auto border-r border-indigo-500 bg-indigo-600 px-5 py-8 text-white">
+    <aside className="relative flex h-full w-full md:w-64 flex-col overflow-y-auto border-r border-indigo-500 bg-indigo-600 px-5 py-8 text-white">
+      {/* Mobile Close Button (X) */}
+      {isMobile && (
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 p-2 text-indigo-200 hover:text-white md:hidden"
+        >
+          <X className="h-6 w-6" />
+        </button>
+      )}
+
       <div className="flex flex-col h-full">
         <div>
           <div className="space-y-4">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 mt-4 md:mt-0">
               <div className="relative p-2 bg-white rounded-lg w-full flex justify-center shadow-sm">
                  <img src={logo} alt="Software Logo" className="h-auto w-32 object-contain" />
               </div>
@@ -197,11 +196,10 @@ export function Sidebar({
 
         {/* Footer Actions */}
         <div className="mt-auto pt-6 border-t border-indigo-500 space-y-2">
-          
           <Button
             variant="ghost"
             className="w-full justify-start text-indigo-100 hover:bg-indigo-700 hover:text-white transition-colors"
-            onClick={() => navigate("/assignment-selection")}
+            onClick={() => { handleLinkClick(); navigate("/assignment-selection"); }}
           >
             <ArrowLeftRight className="mr-3 h-5 w-5" />
             <span>Exit Assignment</span>
