@@ -40,19 +40,16 @@ export const LocationMaster = () => {
   const [currentCompanyName, setCurrentCompanyName] = useState<string | null>(null);
   const [companyLoaded, setCompanyLoaded] = useState(false);
   const [companies, setCompanies] = useState<Company[]>([]);
-
   
   const isSuperAdmin = userRole === "super_admin";
   const isAdmin = userRole === "admin";
   const isClient = userRole === "client";
   const isAuditor = userRole === "auditor";
 
-  
   const canAddLocation = isSuperAdmin || isAdmin || isClient;
   const canEditLocation = isSuperAdmin || isAdmin;
   const canDeleteLocation = isSuperAdmin || isAdmin;
 
-  
   useEffect(() => {
     const fetchCompanies = async () => {
       try {
@@ -70,7 +67,6 @@ export const LocationMaster = () => {
     };
     fetchCompanies();
   }, []);
-
   
   useEffect(() => {
     const fetchCurrentCompanyName = async () => {
@@ -98,7 +94,6 @@ export const LocationMaster = () => {
     setCompanyLoaded(false);
     fetchCurrentCompanyName();
   }, [selectedCompanyId]);
-
   
   const handleAddLocation = async (newLocation: Omit<Location, "id">) => {
     try {
@@ -161,7 +156,8 @@ export const LocationMaster = () => {
   return (
     <Card className="shadow-sm border-gray-200">
       <CardHeader className="border-b border-gray-100 pb-4">
-        <CardTitle className="flex items-center justify-between">
+        {/* RESPONSIVE: flex-col on mobile, flex-row on md+ */}
+        <CardTitle className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-2 text-gray-900">
             <Building className="h-5 w-5 text-indigo-600" />
             <span>Location Master</span>
@@ -171,7 +167,7 @@ export const LocationMaster = () => {
             <Button 
               onClick={() => setIsAdding(true)} 
               size="sm" 
-              className="h-9 bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-all"
+              className="h-9 w-full md:w-auto bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-all"
             >
               <Plus className="mr-1 h-4 w-4" />
               Add Location
@@ -210,16 +206,17 @@ export const LocationMaster = () => {
               </div>
             )}
 
-            <div className="rounded-md border border-gray-200 overflow-hidden">
+            {/* RESPONSIVE: Added overflow-x-auto for horizontal scrolling */}
+            <div className="rounded-md border border-gray-200 overflow-x-auto">
               <Table>
                 <TableHeader className="bg-gray-50/50">
                   <TableRow>
-                    <TableHead className="font-semibold text-gray-700">Name</TableHead>
-                    <TableHead className="font-semibold text-gray-700">Description</TableHead>
-                    <TableHead className="font-semibold text-gray-700">Company</TableHead>
-                    <TableHead className="font-semibold text-gray-700">Status</TableHead>
-                    <TableHead className="font-semibold text-gray-700">Items</TableHead>
-                    <TableHead className="text-right font-semibold text-gray-700">Actions</TableHead>
+                    <TableHead className="font-semibold text-gray-700 min-w-[150px]">Name</TableHead>
+                    <TableHead className="font-semibold text-gray-700 min-w-[200px]">Description</TableHead>
+                    <TableHead className="font-semibold text-gray-700 min-w-[150px]">Company</TableHead>
+                    <TableHead className="font-semibold text-gray-700 w-[100px]">Status</TableHead>
+                    <TableHead className="font-semibold text-gray-700 w-[100px]">Items</TableHead>
+                    <TableHead className="text-right font-semibold text-gray-700 min-w-[120px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

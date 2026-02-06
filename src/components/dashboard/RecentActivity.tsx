@@ -7,6 +7,7 @@ import { useUser } from "@/context/UserContext";
 import { useUserAccess } from "@/hooks/useUserAccess";
 import { useCompany } from "@/context/CompanyContext";
 import { useLocationFilter } from "@/hooks/useLocationFilter";
+import { ScrollArea } from "@/components/ui/scroll-area"; // Added ScrollArea
 
 export const RecentActivity = () => {
   const { auditedItems, locations, assignments } = useInventory();
@@ -30,7 +31,6 @@ export const RecentActivity = () => {
   }, [locations]);
 
   const filteredItems = useMemo(() => {
-    // Determine strict assignment location constraint
     let assignmentLocationName: string | null = null;
     if (selectedAssignmentId) {
        const ass = assignments.find((a: Assignment) => a.id === Number(selectedAssignmentId));
@@ -41,15 +41,12 @@ export const RecentActivity = () => {
     }
 
     return auditedItems.filter((item) => {
-      // Basic Status Check
       if (!item.status || item.status === "pending") return false;
 
-      // Assignment Filter (Strict)
       if (assignmentLocationName && item.location !== assignmentLocationName) {
         return false;
       }
       
-      // Assignment ID Filter (Double check if item belongs to this assignment)
       if (selectedAssignmentId && item.assignmentId && item.assignmentId !== Number(selectedAssignmentId)) {
         return false;
       }
@@ -57,19 +54,16 @@ export const RecentActivity = () => {
       const itemLocation = locationByName.get(item.location);
       if (!itemLocation) return false;
 
-      // Company Filter
       if (selectedCompanyId && itemLocation.companyId !== selectedCompanyId) {
         return false;
       }
 
-      // Role-Based Location Access Check
       const hasAccess = 
         currentUser?.role === "admin" || 
         accessibleLocationNames.includes(item.location);
 
       if (!hasAccess) return false;
 
-      // Dashboard Location Filter
       if (selectedLocation && selectedLocation !== "all") {
         const locationObj = locations.find((loc) => loc.id === selectedLocation);
         return item.location === locationObj?.name;
@@ -89,8 +83,6 @@ export const RecentActivity = () => {
     assignments
   ]);
 
-  // FIX: Flatten logic to show individual scan events if multiple occur
-  // But keeping your exact UI structure (Item centric)
   const recentItems = useMemo(() => {
     return [...filteredItems]
       .sort((a, b) => {
@@ -98,12 +90,12 @@ export const RecentActivity = () => {
         const dateB = b.lastAudited ? new Date(b.lastAudited).getTime() : 0;
         return dateB - dateA;
       })
-      .slice(0, 5);
+      .slice(0, 10); // Increased to 10 to show scrolling capability
   }, [filteredItems]);
 
   if (recentItems.length === 0) {
     return (
-      <Card className="shadow-sm border-gray-200">
+      <Card className="shadow-sm border-gray-200 h-full">
         <CardHeader>
           <CardTitle className="text-gray-900">Recent Activity</CardTitle>
         </CardHeader>
@@ -119,60 +111,63 @@ export const RecentActivity = () => {
   }
 
   return (
-    <Card className="shadow-sm border-gray-200">
-      <CardHeader>
-        <CardTitle className="flex items-center justify-between text-gray-900">
+    <Card className="shadow-sm border-gray-200 h-full flex flex-col">
+      <CardHeader className="pb-3 border-b border-gray-100 bg-gray-50/30 shrink-0">
+        <CardTitle className="flex items-center justify-between text-gray-900 text-base">
           <span>Recent Activity</span>
           {currentUser?.role !== "admin" && userAccessibleLocations.length > 0 && (
-            <span className="text-xs font-normal text-muted-foreground">
+            <span className="text-xs font-normal text-muted-foreground hidden sm:inline-block">
               Your locations only
             </span>
           )}
         </CardTitle>
       </CardHeader>
-      <CardContent>
-        <div className="space-y-4">
-          {recentItems.map((item, index) => (
-            <div
-              key={`${item.id}-${item.lastAudited}-${index}`}
-              className="flex items-start gap-3 pb-3 border-b border-gray-100 last:border-0 last:pb-0"
-            >
-              <div className="mt-1">
-                {item.status === "matched" ? (
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-green-100">
-                    <Check className="h-4 w-4 text-green-600" />
-                  </div>
-                ) : (
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-red-100">
-                    <X className="h-4 w-4 text-red-600" />
-                  </div>
-                )}
-              </div>
+      
+      <CardContent className="p-0 flex-1 min-h-0">
+        <ScrollArea className="h-[400px] lg:h-[calc(100%-10px)]">
+          <div className="space-y-0">
+            {recentItems.map((item, index) => (
+              <div
+                key={`${item.id}-${item.lastAudited}-${index}`}
+                className="flex items-start gap-3 p-4 border-b border-gray-100 last:border-0 hover:bg-gray-50 transition-colors"
+              >
+                <div className="mt-1 shrink-0">
+                  {item.status === "matched" ? (
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-green-100">
+                      <Check className="h-4 w-4 text-green-600" />
+                    </div>
+                  ) : (
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-red-100">
+                      <X className="h-4 w-4 text-red-600" />
+                    </div>
+                  )}
+                </div>
 
-              <div className="flex-1 min-w-0">
-                <p className="font-medium truncate text-gray-900">{item.name || "Unnamed Item"}</p>
-                <p className="text-sm text-gray-500">
-                  {item.sku} - {item.location}
-                </p>
-              </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium truncate text-gray-900 text-sm">{item.name || "Unnamed Item"}</p>
+                  <p className="text-xs text-gray-500 truncate">
+                    {item.sku} - {item.location}
+                  </p>
+                </div>
 
-              <div className="text-right flex-shrink-0">
-                <p
-                  className={`font-medium ${
-                    item.status === "matched"
-                      ? "text-green-600"
-                      : "text-red-600"
-                  }`}
-                >
-                  {item.physicalQuantity} / {item.systemQuantity}
-                </p>
-                <p className="text-xs text-gray-400">
-                  {item.lastAudited ? format(new Date(item.lastAudited), "dd MMM, HH:mm") : "Just now"}
-                </p>
+                <div className="text-right flex-shrink-0 ml-2">
+                  <p
+                    className={`font-medium text-sm ${
+                      item.status === "matched"
+                        ? "text-green-600"
+                        : "text-red-600"
+                    }`}
+                  >
+                    {item.physicalQuantity} / {item.systemQuantity}
+                  </p>
+                  <p className="text-xs text-gray-400 whitespace-nowrap">
+                    {item.lastAudited ? format(new Date(item.lastAudited), "dd MMM, HH:mm") : "Just now"}
+                  </p>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </ScrollArea>
       </CardContent>
     </Card>
   );

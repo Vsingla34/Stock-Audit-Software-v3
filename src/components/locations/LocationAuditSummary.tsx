@@ -85,7 +85,8 @@ export const LocationAuditSummary = ({
           )}
 
           {locationSummary ? (
-            <div className="mt-4 grid grid-cols-2 gap-4">
+            // RESPONSIVE FIX: Stack on mobile (grid-cols-1), 2 cols on tablet/desktop
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="rounded-lg bg-indigo-50 p-4 border border-indigo-100">
                 <div className="text-sm text-indigo-600 font-medium">Total Items</div>
                 <div className="text-2xl font-bold text-gray-900">{locationSummary.totalItems}</div>

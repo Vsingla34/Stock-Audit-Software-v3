@@ -14,7 +14,7 @@ import { supabase } from "@/integrations/supabase/client";
 const Index = () => {
   const { canUploadData, canPerformAudits, isClientUser } = useUserAccess();
   const { currentUser } = useUser();
-  const { selectedCompanyId, selectedAssignmentId } = useCompany(); // Destructure assignment ID
+  const { selectedCompanyId, selectedAssignmentId } = useCompany();
   const [companyName, setCompanyName] = useState<string>("");
 
   useEffect(() => {
@@ -41,20 +41,21 @@ const Index = () => {
 
   return (
     <AppLayout>
-      <div className="space-y-6">
+      <div className="space-y-6 w-full max-w-full overflow-x-hidden">
+        {/* Header Section */}
         <div className="flex flex-col md:flex-row justify-between items-start gap-4">
           <div className="flex flex-col gap-1">
-            <h1 className="text-3xl font-bold tracking-tight text-gray-900">
+            <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-900">
               Welcome back, <span className="text-indigo-600">{currentUser?.name}</span>
             </h1>
-            <p className="text-lg text-muted-foreground">
+            <p className="text-base md:text-lg text-muted-foreground">
               Dashboard
             </p>
           </div>
 
-          <div className="text-right hidden md:block">
+          <div className="text-left md:text-right w-full md:w-auto">
             {companyName && (
-              <h2 className="text-2xl font-bold tracking-tight text-gray-900">
+              <h2 className="text-xl md:text-2xl font-bold tracking-tight text-gray-900 truncate">
                 {companyName}
               </h2>
             )}
@@ -66,15 +67,22 @@ const Index = () => {
           </div>
         </div>
 
+        {/* Inventory Overview Component */}
         <InventoryOverview />
 
-        <div className="grid gap-6 md:grid-cols-2">
-          <RecentActivity />
+        {/* Main Grid: Activity & Actions */}
+        <div className="grid gap-6 grid-cols-1 lg:grid-cols-2">
+          {/* Recent Activity: constrained height for mobile matching */}
+          <div className="h-full min-h-[400px]">
+             <RecentActivity />
+          </div>
           
+          {/* Quick Actions */}
           <div className="space-y-4">
             <h2 className="text-lg font-medium text-gray-900">Quick Actions</h2>
             
-            <div className="grid gap-4 grid-cols-2">
+            {/* Mobile: Stack (1 col), Tablet+: 2 Cols */}
+            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
               {isClient ? (
                 <>
                   <Button asChild className="h-24 flex flex-col bg-indigo-600 hover:bg-indigo-700 text-white border-none shadow-md transition-all">
@@ -109,7 +117,7 @@ const Index = () => {
             </div>
             
             {(canUploadData() || canPerformAudits()) && !isClient && (
-              <div className="grid gap-4 grid-cols-2 mt-2">
+              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 mt-2">
                 {canUploadData() && (
                   <Button asChild variant="outline" className="h-24 flex flex-col bg-white hover:bg-indigo-50 border-gray-200 text-gray-700 hover:text-indigo-700 shadow-sm transition-all">
                     <Link to="/upload">
@@ -131,12 +139,16 @@ const Index = () => {
           </div>
         </div>
 
+        {/* Inventory Table Section */}
         <div>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-medium text-gray-900">Inventory Status</h2>
           </div>
           
-          <InventoryTable />
+          {/* Ensure table has horizontal scroll on small screens */}
+          <div className="overflow-x-auto">
+             <InventoryTable />
+          </div>
         </div>
       </div>
     </AppLayout>
