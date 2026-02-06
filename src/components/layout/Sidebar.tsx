@@ -13,7 +13,7 @@ import {
   ListChecks,
   History,
   ArrowLeftRight,
-  X, // Close Icon
+  X,
 } from "lucide-react";
 import { useUser } from "@/context/UserContext";
 import { Button } from "@/components/ui/button";
@@ -71,21 +71,15 @@ export function Sidebar({ isMobile, onClose }: SidebarProps) {
   if (location.pathname === "/login") return null;
   if (!isAuthenticated) return null;
 
-  const navigation = useMemo(() => {
+  // 1. TOP SECTION (Information & View Items)
+  const mainNavigation = useMemo(() => {
     const nav = [{ name: "Dashboard", href: "/", icon: Home }];
     
-    if (["super_admin", "admin", "auditor"].includes(userRole)) {
-      nav.push({ name: "Scanner", href: "/scanner", icon: ScanBarcode });
-    }
-
     if (userRole !== "client") {
       nav.push({ name: "Search", href: "/search", icon: Search });
     }
 
-    nav.push(
-      { name: "Reports", href: "/reports", icon: FileSpreadsheet },
-      { name: "History", href: "/history", icon: History }
-    );
+    nav.push({ name: "History", href: "/history", icon: History });
 
     if (userRole !== "auditor") {
       nav.push({ name: "Analytics", href: "/analytics", icon: BarChart3 });
@@ -96,12 +90,29 @@ export function Sidebar({ isMobile, onClose }: SidebarProps) {
       href: "/questionnaire",
       icon: ListChecks,
     });
+    
+    nav.push({ name: "My Profile", href: "/profile", icon: UserCircle });
+    
+    return nav;
+  }, [userRole]);
 
+  // 2. BOTTOM SECTION (Action Items: Scan, Report, Upload)
+  const actionNavigation = useMemo(() => {
+    const nav = [];
+
+    // Scanner (Primary Action)
+    if (["super_admin", "admin", "auditor"].includes(userRole)) {
+      nav.push({ name: "Scanner", href: "/scanner", icon: ScanBarcode });
+    }
+
+    // Reports (Key Output)
+    nav.push({ name: "Reports", href: "/reports", icon: FileSpreadsheet });
+
+    // Upload (Admin Action)
     if (["super_admin", "admin", "auditor"].includes(userRole)) {
       nav.push({ name: "Upload Data", href: "/upload", icon: Upload });
     }
-    
-    nav.push({ name: "My Profile", href: "/profile", icon: UserCircle });
+
     return nav;
   }, [userRole]);
 
@@ -115,19 +126,30 @@ export function Sidebar({ isMobile, onClose }: SidebarProps) {
   };
 
   return (
-    <aside className="relative flex h-full w-full md:w-64 flex-col overflow-y-auto border-r border-indigo-500 bg-indigo-600 px-5 py-8 text-white">
-      {/* Mobile Close Button (X) */}
-      {isMobile && (
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 p-2 text-indigo-200 hover:text-white md:hidden"
-        >
-          <X className="h-6 w-6" />
-        </button>
-      )}
+    <>
+      <style>{`
+        .no-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+        .no-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+      `}</style>
+      <aside className="relative flex h-full w-full md:w-64 flex-col overflow-y-auto no-scrollbar border-r border-indigo-500 bg-indigo-600 px-5 py-6 text-white">
+        
+        {/* Mobile Close Button */}
+        {isMobile && (
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 p-2 text-indigo-200 hover:text-white md:hidden"
+          >
+            <X className="h-6 w-6" />
+          </button>
+        )}
 
-      <div className="flex flex-col h-full">
-        <div>
+        <div className="flex flex-col h-full">
+          {/* --- HEADER SECTION --- */}
           <div className="space-y-4">
             <div className="flex items-center gap-2 mt-4 md:mt-0">
               <div className="relative p-2 bg-white rounded-lg w-full flex justify-center shadow-sm">
@@ -156,7 +178,7 @@ export function Sidebar({ isMobile, onClose }: SidebarProps) {
               {userRole !== "super_admin" && accessibleLocations.length > 0 && (
                 <div className="mt-1.5">
                   <p className="text-[10px] text-indigo-300 mb-1">Assigned locations:</p>
-                  <div className="max-h-20 overflow-y-auto pr-1 space-y-1">
+                  <div className="max-h-20 overflow-y-auto pr-1 space-y-1 no-scrollbar">
                     {accessibleLocations.map((loc) => (
                       <div key={loc.id} className="text-[10px] py-0.5 px-2 bg-indigo-800 rounded text-indigo-100 truncate">
                         {loc.name}
@@ -168,8 +190,9 @@ export function Sidebar({ isMobile, onClose }: SidebarProps) {
             </div>
           </div>
 
+          {/* --- MAIN NAVIGATION (Top) --- */}
           <nav className="flex flex-col space-y-1 mt-6">
-            {navigation.map((item) => {
+            {mainNavigation.map((item) => {
               const isActive = location.pathname === item.href;
               return (
                 <Link
@@ -192,35 +215,68 @@ export function Sidebar({ isMobile, onClose }: SidebarProps) {
               );
             })}
           </nav>
-        </div>
 
-        {/* Footer Actions */}
-        <div className="mt-auto pt-6 border-t border-indigo-500 space-y-2">
-          <Button
-            variant="ghost"
-            className="w-full justify-start text-indigo-100 hover:bg-indigo-700 hover:text-white transition-colors"
-            onClick={() => { handleLinkClick(); navigate("/assignment-selection"); }}
-          >
-            <ArrowLeftRight className="mr-3 h-5 w-5" />
-            <span>Exit Assignment</span>
-          </Button>
+          {/* --- ACTION NAVIGATION (Bottom Pinned) --- */}
+          <div className="mt-auto">
+             <div className="pt-4 pb-2">
+                <p className="px-3 text-xs font-semibold text-indigo-300 uppercase tracking-wider mb-2">
+                  Quick Actions
+                </p>
+                <nav className="flex flex-col space-y-1">
+                  {actionNavigation.map((item) => {
+                    const isActive = location.pathname === item.href;
+                    return (
+                      <Link
+                        key={item.name}
+                        to={item.href}
+                        onClick={handleLinkClick}
+                        className={`group flex items-center rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
+                          isActive
+                            ? "bg-white text-indigo-600 shadow-md"
+                            : "text-indigo-100 hover:bg-indigo-700 hover:text-white"
+                        }`}
+                      >
+                        <item.icon
+                          className={`mr-3 h-5 w-5 transition-colors ${
+                            isActive ? "text-indigo-600" : "text-indigo-300 group-hover:text-white"
+                          }`}
+                        />
+                        <span>{item.name}</span>
+                      </Link>
+                    );
+                  })}
+                </nav>
+             </div>
 
-          <Button
-            variant="ghost"
-            className="w-full justify-start text-indigo-100 hover:bg-indigo-700 hover:text-white transition-colors"
-            onClick={handleLogout}
-          >
-            <LogOut className="mr-3 h-5 w-5" />
-            <span>Log out</span>
-          </Button>
-          
-          <div className="mt-4 px-2 text-center">
-            <p className="text-xs text-indigo-300 font-medium">
-              &copy; {new Date().getFullYear()} StockCheck360
-            </p>
+             {/* Footer Actions (Exit/Logout) */}
+             <div className="pt-4 border-t border-indigo-500 space-y-2">
+                <Button
+                  variant="ghost"
+                  className="w-full justify-start text-indigo-100 hover:bg-indigo-700 hover:text-white transition-colors"
+                  onClick={() => { handleLinkClick(); navigate("/assignment-selection"); }}
+                >
+                  <ArrowLeftRight className="mr-3 h-5 w-5" />
+                  <span>Exit Assignment</span>
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  className="w-full justify-start text-indigo-100 hover:bg-indigo-700 hover:text-white transition-colors"
+                  onClick={handleLogout}
+                >
+                  <LogOut className="mr-3 h-5 w-5" />
+                  <span>Log out</span>
+                </Button>
+                
+                <div className="mt-2 px-2 text-center">
+                  <p className="text-[10px] text-indigo-300/60 font-medium">
+                    &copy; {new Date().getFullYear()} StockCheck360
+                  </p>
+                </div>
+             </div>
           </div>
         </div>
-      </div>
-    </aside>
+      </aside>
+    </>
   );
 }
