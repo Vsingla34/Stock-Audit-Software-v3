@@ -41,7 +41,6 @@ export const BarcodeScanner = () => {
                  toast.error("Location Required", { description: "No active assignment location found." });
                  return false; 
             }
-            
             const locationObj = locations.find(loc => loc.id === locationId);
             const locationName = locationObj?.name || '';
             
@@ -179,97 +178,81 @@ export const BarcodeScanner = () => {
     const handleStartScanning = async () => {
         if (!selectedLocation) { toast.error("Location required"); return; }
 
-        // Security Check
         if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
             toast.error("Protocol Error", { description: "Camera access requires HTTPS or localhost." });
             return;
         }
 
-        // Cleanup previous instance
-        if (html5QrCodeRef.current) {
-            try {
-                if (html5QrCodeRef.current.isScanning) {
-                    await html5QrCodeRef.current.stop();
-                }
-                html5QrCodeRef.current.clear();
-            } catch (e) { console.warn("Cleanup warning:", e); }
-        }
+        // 1. Force state FIRST to render the div
+        setIsScanning(true);
+        setIsHardwareScannerMode(false);
 
-        // Config
-        const config = {
-            fps: 10,
-            qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-                const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-                const size = Math.floor(minEdge * 0.7);
-                return { width: size, height: size };
-            },
-            disableFlip: false, 
-            formatsToSupport: [
-                Html5QrcodeSupportedFormats.QR_CODE,
-                Html5QrcodeSupportedFormats.CODE_128,
-                Html5QrcodeSupportedFormats.CODE_39,
-                Html5QrcodeSupportedFormats.EAN_13,
-                Html5QrcodeSupportedFormats.UPC_A,
-            ]
-        };
-
-        // Initialize
-        const html5QrCode = new Html5Qrcode(scannerElementId);
-        html5QrCodeRef.current = html5QrCode;
-
-        // Start Helper
-        const startCamera = async (cameraIdOrConfig: string | { facingMode: string }) => {
-            await html5QrCode.start(cameraIdOrConfig, config, onScanSuccess, () => {});
-        };
-
-        try {
-            // ATTEMPT 1: Get Cameras & Select Back Camera
-            try {
-                const devices = await Html5Qrcode.getCameras();
-                if (devices && devices.length > 0) {
-                     const backCamera = devices.find(d => d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('rear') || d.label.toLowerCase().includes('environment'));
-                     const deviceId = backCamera ? backCamera.id : devices[0].id;
-                     await startCamera(deviceId);
-                     setIsScanning(true);
-                     setIsHardwareScannerMode(false);
-                     return; // Success
-                }
-            } catch (cameraListError) {
-                console.warn("Could not list cameras (Permissions?):", cameraListError);
-                // Continue to fallback...
+        // 2. Wait for DOM to render the div
+        setTimeout(async () => {
+            if (html5QrCodeRef.current) {
+                try {
+                    if (html5QrCodeRef.current.isScanning) {
+                        await html5QrCodeRef.current.stop();
+                    }
+                    html5QrCodeRef.current.clear();
+                } catch (e) { console.warn("Cleanup warning:", e); }
             }
 
-            // ATTEMPT 2: Generic Environment (Back)
+            const html5QrCode = new Html5Qrcode(scannerElementId);
+            html5QrCodeRef.current = html5QrCode;
+
+            // Simple config - remove qrbox if it causes layout issues
+            const config = {
+                fps: 10,
+                aspectRatio: 1.0, 
+                qrbox: 250, 
+                disableFlip: false, 
+                formatsToSupport: [
+                    Html5QrcodeSupportedFormats.QR_CODE,
+                    Html5QrcodeSupportedFormats.CODE_128,
+                    Html5QrcodeSupportedFormats.CODE_39,
+                    Html5QrcodeSupportedFormats.EAN_13,
+                    Html5QrcodeSupportedFormats.UPC_A,
+                ]
+            };
+
+            const startCamera = async (cameraIdOrConfig: string | { facingMode: string }) => {
+                await html5QrCode.start(cameraIdOrConfig, config, onScanSuccess, () => {});
+            };
+
             try {
-                await startCamera({ facingMode: "environment" });
-                setIsScanning(true);
-                setIsHardwareScannerMode(false);
-                return; // Success
-            } catch (envError) {
-                console.warn("Environment camera failed:", envError);
-                // Continue to fallback...
+                // Attempt 1: Back Camera ID
+                try {
+                    const devices = await Html5Qrcode.getCameras();
+                    if (devices && devices.length > 0) {
+                         const backCamera = devices.find(d => d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('rear') || d.label.toLowerCase().includes('environment'));
+                         const deviceId = backCamera ? backCamera.id : devices[0].id;
+                         await startCamera(deviceId);
+                         return; 
+                    }
+                } catch (cameraListError) {
+                    console.warn("Listing cameras failed:", cameraListError);
+                }
+
+                // Attempt 2: Generic Environment
+                try {
+                    await startCamera({ facingMode: "environment" });
+                    return;
+                } catch (envError) {
+                    console.warn("Env camera failed:", envError);
+                }
+
+                // Attempt 3: User Camera
+                await startCamera({ facingMode: "user" });
+                toast.info("Using front camera (Rear camera unavailable)");
+
+            } catch (finalError: any) {
+                 console.error("FATAL:", finalError);
+                 setIsScanning(false);
+                 toast.error("Camera Failed", { description: "Could not start video stream." });
+                 html5QrCode.clear();
             }
-
-            // ATTEMPT 3: Generic User (Front)
-            await startCamera({ facingMode: "user" });
-            setIsScanning(true);
-            setIsHardwareScannerMode(false);
-            toast.info("Using front camera (Rear camera unavailable)");
-
-        } catch (finalError: any) {
-             console.error("FATAL: All camera attempts failed:", finalError);
-             
-             if (finalError.name === "NotAllowedError") {
-                 toast.error("Permission Denied", { description: "Please allow camera access in your browser settings." });
-             } else if (finalError.name === "NotFoundError") {
-                 toast.error("No Camera Found", { description: "No video input device detected." });
-             } else {
-                 toast.error("Scanner Error", { description: finalError.message || "Could not start camera." });
-             }
-             
-             setIsScanning(false);
-             html5QrCode.clear();
-        }
+        }, 300); // 300ms delay to let React render the div
     };
 
     const handleStopScanning = async () => {
@@ -297,6 +280,16 @@ export const BarcodeScanner = () => {
 
     return (
         <div className="grid md:grid-cols-2 gap-6">
+            {/* CSS Fix for Video Element */}
+            <style>{`
+                #barcode-scanner-element video {
+                    width: 100% !important;
+                    height: 100% !important;
+                    object-fit: cover !important;
+                    border-radius: 0.5rem;
+                }
+            `}</style>
+
             <Card className="shadow-sm border-gray-200">
                 <CardHeader className="pb-3">
                     <CardTitle className="flex items-center justify-between text-gray-900">
@@ -337,9 +330,13 @@ export const BarcodeScanner = () => {
                             </div>
                         ) : (
                             <div>
-                                <div className={`w-full aspect-video relative rounded-lg overflow-hidden mb-4 border border-gray-200 bg-black ${!isScanning ? 'hidden' : 'block'}`}>
+                                <div 
+                                    className={`w-full relative rounded-lg overflow-hidden mb-4 border border-gray-200 bg-black ${!isScanning ? 'hidden' : 'block'}`}
+                                    style={{ minHeight: '300px' }} // FORCE HEIGHT
+                                >
                                     <div id={scannerElementId} className="w-full h-full" />
                                 </div>
+                                
                                 {!isScanning && (
                                     <div className="w-full aspect-video relative bg-gray-100 rounded-lg overflow-hidden mb-4 flex items-center justify-center border border-gray-200">
                                         <div className="text-center text-gray-400">
@@ -348,6 +345,7 @@ export const BarcodeScanner = () => {
                                         </div>
                                     </div>
                                 )}
+                                
                                 {isScanning ? (
                                     <Button variant="destructive" className="w-full" onClick={handleStopScanning}>
                                         <X className="mr-2 h-4 w-4" /> Stop Camera
