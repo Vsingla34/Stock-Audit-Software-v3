@@ -3,9 +3,9 @@ import { useInventory } from "@/context/InventoryContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Barcode, Scan, Check, MapPin, Keyboard, Camera, X } from "lucide-react";
+import { Barcode, Scan, Check, MapPin, Keyboard, Camera, X, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { Html5Qrcode, Html5QrcodeSupportedFormats, Html5QrcodeScannerState } from "html5-qrcode";
 import { useUser } from "@/context/UserContext"; 
 import { useUserAccess } from "@/hooks/useUserAccess";
 import { LocationAuditSummary } from "@/components/locations/LocationAuditSummary";
@@ -15,11 +15,11 @@ import { useCompany } from "@/context/CompanyContext";
 export const BarcodeScanner = () => {
     const [isScanning, setIsScanning] = useState(false);
     const [isHardwareScannerMode, setIsHardwareScannerMode] = useState(false);
+    const [isProcessing, setIsProcessing] = useState(false); // Visual loading state
     const [manualBarcode, setManualBarcode] = useState("");
     const [scannedBarcode, setScannedBarcode] = useState(""); 
     
     const { itemMaster, auditedItems, updateAuditedItem, locations, assignments } = useInventory();
-    const { accessibleLocations } = useUserAccess();
     const { currentUser } = useUser();
     const { selectedAssignmentId } = useCompany();
 
@@ -28,6 +28,7 @@ export const BarcodeScanner = () => {
     
     const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
     const hardwareScannerInputRef = useRef<HTMLInputElement>(null);
+    const isProcessingRef = useRef(false); // Logic lock
     const scannerElementId = "barcode-scanner-element";
 
     const scannedBufferRef = useRef('');
@@ -105,6 +106,44 @@ export const BarcodeScanner = () => {
         }
     };
 
+    // --- PAUSE & RESUME LOGIC ---
+    const onScanSuccess = async (decodedText: string) => {
+        // 1. Prevent overlapping scans
+        if (isProcessingRef.current) return;
+        isProcessingRef.current = true;
+        setIsProcessing(true);
+
+        // 2. PAUSE SCANNER immediately to stop duplicate reads
+        try {
+            if (html5QrCodeRef.current?.getState() === Html5QrcodeScannerState.SCANNING) {
+                html5QrCodeRef.current.pause();
+            }
+        } catch (e) {
+            console.warn("Failed to pause scanner:", e);
+        }
+
+        // 3. Process the scan
+        try {
+            const success = await handleItemScan(decodedText, selectedLocation);
+            if (success) setScannedBarcode(decodedText);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            // 4. WAIT & RESUME (1.5s delay)
+            setTimeout(() => {
+                try {
+                    if (html5QrCodeRef.current?.getState() === Html5QrcodeScannerState.PAUSED) {
+                        html5QrCodeRef.current.resume();
+                    }
+                } catch (e) {
+                    console.warn("Failed to resume scanner:", e);
+                }
+                isProcessingRef.current = false;
+                setIsProcessing(false);
+            }, 1500);
+        }
+    };
+
     // Hardware Scanner Logic
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
@@ -119,6 +158,7 @@ export const BarcodeScanner = () => {
                 event.stopPropagation();
                 const barcode = scannedBufferRef.current.trim();
                 if (barcode) {
+                    // Reuse the processing logic if needed, or keeping it instant for hardware
                     handleItemScan(barcode, selectedLocation).then(success => { if (success) setScannedBarcode(barcode); });
                 } else {
                     toast.error("Empty scan");
@@ -148,17 +188,12 @@ export const BarcodeScanner = () => {
     // Cleanup
     useEffect(() => {
         return () => {
+            isProcessingRef.current = false; // reset lock
             if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
                 html5QrCodeRef.current.stop().then(() => html5QrCodeRef.current?.clear()).catch(console.error);
             }
         };
     }, []);
-
-    const onScanSuccess = (decodedText: string) => {
-        handleItemScan(decodedText, selectedLocation).then(success => {
-            if (success) setScannedBarcode(decodedText);
-        }).catch(e => console.error("Camera scan error:", e));
-    };
 
     const handleStartHardwareScanner = () => {
         if (!selectedLocation) { toast.error("Location required"); return; }
@@ -174,7 +209,6 @@ export const BarcodeScanner = () => {
         scannedBufferRef.current = '';
     };
 
-    // --- ROBUST CAMERA START LOGIC ---
     const handleStartScanning = async () => {
         if (!selectedLocation) { toast.error("Location required"); return; }
 
@@ -183,11 +217,11 @@ export const BarcodeScanner = () => {
             return;
         }
 
-        // 1. Force state FIRST to render the div
         setIsScanning(true);
         setIsHardwareScannerMode(false);
+        setIsProcessing(false);
+        isProcessingRef.current = false;
 
-        // 2. Wait for DOM to render the div
         setTimeout(async () => {
             if (html5QrCodeRef.current) {
                 try {
@@ -201,7 +235,6 @@ export const BarcodeScanner = () => {
             const html5QrCode = new Html5Qrcode(scannerElementId);
             html5QrCodeRef.current = html5QrCode;
 
-            // Simple config - remove qrbox if it causes layout issues
             const config = {
                 fps: 10,
                 aspectRatio: 1.0, 
@@ -217,11 +250,11 @@ export const BarcodeScanner = () => {
             };
 
             const startCamera = async (cameraIdOrConfig: string | { facingMode: string }) => {
+                // Pass onScanSuccess here
                 await html5QrCode.start(cameraIdOrConfig, config, onScanSuccess, () => {});
             };
 
             try {
-                // Attempt 1: Back Camera ID
                 try {
                     const devices = await Html5Qrcode.getCameras();
                     if (devices && devices.length > 0) {
@@ -234,7 +267,6 @@ export const BarcodeScanner = () => {
                     console.warn("Listing cameras failed:", cameraListError);
                 }
 
-                // Attempt 2: Generic Environment
                 try {
                     await startCamera({ facingMode: "environment" });
                     return;
@@ -242,7 +274,6 @@ export const BarcodeScanner = () => {
                     console.warn("Env camera failed:", envError);
                 }
 
-                // Attempt 3: User Camera
                 await startCamera({ facingMode: "user" });
                 toast.info("Using front camera (Rear camera unavailable)");
 
@@ -252,7 +283,7 @@ export const BarcodeScanner = () => {
                  toast.error("Camera Failed", { description: "Could not start video stream." });
                  html5QrCode.clear();
             }
-        }, 300); // 300ms delay to let React render the div
+        }, 300);
     };
 
     const handleStopScanning = async () => {
@@ -262,6 +293,7 @@ export const BarcodeScanner = () => {
                 html5QrCodeRef.current.clear();
             }
             setIsScanning(false);
+            setIsProcessing(false);
         } catch (err) {
             console.error("Error stopping scanner:", err);
             setIsScanning(false);
@@ -280,7 +312,6 @@ export const BarcodeScanner = () => {
 
     return (
         <div className="grid md:grid-cols-2 gap-6">
-            {/* CSS Fix for Video Element */}
             <style>{`
                 #barcode-scanner-element video {
                     width: 100% !important;
@@ -297,7 +328,8 @@ export const BarcodeScanner = () => {
                             <Barcode className="h-5 w-5 text-indigo-600" />
                             <span>Scanner</span>
                         </div>
-                        {isScanning && <span className="text-xs font-normal text-red-500 animate-pulse flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500"/> Live</span>}
+                        {isScanning && !isProcessing && <span className="text-xs font-normal text-red-500 animate-pulse flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500"/> Live</span>}
+                        {isProcessing && <span className="text-xs font-normal text-indigo-600 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin"/> Processing</span>}
                     </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -332,9 +364,19 @@ export const BarcodeScanner = () => {
                             <div>
                                 <div 
                                     className={`w-full relative rounded-lg overflow-hidden mb-4 border border-gray-200 bg-black ${!isScanning ? 'hidden' : 'block'}`}
-                                    style={{ minHeight: '300px' }} // FORCE HEIGHT
+                                    style={{ minHeight: '300px' }} 
                                 >
                                     <div id={scannerElementId} className="w-full h-full" />
+                                    
+                                    {/* Freeze Overlay */}
+                                    {isProcessing && (
+                                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-10 backdrop-blur-[2px]">
+                                            <div className="bg-white px-4 py-2 rounded-full flex items-center gap-2 shadow-lg">
+                                                <Check className="h-5 w-5 text-green-600" />
+                                                <span className="font-semibold text-gray-800">Scanned!</span>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                                 
                                 {!isScanning && (
