@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from "react";
-import { useInventory, InventoryItem } from "@/context/InventoryContext"; 
+import { useInventory } from "@/context/InventoryContext"; 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Barcode, Scan, Check, MapPin, Keyboard } from "lucide-react";
+import { Barcode, Scan, Check, MapPin, Keyboard, Camera, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { useUser } from "@/context/UserContext"; 
@@ -17,87 +17,61 @@ export const BarcodeScanner = () => {
     const [isHardwareScannerMode, setIsHardwareScannerMode] = useState(false);
     const [manualBarcode, setManualBarcode] = useState("");
     const [scannedBarcode, setScannedBarcode] = useState(""); 
-    const [debugInfo, setDebugInfo] = useState("");
     
     const { itemMaster, auditedItems, updateAuditedItem, locations, assignments } = useInventory();
     const { accessibleLocations } = useUserAccess();
     const { currentUser } = useUser();
     const { selectedAssignmentId } = useCompany();
 
-    // AUTO-DETECT LOCATION FROM ASSIGNMENT
     const currentAssignment = assignments.find(a => a.id === selectedAssignmentId);
     const selectedLocation = currentAssignment?.locationId || "";
     
-    const html5QrCodeRef = useRef(null);
-    const hardwareScannerInputRef = useRef(null);
+    const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
+    const hardwareScannerInputRef = useRef<HTMLInputElement>(null);
     const scannerElementId = "barcode-scanner-element";
 
     const scannedBufferRef = useRef('');
     const lastKeypressTime = useRef(0);
 
-    // Handle item scanning with auditor tracking
-    const handleItemScan = async (barcode, locationId) => {
-        console.log("=== handleItemScan called ===");
-        
-        if (typeof updateAuditedItem !== 'function') {
-            console.error("updateAuditedItem is not available.");
-            return false;
-        }
+    const handleItemScan = async (barcode: string, locationId: string) => {
+        if (typeof updateAuditedItem !== 'function') return false;
 
         try {
-            let locationName = '';
-            
-            if (!locationId || locationId === "") {
+            if (!locationId) {
                  toast.error("Location Required", { description: "No active assignment location found." });
                  return false; 
             }
             
             const locationObj = locations.find(loc => loc.id === locationId);
-            locationName = locationObj?.name || '';
+            const locationName = locationObj?.name || '';
             
-            if (locationName === '') {
+            if (!locationName) {
                  toast.error("Invalid Location", { description: "Location name mismatch." });
                  return false;
             }
             
-            // 1. Find the Master Item (Global Definition)
-            const masterItem = itemMaster.find(item => 
-                (item.sku === barcode) && item.location === locationName
-            );
+            const masterItem = itemMaster.find(item => (item.sku === barcode) && item.location === locationName);
             
             if (!masterItem) {
                 const itemInOtherLocation = itemMaster.find(item => item.sku === barcode);
                 if (itemInOtherLocation) {
-                    toast.error("Item not found at this location", {
-                        description: `Item ${barcode} exists at ${itemInOtherLocation.location}, but not at ${locationName}.`,
-                    });
+                    toast.error("Item mismatch", { description: `Item exists at ${itemInOtherLocation.location}, not ${locationName}.` });
                 } else {
-                    toast.error("Item not found", {
-                        description: `No item found with barcode ${barcode} in master data.`,
-                    });
+                    toast.error("Unknown Item", { description: `Barcode ${barcode} not found in master data.` });
                 }
                 return false;
             }
 
-            // 2. Find Existing Audit Entry for this Assignment
-            // FIX: Match by SKU/Location instead of ID, because ID changes when forked to assignment
-            const existingAuditedItem = auditedItems.find(
-                item => item.sku === masterItem.sku && item.location === locationName
-            );
-
-            // Use the existing entry's ID if available, otherwise fallback to Master (InventoryContext will handle the fork)
+            const existingAuditedItem = auditedItems.find(item => item.sku === masterItem.sku && item.location === locationName);
             const targetItem = existingAuditedItem || masterItem;
 
             const existingAuditorEntries = targetItem.auditorEntries || [];
-            const currentAuditorEntry = existingAuditorEntries.find(
-                entry => entry.auditorId === currentUser?.id
-            );
-            
+            const currentAuditorEntry = existingAuditorEntries.find(entry => entry.auditorId === currentUser?.id);
             const currentAuditorQuantity = currentAuditorEntry?.quantityFound || 0;
             const newAuditorQuantity = currentAuditorQuantity + 1;
 
             const itemToUpdate = {
-                ...targetItem, // Preserve all props including correct ID if it exists
+                ...targetItem,
                 physicalQuantity: newAuditorQuantity, 
                 status: 'pending' as const,
                 lastAudited: new Date().toISOString(),
@@ -110,23 +84,19 @@ export const BarcodeScanner = () => {
                 currentUser?.email || currentUser?.name || 'Unknown Auditor'
             );
 
-            // Calculate display totals
-            const totalPhysicalQuantity = (targetItem.physicalQuantity || 0) + 1; // Approximate immediate update
-            const quantityInfo = currentAuditorQuantity > 0 
-                ? `Your count: ${currentAuditorQuantity} → ${newAuditorQuantity} (Total: ${totalPhysicalQuantity}/${masterItem.systemQuantity})`
-                : `Your count: ${newAuditorQuantity} (Total: ${totalPhysicalQuantity}/${masterItem.systemQuantity})`;
+            const totalPhysicalQuantity = (targetItem.physicalQuantity || 0) + 1;
+            const quantityInfo = currentAuditorQuantity > 0 ? `${currentAuditorQuantity} → ${newAuditorQuantity}` : `${newAuditorQuantity}`;
+            const isMatch = totalPhysicalQuantity === masterItem.systemQuantity;
 
-            const status = totalPhysicalQuantity === masterItem.systemQuantity ? 'matched' : 'discrepancy';
-
-            if (status === "matched") {
-                toast.success("Item scanned - Matched!", {
-                    description: `${masterItem.name} ${quantityInfo} at ${locationName}`,
-                });
-            } else {
-                toast.warning("Item scanned - Discrepancy detected!", {
-                    description: `${masterItem.name} ${quantityInfo} at ${locationName}`,
-                });
-            }
+            toast(isMatch ? "Matched!" : "Item Scanned", {
+                description: (
+                    <div className="flex flex-col gap-1">
+                        <span className="font-semibold">{masterItem.name}</span>
+                        <span className="text-xs">Count: {quantityInfo} | Total: {totalPhysicalQuantity} / {masterItem.systemQuantity}</span>
+                    </div>
+                ),
+                className: isMatch ? "border-green-500 bg-green-50" : ""
+            });
 
             return true;
         } catch (error: any) {
@@ -136,46 +106,27 @@ export const BarcodeScanner = () => {
         }
     };
 
-    // Hardware scanner logic
+    // Hardware Scanner Logic
     useEffect(() => {
-        const handleKeyDown = (event) => {
-            if (!isHardwareScannerMode || !selectedLocation) {
-                return;
-            }
-
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (!isHardwareScannerMode || !selectedLocation) return;
             const currentTime = Date.now();
             const timeSinceLastKey = currentTime - lastKeypressTime.current;
             lastKeypressTime.current = currentTime;
-
-            if (timeSinceLastKey > 100) {
-                scannedBufferRef.current = '';
-            }
+            if (timeSinceLastKey > 100) scannedBufferRef.current = '';
 
             if (event.key === 'Enter') {
                 event.preventDefault();
                 event.stopPropagation();
-                
                 const barcode = scannedBufferRef.current.trim();
-                
                 if (barcode) {
-                    handleItemScan(barcode, selectedLocation)
-                        .then(success => {
-                            if (success) {
-                                setScannedBarcode(barcode);
-                            }
-                        })
-                        .catch(e => console.error("Hardware scan error:", e));
+                    handleItemScan(barcode, selectedLocation).then(success => { if (success) setScannedBarcode(barcode); });
                 } else {
-                    console.warn("Empty buffer on Enter");
-                    toast.error("Empty scan", {
-                        description: "No barcode data received"
-                    });
+                    toast.error("Empty scan");
                 }
-                
                 scannedBufferRef.current = '';
                 return;
             }
-
             if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
                 scannedBufferRef.current += event.key;
             }
@@ -183,13 +134,11 @@ export const BarcodeScanner = () => {
 
         if (isHardwareScannerMode) {
             document.addEventListener('keydown', handleKeyDown, true);
-            
             const focusInterval = setInterval(() => {
                 if (hardwareScannerInputRef.current && document.activeElement !== hardwareScannerInputRef.current) {
                     hardwareScannerInputRef.current.focus();
                 }
             }, 100);
-
             return () => {
                 document.removeEventListener('keydown', handleKeyDown, true);
                 clearInterval(focusInterval);
@@ -197,130 +146,129 @@ export const BarcodeScanner = () => {
         }
     }, [isHardwareScannerMode, selectedLocation, itemMaster, auditedItems, locations, currentUser]);
 
-    useEffect(() => {
-        if (isHardwareScannerMode && scannedBufferRef.current) {
-            const timeout = setTimeout(() => {
-                if (scannedBufferRef.current) {
-                    scannedBufferRef.current = '';
-                }
-            }, 500);
-            return () => clearTimeout(timeout);
-        }
-    }, [scannedBarcode, isHardwareScannerMode]);
-
+    // Cleanup
     useEffect(() => {
         return () => {
             if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
-                html5QrCodeRef.current.stop().catch(console.error);
+                html5QrCodeRef.current.stop().then(() => html5QrCodeRef.current?.clear()).catch(console.error);
             }
         };
     }, []);
 
-    const onScanSuccess = (decodedText, decodedResult) => {
-        handleItemScan(decodedText, selectedLocation)
-            .then(success => {
-                if (success) {
-                    setScannedBarcode(decodedText);
-                }
-            })
-            .catch(e => console.error("Camera scan error:", e));
-    };
-
-    const onScanError = (errorMessage) => {
-        // Suppress frequent scan errors
+    const onScanSuccess = (decodedText: string) => {
+        handleItemScan(decodedText, selectedLocation).then(success => {
+            if (success) setScannedBarcode(decodedText);
+        }).catch(e => console.error("Camera scan error:", e));
     };
 
     const handleStartHardwareScanner = () => {
-        if (!selectedLocation) {
-            toast.error("Location required", {
-                description: "No active assignment location found."
-            });
-            return;
-        }
-        
+        if (!selectedLocation) { toast.error("Location required"); return; }
         setIsHardwareScannerMode(true);
+        handleStopScanning(); 
         scannedBufferRef.current = '';
-        lastKeypressTime.current = 0;
-        
-        toast.success("Hardware scanner activated", {
-            description: `Scanning as ${currentUser?.email || currentUser?.name}. Press ESC to stop.`
-        });
-        
-        setTimeout(() => {
-            (document.activeElement)?.blur();
-            hardwareScannerInputRef.current?.focus();
-        }, 100);
+        toast.success("Hardware scanner activated");
+        setTimeout(() => hardwareScannerInputRef.current?.focus(), 100);
     };
 
     const handleStopHardwareScanner = () => {
         setIsHardwareScannerMode(false);
         scannedBufferRef.current = '';
-        setDebugInfo('');
-        toast.info("Hardware scanner stopped");
     };
 
+    // --- ROBUST CAMERA START LOGIC ---
     const handleStartScanning = async () => {
-        if (!selectedLocation) {
-            toast.error("Location required", {
-                description: "No active assignment location found."
-            });
+        if (!selectedLocation) { toast.error("Location required"); return; }
+
+        // Security Check
+        if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+            toast.error("Protocol Error", { description: "Camera access requires HTTPS or localhost." });
             return;
         }
 
+        // Cleanup previous instance
+        if (html5QrCodeRef.current) {
+            try {
+                if (html5QrCodeRef.current.isScanning) {
+                    await html5QrCodeRef.current.stop();
+                }
+                html5QrCodeRef.current.clear();
+            } catch (e) { console.warn("Cleanup warning:", e); }
+        }
+
+        // Config
         const config = {
             fps: 10,
-            qrbox: { width: 250, height: 250 }, 
-            aspectRatio: 1.777778, 
+            qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+                const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+                const size = Math.floor(minEdge * 0.7);
+                return { width: size, height: size };
+            },
+            disableFlip: false, 
             formatsToSupport: [
                 Html5QrcodeSupportedFormats.QR_CODE,
                 Html5QrcodeSupportedFormats.CODE_128,
                 Html5QrcodeSupportedFormats.CODE_39,
                 Html5QrcodeSupportedFormats.EAN_13,
-                Html5QrcodeSupportedFormats.EAN_8,
                 Html5QrcodeSupportedFormats.UPC_A,
-                Html5QrcodeSupportedFormats.UPC_E,
             ]
         };
 
+        // Initialize
+        const html5QrCode = new Html5Qrcode(scannerElementId);
+        html5QrCodeRef.current = html5QrCode;
+
+        // Start Helper
+        const startCamera = async (cameraIdOrConfig: string | { facingMode: string }) => {
+            await html5QrCode.start(cameraIdOrConfig, config, onScanSuccess, () => {});
+        };
+
         try {
-            html5QrCodeRef.current = new Html5Qrcode(scannerElementId);
-
-            await html5QrCodeRef.current.start(
-                { facingMode: "environment" },
-                config,
-                onScanSuccess,
-                onScanError
-            );
-
-            setIsScanning(true);
-            toast.success("Camera scanner started", {
-                description: `Scanning as ${currentUser?.email || currentUser?.name}`
-            });
-
-        } catch (err) {
-            console.error("Error starting scanner:", err);
-            
+            // ATTEMPT 1: Get Cameras & Select Back Camera
             try {
-                if (!html5QrCodeRef.current) {
-                    html5QrCodeRef.current = new Html5Qrcode(scannerElementId);
+                const devices = await Html5Qrcode.getCameras();
+                if (devices && devices.length > 0) {
+                     const backCamera = devices.find(d => d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('rear') || d.label.toLowerCase().includes('environment'));
+                     const deviceId = backCamera ? backCamera.id : devices[0].id;
+                     await startCamera(deviceId);
+                     setIsScanning(true);
+                     setIsHardwareScannerMode(false);
+                     return; // Success
                 }
-                
-                await html5QrCodeRef.current.start(
-                    { facingMode: "user" },
-                    config,
-                    onScanSuccess,
-                    onScanError
-                );
-                setIsScanning(true);
-                toast.success("Camera scanner started", {
-                    description: "Using front camera"
-                });
-            } catch (fallbackErr) {
-                toast.error("Camera not available", {
-                    description: "Try using hardware scanner mode or manual entry instead."
-                });
-                html5QrCodeRef.current = null;
+            } catch (cameraListError) {
+                console.warn("Could not list cameras (Permissions?):", cameraListError);
+                // Continue to fallback...
             }
+
+            // ATTEMPT 2: Generic Environment (Back)
+            try {
+                await startCamera({ facingMode: "environment" });
+                setIsScanning(true);
+                setIsHardwareScannerMode(false);
+                return; // Success
+            } catch (envError) {
+                console.warn("Environment camera failed:", envError);
+                // Continue to fallback...
+            }
+
+            // ATTEMPT 3: Generic User (Front)
+            await startCamera({ facingMode: "user" });
+            setIsScanning(true);
+            setIsHardwareScannerMode(false);
+            toast.info("Using front camera (Rear camera unavailable)");
+
+        } catch (finalError: any) {
+             console.error("FATAL: All camera attempts failed:", finalError);
+             
+             if (finalError.name === "NotAllowedError") {
+                 toast.error("Permission Denied", { description: "Please allow camera access in your browser settings." });
+             } else if (finalError.name === "NotFoundError") {
+                 toast.error("No Camera Found", { description: "No video input device detected." });
+             } else {
+                 toast.error("Scanner Error", { description: finalError.message || "Could not start camera." });
+             }
+             
+             setIsScanning(false);
+             html5QrCode.clear();
         }
     };
 
@@ -331,169 +279,101 @@ export const BarcodeScanner = () => {
                 html5QrCodeRef.current.clear();
             }
             setIsScanning(false);
-            toast.info("Camera scanner stopped");
         } catch (err) {
             console.error("Error stopping scanner:", err);
             setIsScanning(false);
         }
     };
 
-    const handleManualSubmit = (e) => {
+    const handleManualSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!selectedLocation) {
-            toast.error("Location required", {
-                description: "No active assignment location found."
-            });
-            return;
-        }
-        
+        if (!selectedLocation) { toast.error("Location required"); return; }
         if (manualBarcode.trim()) {
-            handleItemScan(manualBarcode.trim(), selectedLocation)
-                .then(success => {
-                    if (success) {
-                        setScannedBarcode(manualBarcode.trim());
-                        setManualBarcode("");
-                    }
-                })
-                .catch(e => console.error("Manual submit error:", e));
+            handleItemScan(manualBarcode.trim(), selectedLocation).then(success => {
+                if (success) { setScannedBarcode(manualBarcode.trim()); setManualBarcode(""); }
+            });
         }
     };
-
-    useEffect(() => {
-        const handleEscKey = (event) => {
-            if (event.key === 'Escape' && isHardwareScannerMode) {
-                handleStopHardwareScanner();
-            }
-        };
-
-        window.addEventListener('keydown', handleEscKey);
-        return () => {
-            window.removeEventListener('keydown', handleEscKey);
-        };
-    }, [isHardwareScannerMode]);
 
     return (
         <div className="grid md:grid-cols-2 gap-6">
             <Card className="shadow-sm border-gray-200">
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-gray-900">
-                        <Barcode className="h-5 w-5" />
-                        <span>Barcode Scanner</span>
-                        {currentUser && (
-                            <span className="text-xs bg-indigo-100 text-indigo-800 px-2 py-1 rounded-full ml-2">
-                                {currentUser.email || currentUser.name}
-                            </span>
-                        )}
+                <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center justify-between text-gray-900">
+                        <div className="flex items-center gap-2">
+                            <Barcode className="h-5 w-5 text-indigo-600" />
+                            <span>Scanner</span>
+                        </div>
+                        {isScanning && <span className="text-xs font-normal text-red-500 animate-pulse flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500"/> Live</span>}
                     </CardTitle>
                 </CardHeader>
                 <CardContent>
                     <div className="space-y-4">
                         <div className="flex items-center gap-2 mb-2 p-2 bg-gray-50 rounded border border-gray-200">
                             <MapPin className="h-4 w-4 text-indigo-500" />
-                            <span className="text-sm font-medium text-gray-700">
-                                Location: {locations.find(l => l.id === selectedLocation)?.name || 'Loading...'}
+                            <span className="text-sm font-medium text-gray-700 truncate">
+                                {locations.find(l => l.id === selectedLocation)?.name || 'Select Assignment...'}
                             </span>
                         </div>
                         
                         {isHardwareScannerMode ? (
                             <div>
                                 <div className="w-full aspect-video relative bg-indigo-50 rounded-lg overflow-hidden mb-4 flex items-center justify-center border-2 border-indigo-200 border-dashed">
-                                    <div className="text-center">
-                                        <Keyboard className="h-12 w-12 text-indigo-500 mx-auto mb-2 animate-pulse" />
-                                        <p className="text-indigo-700 font-medium">Hardware Scanner Active</p>
-                                        <p className="text-sm text-indigo-600">Auditor: {currentUser?.email || currentUser?.name}</p>
+                                    <div className="text-center p-4">
+                                        <Keyboard className="h-10 w-10 text-indigo-500 mx-auto mb-2 animate-bounce" />
+                                        <p className="text-indigo-900 font-semibold">Hardware Mode</p>
+                                        <p className="text-sm text-indigo-600">Ready to scan with external device</p>
                                         {scannedBarcode && (
-                                            <p className="text-xs text-indigo-500 mt-2 font-mono bg-indigo-100 px-2 py-1 rounded">
-                                                Last: {scannedBarcode}
-                                            </p>
+                                            <div className="mt-3 inline-flex items-center gap-2 bg-white px-3 py-1 rounded-full border border-indigo-100 shadow-sm">
+                                                <Check className="h-3 w-3 text-green-500" />
+                                                <span className="text-xs font-mono text-gray-700">{scannedBarcode}</span>
+                                            </div>
                                         )}
                                     </div>
                                 </div>
-                                <Button 
-                                    variant="destructive" 
-                                    className="w-full" 
-                                    onClick={handleStopHardwareScanner}
-                                >
-                                    Stop Hardware Scanner (ESC)
-                                </Button>
-                            </div>
-                        ) : isScanning ? (
-                            <div>
-                                <div className="w-full aspect-video relative rounded-lg overflow-hidden mb-4 border border-gray-200">
-                                    <div id={scannerElementId} className="w-full h-full" />
-                                </div>
-                                <Button 
-                                    variant="destructive" 
-                                    className="w-full" 
-                                    onClick={handleStopScanning}
-                                >
-                                    Stop Camera Scanning
+                                <Button variant="destructive" className="w-full" onClick={handleStopHardwareScanner}>
+                                    <X className="mr-2 h-4 w-4" /> Stop Hardware Scanner
                                 </Button>
                             </div>
                         ) : (
                             <div>
-                                <div className="w-full aspect-video relative bg-gray-100 rounded-lg overflow-hidden mb-4 flex items-center justify-center border border-gray-200">
-                                    <p className="text-center text-gray-500">
-                                        Camera preview will appear here when scanning
-                                    </p>
+                                <div className={`w-full aspect-video relative rounded-lg overflow-hidden mb-4 border border-gray-200 bg-black ${!isScanning ? 'hidden' : 'block'}`}>
+                                    <div id={scannerElementId} className="w-full h-full" />
                                 </div>
-                                
-                                <div className="grid grid-cols-2 gap-2">
-                                    <Button 
-                                        variant="default" 
-                                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white" 
-                                        onClick={handleStartScanning}
-                                        disabled={!selectedLocation}
-                                    >
-                                        <Scan className="mr-2 h-4 w-4" />
-                                        Camera Scan
+                                {!isScanning && (
+                                    <div className="w-full aspect-video relative bg-gray-100 rounded-lg overflow-hidden mb-4 flex items-center justify-center border border-gray-200">
+                                        <div className="text-center text-gray-400">
+                                            <Camera className="h-10 w-10 mx-auto mb-2 opacity-50" />
+                                            <p className="text-sm">Camera inactive</p>
+                                        </div>
+                                    </div>
+                                )}
+                                {isScanning ? (
+                                    <Button variant="destructive" className="w-full" onClick={handleStopScanning}>
+                                        <X className="mr-2 h-4 w-4" /> Stop Camera
                                     </Button>
-                                    <Button 
-                                        variant="secondary" 
-                                        className="w-full bg-white hover:bg-indigo-50 border border-gray-200 text-gray-700 hover:text-indigo-700 shadow-sm" 
-                                        onClick={handleStartHardwareScanner}
-                                        disabled={!selectedLocation}
-                                    >
-                                        <Keyboard className="mr-2 h-4 w-4" />
-                                        Hardware Scan
-                                    </Button>
-                                </div>
+                                ) : (
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <Button variant="default" className="w-full bg-indigo-600 hover:bg-indigo-700" onClick={handleStartScanning} disabled={!selectedLocation}>
+                                            <Scan className="mr-2 h-4 w-4" /> Camera
+                                        </Button>
+                                        <Button variant="outline" className="w-full border-gray-300 text-gray-700" onClick={handleStartHardwareScanner} disabled={!selectedLocation}>
+                                            <Keyboard className="mr-2 h-4 w-4" /> Hardware
+                                        </Button>
+                                    </div>
+                                )}
                             </div>
                         )}
                         
                         <div className="border-t border-gray-100 pt-4">
                             <form onSubmit={handleManualSubmit} className="flex gap-2">
-                                <Input
-                                    placeholder="Enter barcode manually"
-                                    value={manualBarcode}
-                                    onChange={(e) => setManualBarcode(e.target.value)}
-                                    disabled={!selectedLocation}
-                                    className="focus:ring-indigo-600 focus:border-indigo-600"
-                                />
-                                <Button 
-                                    type="submit" 
-                                    disabled={!selectedLocation || !manualBarcode.trim()}
-                                    className="bg-indigo-600 hover:bg-indigo-700 text-white"
-                                >
+                                <Input placeholder="Manual barcode..." value={manualBarcode} onChange={(e) => setManualBarcode(e.target.value)} disabled={!selectedLocation} className="focus:ring-indigo-600" />
+                                <Button type="submit" disabled={!selectedLocation || !manualBarcode.trim()} className="bg-indigo-600 hover:bg-indigo-700 text-white">
                                     <Check className="h-4 w-4" />
                                 </Button>
                             </form>
                         </div>
-                        
-                        <input
-                            ref={hardwareScannerInputRef}
-                            type="text"
-                            style={{ 
-                                position: 'absolute', 
-                                left: '-9999px', 
-                                opacity: 0,
-                                width: '1px',
-                                height: '1px'
-                            }}
-                            tabIndex={-1}
-                            autoComplete="off"
-                            aria-hidden="true"
-                        />
+                        <input ref={hardwareScannerInputRef} type="text" className="absolute opacity-0 w-px h-px pointer-events-none" tabIndex={-1} autoComplete="off" />
                     </div>
                 </CardContent>
             </Card>
@@ -501,17 +381,14 @@ export const BarcodeScanner = () => {
             <div className="space-y-6">
                 {selectedLocation ? (
                     <>
-                        <LocationAuditSummary 
-                            locationId={selectedLocation} 
-                            hideDropdown={true} 
-                        />
+                        <LocationAuditSummary locationId={selectedLocation} hideDropdown={true} />
                         <RecentActivity selectedLocation={selectedLocation} />
                     </>
                 ) : (
                     <Card className="h-full flex items-center justify-center p-6 shadow-sm border-gray-200">
                         <div className="text-center text-gray-400">
                             <MapPin className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                            <p>Loading active assignment...</p>
+                            <p>Please select an active assignment <br/> to start scanning.</p>
                         </div>
                     </Card>
                 )}
