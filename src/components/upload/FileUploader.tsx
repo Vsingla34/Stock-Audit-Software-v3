@@ -114,10 +114,10 @@ export const FileUploader = ({
     setFile(file);
   };
 
-  const handleImport = async (type: 'master' | 'stock') => {
+const handleImport = async (type: 'master' | 'stock') => {
     if (!selectedCompanyId) {
-        toast.error("No company selected");
-        return;
+      toast.error("No company selected");
+      return;
     }
 
     const file = type === 'master' ? itemMasterFile : closingStockFile;
@@ -135,7 +135,7 @@ export const FileUploader = ({
       try {
         const rawRows = processCSV(text);
         if (rawRows.length === 0) {
-            throw new Error("CSV file is empty or invalid");
+          throw new Error("CSV file is empty or invalid");
         }
 
         const batchKey = generateBatchKey();
@@ -143,30 +143,20 @@ export const FileUploader = ({
         if (type === 'master') {
           const processedItems = processItemMasterData(rawRows);
           
-          // Validate required fields: SKU, Name, Category
-          processedItems.forEach((item, index) => {
-            if (!item.sku || !item.sku.trim()) {
-              throw new Error(`Row ${index + 2}: SKU is required`);
-            }
-            if (!item.name || !item.name.trim()) {
-              throw new Error(`Row ${index + 2}: Name is required`);
-            }
-            if (!item.category || !item.category.trim()) {
-              throw new Error(`Row ${index + 2}: Category is required`);
-            }
+          // Validate and Trim Item Master data
+          const trimmedItems = processedItems.map((item, index) => {
+            if (!item.sku || !item.sku.trim()) throw new Error(`Row ${index + 2}: SKU is required`);
+            if (!item.name || !item.name.trim()) throw new Error(`Row ${index + 2}: Name is required`);
+            
+            return {
+              ...item,
+              sku: item.sku.trim(),
+              name: item.name.trim(),
+              category: item.category?.trim() || 'General',
+              location: item.location?.trim() || '',
+              uploadBatchKey: batchKey
+            };
           });
-          
-          // TRIM all string fields in Item Master data
-          const trimmedItems = processedItems.map(item => ({
-            ...item,
-            sku: item.sku.trim(),
-            name: item.name.trim(),
-            category: item.category.trim(),
-            location: item.location?.trim() || '',
-            uploadBatchKey: batchKey
-          }));
-          
-          console.log(`Uploading ${trimmedItems.length} items to Item Master...`);
           
           await SupabaseDataService.setItemMaster(trimmedItems, selectedCompanyId);
           
@@ -184,94 +174,92 @@ export const FileUploader = ({
           setItemMasterFile(null);
         
         } else {
-            // CLOSING STOCK UPLOAD WITH ENHANCED VALIDATION
-            if (!selectedAssignmentId) throw new Error("Please select an assignment first");
-            
-            const processedStock = processClosingStockData(
-                rawRows, 
-                userRole as any, 
-                targetLocationId, 
-                locations
-            );
+          // --- CLOSING STOCK UPLOAD WITH METADATA LOOKUP ---
+          if (!selectedAssignmentId) throw new Error("Please select an assignment first");
+          
+          const processedStock = processClosingStockData(
+            rawRows, 
+            userRole as any, 
+            targetLocationId, 
+            locations
+          );
 
-            console.log(`Validating ${processedStock.length} items from Closing Stock CSV...`);
+          // 1. Fetch full Item Master to map Names and Categories
+          toast.info("Fetching Item Master for validation...");
+          const masterItems = await SupabaseDataService.getItemMaster(selectedCompanyId);
+          
+          // 2. Create a lookup map for fast matching
+          const masterMap = new Map(masterItems.map(item => [item.sku.trim(), item]));
 
-            // CRITICAL: Fetch ALL SKUs for this company (with pagination, already trimmed by service)
-            const validSkus = await SupabaseDataService.getAllSkus(selectedCompanyId);
-            console.log(`Loaded ${validSkus.size} SKUs from Item Master for validation`);
+          const missingSkus: string[] = [];
+          
+          // 3. Enrich the Closing Stock rows with data from Item Master
+          const enrichedStock = processedStock.map((item, index) => {
+            const trimmedSku = item.sku?.trim() || '';
+            if (!trimmedSku) throw new Error(`Row ${index + 2}: SKU is empty`);
 
-            // TRIM CSV data and validate against master SKUs
-            const missingSkus: string[] = [];
-            const trimmedStock = processedStock.map((item, index) => {
-                // Trim the SKU
-                const trimmedSku = item.sku?.trim() || '';
+            const masterInfo = masterMap.get(trimmedSku);
 
-                // Validate SKU exists
-                if (!trimmedSku) {
-                    throw new Error(`Row ${index + 2}: SKU is empty or missing`);
-                }
-
-                if (!validSkus.has(trimmedSku)) {
-                    missingSkus.push(trimmedSku);
-                }
-
-                // For closing stock, we only need SKU and systemQuantity
-                // Name and Category will come from Item Master
-                return {
-                    sku: trimmedSku,
-                    location: item.location?.trim() || '',
-                    systemQuantity: item.systemQuantity,
-                    customAttributes: item.customAttributes || {},
-                    uploadBatchKey: batchKey
-                };
-            });
-
-            // Report validation errors if any SKUs are missing
-            if (missingSkus.length > 0) {
-                const uniqueMissing = [...new Set(missingSkus)];
-                const exampleSkus = uniqueMissing.slice(0, 5).join('", "');
-                const remainingCount = uniqueMissing.length > 5 ? ` (and ${uniqueMissing.length - 5} more)` : '';
-                
-                throw new Error(
-                    `Validation Failed: Found ${uniqueMissing.length} SKU(s) not in Item Master.\n\n` +
-                    `Examples: "${exampleSkus}"${remainingCount}\n\n` +
-                    `Please ensure all SKUs exist in the Item Master before uploading Closing Stock. ` +
-                    `Check for typos, extra spaces, or case sensitivity issues.`
-                );
+            if (!masterInfo) {
+              missingSkus.push(trimmedSku);
             }
 
-            console.log(`✓ Validation passed: All ${trimmedStock.length} SKUs found in Item Master`);
+            return {
+              sku: trimmedSku,
+              // PRIORITY: Use Master Name > CSV Name > Unnamed
+              name: masterInfo?.name || item.name || "Unnamed Item",
+              category: masterInfo?.category || item.category || "General",
+              location: item.location?.trim() || '',
+              systemQuantity: item.systemQuantity || 0,
+              // Merge Custom Attributes (Master attributes + specific stock attributes)
+              customAttributes: {
+                ...(masterInfo?.customAttributes || {}),
+                ...(item.customAttributes || {})
+              },
+              uploadBatchKey: batchKey
+            };
+          });
 
-            // Upload validated and trimmed data
-            await SupabaseDataService.setClosingStock(
-                trimmedStock, 
-                selectedCompanyId, 
-                selectedAssignmentId
-            );
+          // 4. Handle Missing SKUs (Strict Validation)
+          if (missingSkus.length > 0) {
+            const uniqueMissing = [...new Set(missingSkus)];
+            const exampleSkus = uniqueMissing.slice(0, 5).join('", "');
+            const remaining = uniqueMissing.length > 5 ? ` (+${uniqueMissing.length - 5} more)` : '';
             
-            await SupabaseDataService.logUploadBatch({
-                batchKey,
-                companyId: selectedCompanyId,
-                locationId: targetLocationId,
-                locationName: locations.find(l => l.id === targetLocationId)?.name || "Unknown",
-                uploadType: "closing_stock",
-                totalItems: trimmedStock.length,
-                assignmentId: parseInt(selectedAssignmentId)
-            });
+            throw new Error(
+              `Validation Failed: ${uniqueMissing.length} SKUs not found in Item Master.\n` +
+              `Examples: "${exampleSkus}"${remaining}.\n\n` +
+              `Please upload these items to Item Master first.`
+            );
+          }
 
-            await refreshData();
-            toast.success(`Closing Stock imported successfully! (${trimmedStock.length} items)`);
-            setClosingStockFile(null);
+          // 5. Upload Enriched Data
+          await SupabaseDataService.setClosingStock(
+            enrichedStock, 
+            selectedCompanyId, 
+            selectedAssignmentId
+          );
+          
+          await SupabaseDataService.logUploadBatch({
+            batchKey,
+            companyId: selectedCompanyId,
+            locationId: targetLocationId,
+            locationName: locations.find(l => l.id === targetLocationId)?.name || "Unknown",
+            uploadType: "closing_stock",
+            totalItems: enrichedStock.length,
+            assignmentId: parseInt(selectedAssignmentId)
+          });
+
+          await refreshData();
+          toast.success(`Closing Stock imported! (${enrichedStock.length} items enriched with Master Data)`);
+          setClosingStockFile(null);
         }
 
         if (onUploadComplete) onUploadComplete();
 
       } catch (error: any) {
         console.error("Import error:", error);
-        toast.error("Import Failed", { 
-          description: error.message,
-          duration: 6000 // Longer duration for validation errors
-        });
+        toast.error("Import Failed", { description: error.message, duration: 6000 });
       } finally {
         setIsProcessing(false);
       }

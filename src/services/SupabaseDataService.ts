@@ -425,6 +425,10 @@ class SupabaseDataService {
     }
   }
 
+// src/services/SupabaseDataService.ts
+
+// ... (Inside SupabaseDataService class)
+
   public async setClosingStock(items: Partial<InventoryItem>[], companyId: string, assignmentId: string): Promise<void> {
      if (items.length === 0) return;
      
@@ -436,8 +440,8 @@ class SupabaseDataService {
          
          const dbItems = chunk.map(item => ({
            sku: item.sku,
-           name: item.name || "Unnamed Item", 
-           category: item.category,
+           name: item.name || "Unnamed Item", // FIXED: Now mapping the name
+           category: item.category || "-",    // FIXED: Now mapping the category
            location: item.location,
            company_id: companyId,
            assignment_id: assignmentIdInt, 
