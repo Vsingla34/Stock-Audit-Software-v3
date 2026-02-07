@@ -48,7 +48,6 @@ export const FileUploader = ({
   const [itemMasterFile, setItemMasterFile] = useState<File | null>(null);
   const [closingStockFile, setClosingStockFile] = useState<File | null>(null);
 
-  // FIX: Destructure closingStockUploaded and refreshData
   const { setItemMaster, setClosingStock, locations, itemMaster, assignments, closingStockUploaded, refreshData } = useInventory();
   const { selectedCompanyId, selectedAssignmentId: contextAssignmentId } = useCompany();
 
@@ -56,8 +55,8 @@ export const FileUploader = ({
     contextAssignmentId ? String(contextAssignmentId) : ""
   );
 
-  // Local state for dropdown/immediate update checks
   const [localAssignmentUploaded, setLocalAssignmentUploaded] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false); // Validating state
 
   useEffect(() => {
     if (contextAssignmentId) {
@@ -65,17 +64,14 @@ export const FileUploader = ({
     }
   }, [contextAssignmentId]);
 
-  // NEW: Check upload status whenever assignment selection changes
   useEffect(() => {
     const checkStatus = async () => {
       if (selectedAssignmentId) {
         const id = parseInt(selectedAssignmentId);
         if (!isNaN(id)) {
-          // If context ID matches selection, sync with global state initially
           if (contextAssignmentId && String(contextAssignmentId) === String(selectedAssignmentId)) {
              setLocalAssignmentUploaded(closingStockUploaded);
           } else {
-             // Otherwise fetch explicitly
              const hasStock = await SupabaseDataService.hasClosingStockForAssignment(id);
              setLocalAssignmentUploaded(hasStock);
           }
@@ -98,6 +94,7 @@ export const FileUploader = ({
     });
   }, [assignments, userRole, assignedLocations]);
 
+  // Use this length check only for UI feedback, NOT for validation
   const hasItemMaster = itemMaster.length > 0;
 
   const currentActiveAssignment = useMemo(() => {
@@ -107,265 +104,215 @@ export const FileUploader = ({
   const targetLocationId = currentActiveAssignment ? currentActiveAssignment.locationId : null;
   const isAssignmentActive = !!currentActiveAssignment;
   
-  // Combine logic: If context ID is present, we trust the sync effect. 
-  // Basically 'localAssignmentUploaded' is our source of truth now since the effect syncs it.
   const isStockUploadedForCurrentSelection = localAssignmentUploaded;
 
   const handleFileChange = (file: File | null, setFile: (f: File | null) => void) => {
-    if (file && !file.name.toLowerCase().endsWith(".csv")) {
-      toast.error("Invalid file", { description: "Please upload a CSV file" });
+    if (file && !file.name.endsWith('.csv')) {
+      toast.error("Please upload a CSV file");
       return;
     }
     setFile(file);
   };
 
-  const [isImporting, setIsImporting] = useState(false);
+  const handleImport = async (type: 'master' | 'stock') => {
+    if (!selectedCompanyId) {
+        toast.error("No company selected");
+        return;
+    }
 
-  const handleImport = async () => {
-    setIsImporting(true);
+    const file = type === 'master' ? itemMasterFile : closingStockFile;
+    if (!file) {
+      toast.error(`Please select a ${type === 'master' ? 'Item Master' : 'Closing Stock'} CSV file`);
+      return;
+    }
 
-    try {
-      if (canUploadItemMaster && itemMasterFile) {
-        if (!selectedCompanyId) throw new Error("Select a company first.");
-        
-        const text = await itemMasterFile.text();
-        const rows = processCSV(text);
-        if (rows.length === 0) throw new Error("File is empty.");
-
-        const processedItems = processItemMasterData(rows);
-        const batchKey = generateBatchKey();
-        
-        const itemsWithKey = processedItems.map((item) => ({ 
-            ...item, 
-            uploadBatchKey: batchKey 
-        }));
-
-        await setItemMaster(itemsWithKey, selectedCompanyId);
-        
-        await SupabaseDataService.logUploadBatch({
-          batchKey,
-          companyId: selectedCompanyId,
-          locationId: null,
-          locationName: "All Locations",
-          uploadType: "item_master",
-          totalItems: itemsWithKey.length,
-        });
-
-        toast.success("Item Master Uploaded", { description: `${itemsWithKey.length} items added.` });
-        setItemMasterFile(null);
-        await refreshData(); 
-        if (onUploadComplete) onUploadComplete();
-      }
-
-      else if (canUploadClosingStock && closingStockFile) {
-        if (!selectedCompanyId) throw new Error("Select a company first.");
-        if (!hasItemMaster) throw new Error("Item Master missing. Please upload it first.");
-        
-        // Validation
-        if (isStockUploadedForCurrentSelection) throw new Error("Closing stock already uploaded for this assignment.");
-
-        if (!selectedAssignmentId) throw new Error("No assignment selected.");
-        if (!currentActiveAssignment) throw new Error("The selected assignment is not active or valid.");
-        if (!targetLocationId) throw new Error("Selected Assignment has no valid Location linked.");
-
-        const text = await closingStockFile.text();
-        const rows = processCSV(text);
-        if (rows.length === 0) throw new Error("File is empty.");
-
-        const processedItems = processClosingStockData(
-          rows,
-          'auditor', 
-          targetLocationId, 
-          locations
-        );
-
-        if (processedItems.length === 0) throw new Error("No valid items found.");
-
-        const masterMap = new Map();
-        itemMaster.forEach(item => {
-            const cleanKey = String(item.sku).trim().toLowerCase();
-            masterMap.set(cleanKey, item);
-        });
-
-        const invalidSKUs: string[] = [];
-        const itemsWithDetails: any[] = [];
-        const batchKey = generateBatchKey();
-
-        processedItems.forEach(stockItem => {
-            const stockSku = String(stockItem.sku).trim().toLowerCase();
-            const masterItem = masterMap.get(stockSku);
-
-            if (!masterItem) {
-                invalidSKUs.push(stockItem.sku);
-            } else {
-                itemsWithDetails.push({
-                    ...stockItem,
-                    sku: masterItem.sku, 
-                    name: masterItem.name || "Unnamed Item", 
-                    category: masterItem.category || "Uncategorized",
-                    description: masterItem.description || "",
-                    uom: masterItem.uom,
-                    price: masterItem.price,
-                    uploadBatchKey: batchKey
-                });
-            }
-        });
-        
-        if (invalidSKUs.length > 0) {
-           const examples = invalidSKUs.slice(0, 3).join(", ");
-           throw new Error(`Found ${invalidSKUs.length} SKUs not in Item Master (e.g., ${examples}). Please check for whitespace or typos. Upload rejected.`);
+    setIsProcessing(true);
+    const reader = new FileReader();
+    
+    reader.onload = async (e) => {
+      const text = e.target?.result as string;
+      
+      try {
+        const rawRows = processCSV(text);
+        if (rawRows.length === 0) {
+            throw new Error("CSV file is empty or invalid");
         }
 
-        if (itemsWithDetails.length === 0) throw new Error("No valid items matched with Item Master.");
+        const batchKey = generateBatchKey();
 
-        await setClosingStock(itemsWithDetails, selectedCompanyId, selectedAssignmentId);
+        if (type === 'master') {
+          const processedItems = processItemMasterData(rawRows);
+          
+          await SupabaseDataService.setItemMaster(processedItems.map(i => ({
+             ...i,
+             uploadBatchKey: batchKey
+          })), selectedCompanyId);
+          
+          await SupabaseDataService.logUploadBatch({
+            batchKey,
+            companyId: selectedCompanyId,
+            locationId: null,
+            locationName: "Master Data",
+            uploadType: "item_master",
+            totalItems: processedItems.length
+          });
 
-        const locName = locations.find(l => l.id === targetLocationId)?.name || "Unknown";
-        const assignmentIdInt = parseInt(selectedAssignmentId, 10);
+          await refreshData(); 
+          toast.success("Item Master imported successfully!");
+          setItemMasterFile(null);
         
-        await SupabaseDataService.logUploadBatch({
-          batchKey,
-          companyId: selectedCompanyId,
-          locationId: targetLocationId,
-          locationName: locName,
-          uploadType: "closing_stock",
-          totalItems: itemsWithDetails.length,
-          assignmentId: isNaN(assignmentIdInt) ? null : assignmentIdInt
-        });
+        } else {
+            // CLOSING STOCK UPLOAD
+            if (!selectedAssignmentId) throw new Error("Please select an assignment first");
+            
+            const processedStock = processClosingStockData(
+                rawRows, 
+                userRole as any, 
+                targetLocationId, 
+                locations
+            );
 
-        toast.success("Closing Stock Uploaded", { description: `${itemsWithDetails.length} items added for ${locName}` });
-        setClosingStockFile(null);
-        
-        // FIX: Force immediate refresh and local state update
-        await refreshData();
-        setLocalAssignmentUploaded(true); 
-        
+            // OPTIMIZATION: Fetch ALL SKUs for this company to check against (Set is fast!)
+            const validSkus = await SupabaseDataService.getAllSkus(selectedCompanyId);
+
+            const missingSkus = [];
+            for (const item of processedStock) {
+                if (!validSkus.has(item.sku)) {
+                    missingSkus.push(item.sku);
+                }
+            }
+
+            if (missingSkus.length > 0) {
+                const exampleSkus = missingSkus.slice(0, 3).join(", ");
+                throw new Error(`Found ${missingSkus.length} SKUs not in Item Master (e.g., ${exampleSkus}). Please check for whitespace or typos. Upload rejected.`);
+            }
+
+            await SupabaseDataService.setClosingStock(processedStock.map(i => ({
+                ...i,
+                uploadBatchKey: batchKey
+            })), selectedCompanyId, selectedAssignmentId);
+            
+            await SupabaseDataService.logUploadBatch({
+                batchKey,
+                companyId: selectedCompanyId,
+                locationId: targetLocationId,
+                locationName: locations.find(l => l.id === targetLocationId)?.name || "Unknown",
+                uploadType: "closing_stock",
+                totalItems: processedStock.length,
+                assignmentId: parseInt(selectedAssignmentId)
+            });
+
+            await refreshData();
+            toast.success("Closing Stock imported successfully!");
+            setClosingStockFile(null);
+        }
+
         if (onUploadComplete) onUploadComplete();
+
+      } catch (error: any) {
+        console.error("Import error:", error);
+        toast.error("Import Failed", { description: error.message });
+      } finally {
+        setIsProcessing(false);
       }
-    } catch (error: any) {
-      console.error("Import error:", error);
-      toast.error("Upload Failed", { description: error.message });
-    } finally {
-      setIsImporting(false);
-    }
+    };
+    reader.readAsText(file);
   };
 
-  if (!canUploadItemMaster && !canUploadClosingStock) return <NoPermissionCard />;
+  if (!selectedCompanyId) {
+      return (
+          <div className="p-8 text-center bg-gray-50 rounded-lg border border-gray-200">
+             <AlertCircle className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+             <p className="text-gray-500">Please select a company to upload data.</p>
+          </div>
+      );
+  }
 
   return (
     <div className="space-y-6">
-      {!hasItemMaster && canUploadClosingStock && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>
-            <strong>Item Master Missing:</strong> You must upload the Item Master file before uploading Closing Stock.
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {/* Warning Alert if Closing Stock is already uploaded */}
-      {canUploadClosingStock && isStockUploadedForCurrentSelection && (
-         <Alert className="border-yellow-200 bg-yellow-50 text-yellow-800">
-           <CheckCircle2 className="h-4 w-4 text-yellow-600" />
-           <AlertDescription>
-             <strong>Already Uploaded:</strong> Closing stock data exists for this assignment. Delete it from the history tab to re-upload.
-           </AlertDescription>
-         </Alert>
+      
+      {/* Assignment Selection Logic - Only visible if not Auditor or handled externally */}
+      {(userRole === 'admin' || userRole === 'super_admin') && (
+        <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm space-y-3">
+           <Label>Select Assignment for Closing Stock</Label>
+           <Select value={selectedAssignmentId} onValueChange={(val) => setSelectedAssignmentId(val)}>
+             <SelectTrigger><SelectValue placeholder="Choose active assignment..." /></SelectTrigger>
+             <SelectContent>
+                {activeAssignments.length === 0 ? (
+                    <SelectItem value="none" disabled>No active assignments</SelectItem>
+                ) : (
+                    activeAssignments.map(a => {
+                        const locName = locations.find(l => l.id === a.locationId)?.name || "Unknown Loc";
+                        return (
+                            <SelectItem key={a.id} value={String(a.id)}>
+                                {locName} - Due: {format(new Date(a.scheduledDate), 'MMM dd')}
+                            </SelectItem>
+                        );
+                    })
+                )}
+             </SelectContent>
+           </Select>
+        </div>
       )}
 
       <div className="grid md:grid-cols-2 gap-6">
-        {canUploadItemMaster && (
+        {/* Item Master Upload */}
+        {canUploadItemMaster ? (
           <FileInputCard
-            title="Step 1: Item Master"
-            description="Upload CSV with SKU, Name, Category. (No quantities)"
-            fileInputId="itemMasterUpload"
+            title="Item Master"
+            description="Upload base inventory catalog (SKU, Name, Category)"
             file={itemMasterFile}
-            onFileChange={(e) => handleFileChange(e.target.files?.[0] || null, setItemMasterFile)}
+            onFileChange={(f) => handleFileChange(f, setItemMasterFile)}
+            onUpload={() => handleImport('master')}
+            accept=".csv"
+            isUploading={isProcessing}
+            icon={<Lock className="h-5 w-5 text-indigo-600" />} 
           />
+        ) : (
+          <NoPermissionCard title="Item Master" description="You do not have permission to upload master data." />
         )}
 
-        {canUploadClosingStock && (
-          <div className="space-y-4">
-            <div className="bg-white p-4 rounded-lg border shadow-sm space-y-3">
-               <Label>Target Assignment</Label>
-               
-               {contextAssignmentId ? (
-                  <div className={`p-3 rounded-md border ${isAssignmentActive ? 'bg-indigo-50 border-indigo-100' : 'bg-red-50 border-red-100'}`}>
-                      {isAssignmentActive ? (
-                        <>
-                           <div className="flex items-center gap-2 text-indigo-900 font-medium">
-                              <Lock className="h-4 w-4 text-indigo-500" />
-                              Using Active Assignment
-                           </div>
-                           <div className="mt-2 text-sm text-indigo-700 flex items-center gap-2 ml-6">
-                              <MapPin className="h-3 w-3" />
-                              {locations.find(l => l.id === currentActiveAssignment?.locationId)?.name || "Unknown Location"}
-                           </div>
-                           <div className="text-xs text-indigo-500 ml-6 mt-1">
-                              ID: {contextAssignmentId} • {currentActiveAssignment?.scheduledDate ? format(new Date(currentActiveAssignment.scheduledDate), "MMM dd, yyyy") : ""}
-                           </div>
-                        </>
-                      ) : (
-                        <div className="flex items-center gap-2 text-red-700">
-                           <AlertCircle className="h-4 w-4" />
-                           <span>The selected assignment is not active or finalized. Upload is disabled.</span>
-                        </div>
-                      )}
+        {/* Closing Stock Upload */}
+        {canUploadClosingStock ? (
+          <div className="relative">
+              <FileInputCard
+                title="Closing Stock"
+                description={isAssignmentActive 
+                    ? `Upload stock for ${locations.find(l => l.id === targetLocationId)?.name || 'selected location'}`
+                    : "Select an assignment to upload stock"
+                }
+                file={closingStockFile}
+                onFileChange={(f) => handleFileChange(f, setClosingStockFile)}
+                onUpload={() => handleImport('stock')}
+                accept=".csv"
+                isUploading={isProcessing}
+                disabled={!isAssignmentActive || isStockUploadedForCurrentSelection}
+                icon={isStockUploadedForCurrentSelection 
+                    ? <CheckCircle2 className="h-5 w-5 text-green-600" /> 
+                    : <MapPin className="h-5 w-5 text-indigo-600" />
+                }
+              />
+              
+              {isStockUploadedForCurrentSelection && (
+                  <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded text-sm text-green-700 flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4" />
+                      Closing stock already uploaded for this assignment.
                   </div>
-               ) : (
-                  <>
-                    {activeAssignments.length === 0 ? (
-                      <p className="text-sm text-yellow-600 bg-yellow-50 p-2 rounded">
-                        No active assignments found. Please create an assignment first.
-                      </p>
-                    ) : (
-                      <Select value={selectedAssignmentId} onValueChange={setSelectedAssignmentId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select Assignment..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {activeAssignments.map(a => {
-                            const loc = locations.find(l => l.id === a.locationId);
-                            const date = a.scheduledDate ? format(new Date(a.scheduledDate), "MMM dd") : "";
-                            return (
-                              <SelectItem key={a.id} value={String(a.id)}>
-                                <div className="flex items-center gap-2">
-                                  <MapPin className="h-3 w-3 text-indigo-500" />
-                                  <span className="font-medium">{loc?.name || "Unknown"}</span>
-                                  <span className="text-gray-400 text-xs">({date})</span>
-                                </div>
-                              </SelectItem>
-                            );
-                          })}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </>
-               )}
-            </div>
-
-            <FileInputCard
-              title="Step 2: Closing Stock"
-              description="Upload CSV with SKU and System Quantity."
-              fileInputId="closingStockUpload"
-              file={closingStockFile}
-              onFileChange={(e) => handleFileChange(e.target.files?.[0] || null, setClosingStockFile)}
-              // FIX: Disable if closing stock already uploaded
-              disabled={!hasItemMaster || !selectedAssignmentId || !isAssignmentActive || isStockUploadedForCurrentSelection} 
-            />
+              )}
           </div>
+        ) : (
+          <NoPermissionCard title="Closing Stock" description="You do not have permission to upload closing stock." />
         )}
-
-        <div className="md:col-span-2 flex flex-col items-center">
-          <Button
-            className="w-full max-w-md bg-indigo-600 hover:bg-indigo-700 text-white"
-            disabled={isImporting || (!itemMasterFile && !closingStockFile)}
-            onClick={handleImport}
-          >
-            {isImporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Start Upload"}
-          </Button>
-        </div>
       </div>
+
+      {isProcessing && (
+        <Alert className="bg-blue-50 border-blue-200">
+           <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+           <AlertDescription className="text-blue-700 ml-2">
+              Processing data... This may take a moment for large files.
+           </AlertDescription>
+        </Alert>
+      )}
     </div>
   );
 };

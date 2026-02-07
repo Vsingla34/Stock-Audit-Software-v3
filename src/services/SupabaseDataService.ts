@@ -220,9 +220,9 @@ class SupabaseDataService {
     return true;
   }
 
-  // UPDATED: Now fetches ALL items using pagination loop to break 1000 row limit
+  // OPTIMIZED: Fetch all items with pagination & array push
   public async getItemMaster(companyId: string, assignmentId: number | null = null): Promise<InventoryItem[]> {
-    let allItems: any[] = [];
+    const allItems: any[] = []; // Constant reference, mutate content
     let page = 0;
     const pageSize = 1000;
 
@@ -250,11 +250,10 @@ class SupabaseDataService {
 
         if (!data || data.length === 0) break;
         
-        allItems = [...allItems, ...data];
+        // Push items instead of spreading (More memory efficient)
+        allItems.push(...data);
         
-        // If we fetched fewer items than pageSize, we've reached the end
         if (data.length < pageSize) break;
-        
         page++;
     }
 
@@ -294,6 +293,32 @@ class SupabaseDataService {
     });
   }
 
+  // NEW: Lightweight SKU Fetcher for Fast Validation (Fixes UI Lag)
+  public async getAllSkus(companyId: string): Promise<Set<string>> {
+      const allSkus = new Set<string>();
+      let page = 0;
+      const pageSize = 2000; // Fetch more per request since payload is small
+
+      while(true) {
+          const { data, error } = await supabase
+             .from("inventory_items")
+             .select("sku")
+             .eq("company_id", companyId)
+             .is("assignment_id", null) // Only fetch Master Items
+             .range(page * pageSize, (page + 1) * pageSize - 1);
+          
+          if (error) throw error;
+          if (!data || data.length === 0) break;
+
+          // Populate Set directly
+          data.forEach(row => allSkus.add(row.sku));
+          
+          if (data.length < pageSize) break;
+          page++;
+      }
+      return allSkus;
+  }
+
   public async getAuditedItems(companyId: string, assignmentId: number | null = null): Promise<InventoryItem[]> {
     return this.getItemMaster(companyId, assignmentId);
   }
@@ -301,7 +326,7 @@ class SupabaseDataService {
   public async setItemMaster(items: Partial<InventoryItem>[], companyId: string): Promise<void> {
     if (items.length === 0) return;
     
-    // Process upserts in chunks to avoid payload size limits
+    // Process upserts in chunks
     const CHUNK_SIZE = 500;
     for (let i = 0; i < items.length; i += CHUNK_SIZE) {
         const chunk = items.slice(i, i + CHUNK_SIZE);

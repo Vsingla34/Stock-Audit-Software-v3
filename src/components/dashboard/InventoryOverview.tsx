@@ -10,7 +10,8 @@ import {
   FileText,
   MapPin,
   Send,
-  Lock
+  Lock,
+  Package 
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
@@ -23,7 +24,8 @@ export const InventoryOverview = () => {
     getInventorySummary, 
     locations, 
     assignments, 
-    submitAudit 
+    submitAudit,
+    itemMaster
   } = useInventory();
   
   const { selectedAssignmentId } = useCompany();
@@ -32,6 +34,14 @@ export const InventoryOverview = () => {
   
   const summary = getInventorySummary();
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Calculate Total Stock Count (Sum of System Quantity for Closing Stock ONLY)
+  // Filter itemMaster to find items associated with the current assignment ID
+  const closingStockItems = selectedAssignmentId 
+    ? itemMaster.filter(item => item.assignmentId === selectedAssignmentId)
+    : [];
+
+  const totalStockCount = closingStockItems.reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
 
   // 1. Get Current Assignment
   const currentAssignment = assignments.find(a => a.id === selectedAssignmentId);
@@ -129,23 +139,34 @@ export const InventoryOverview = () => {
       </CardHeader>
       
       <CardContent>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-2">
-          {/* Total Items */}
+        {/* Adjusted Grid Layout: Added sm and lg breakpoints for 5 items */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mt-2">
+          
+          {/* 1. Total Items (Row Count) */}
           <div className="p-4 bg-gray-50 rounded-xl border border-gray-100">
             <div className="flex justify-between items-start mb-2">
-              <span className="text-gray-500 text-sm font-medium">Total Inventory Items</span>
+              <span className="text-gray-500 text-sm font-medium">Unique Items</span>
               <FileText className="h-4 w-4 text-gray-400" />
             </div>
             <div className="text-2xl font-bold text-gray-900">{summary.totalItems}</div>
-            <div className="text-xs text-gray-500 mt-1">Total items in inventory</div>
+            <div className="text-xs text-gray-500 mt-1">Total SKUs in inventory</div>
           </div>
 
-          {/* Progress */}
+          {/* 2. Total Stock Count (Sum of System Qty for Closing Stock) */}
+          <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
+            <div className="flex justify-between items-start mb-2">
+              <span className="text-blue-600 text-sm font-medium">Total Stock</span>
+              <Package className="h-4 w-4 text-blue-500" />
+            </div>
+            <div className="text-2xl font-bold text-blue-900">{totalStockCount}</div>
+            <div className="text-xs text-blue-600 mt-1">Closing Stock Sum</div>
+          </div>
+
+          {/* 3. Progress */}
           <div className="p-4 bg-indigo-50 rounded-xl border border-indigo-100">
             <div className="flex justify-between items-start mb-2">
               <span className="text-indigo-600 text-sm font-medium">Audit Progress</span>
               <div className="h-4 w-4 text-indigo-400">
-                 {/* Mini Chart Icon */}
                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
               </div>
             </div>
@@ -153,7 +174,7 @@ export const InventoryOverview = () => {
             <div className="text-xs text-indigo-600 mt-1">{summary.auditedItems} of {summary.totalItems} items audited</div>
           </div>
 
-          {/* Matched */}
+          {/* 4. Matched */}
           <div className="p-4 bg-green-50 rounded-xl border border-green-100">
             <div className="flex justify-between items-start mb-2">
               <span className="text-green-600 text-sm font-medium">Matched Items</span>
@@ -163,7 +184,7 @@ export const InventoryOverview = () => {
             <div className="text-xs text-green-600 mt-1">Items with matching quantities</div>
           </div>
 
-          {/* Discrepancies */}
+          {/* 5. Discrepancies */}
           <div className="p-4 bg-red-50 rounded-xl border border-red-100">
             <div className="flex justify-between items-start mb-2">
               <span className="text-red-600 text-sm font-medium">Discrepancies</span>
