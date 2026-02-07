@@ -272,11 +272,50 @@ class SupabaseDataService {
           try { parsedCustomAttributes = JSON.parse(item.custom_attributes); } catch { parsedCustomAttributes = {}; }
       }
 
+      // CRITICAL FIX: Use custom attribute name as fallback if main name is empty
+      let itemName = item.name;
+      if (!itemName || itemName === "Unnamed Item") {
+        // Check for name in custom attributes (case-insensitive)
+        const customName = parsedCustomAttributes['Name'] || 
+                          parsedCustomAttributes['name'] || 
+                          parsedCustomAttributes['Item Name'] ||
+                          parsedCustomAttributes['item_name'];
+        if (customName) {
+          itemName = customName;
+        } else {
+          itemName = "Unnamed Item";
+        }
+      }
+
+      // CRITICAL FIX: Use custom attribute category as fallback if main category is empty
+      let itemCategory = item.category;
+      if (!itemCategory || itemCategory === "-") {
+        const customCategory = parsedCustomAttributes['Category'] || 
+                              parsedCustomAttributes['category'];
+        if (customCategory) {
+          itemCategory = customCategory;
+        }
+      }
+
+      // CRITICAL FIX: Remove duplicate fields from customAttributes
+      // This prevents duplicate columns in the UI (Name, Category, etc.)
+      const reservedFields = ['sku', 'name', 'category', 'location', 'systemQuantity', 'physicalQuantity', 
+                              'status', 'lastAudited', 'notes', 'clientRemarks', 'uploadBatchKey', 'assignmentId',
+                              'id', 'companyId', 'auditorEntries', 'item_name', 'itemname'];
+      
+      const cleanedCustomAttributes = { ...parsedCustomAttributes };
+      reservedFields.forEach(field => {
+        delete cleanedCustomAttributes[field];
+        // Also check lowercase/uppercase variations
+        delete cleanedCustomAttributes[field.toLowerCase()];
+        delete cleanedCustomAttributes[field.toUpperCase()];
+      });
+
       return {
         id: item.id,
         sku: item.sku,
-        name: item.name || "Unnamed Item", 
-        category: item.category,
+        name: itemName, 
+        category: itemCategory,
         location: item.location,
         companyId: item.company_id,
         systemQuantity: item.system_quantity,
@@ -288,34 +327,65 @@ class SupabaseDataService {
         clientRemarks: item.client_remarks,
         uploadBatchKey: item.upload_batch_key,
         assignmentId: item.assignment_id,
-        customAttributes: parsedCustomAttributes
+        customAttributes: cleanedCustomAttributes
       };
     });
   }
 
-  // NEW: Lightweight SKU Fetcher for Fast Validation (Fixes UI Lag)
+  // ENHANCED: Lightweight SKU Fetcher with Robust Pagination & Trimming
   public async getAllSkus(companyId: string): Promise<Set<string>> {
       const allSkus = new Set<string>();
       let page = 0;
-      const pageSize = 2000; // Fetch more per request since payload is small
+      const pageSize = 1000; // Standard page size for reliable fetching
+      let totalFetched = 0;
+
+      console.log(`Starting SKU fetch for company ${companyId}...`);
 
       while(true) {
+          const start = page * pageSize;
+          const end = start + pageSize - 1;
+          
           const { data, error } = await supabase
              .from("inventory_items")
              .select("sku")
              .eq("company_id", companyId)
              .is("assignment_id", null) // Only fetch Master Items
-             .range(page * pageSize, (page + 1) * pageSize - 1);
+             .range(start, end);
           
-          if (error) throw error;
+          if (error) {
+              console.error("Error fetching SKUs at page", page, error);
+              throw error;
+          }
+          
+          // If no data returned, we've reached the end
           if (!data || data.length === 0) break;
 
-          // Populate Set directly
-          data.forEach(row => allSkus.add(row.sku));
+          // Populate Set with trimmed SKUs to prevent whitespace mismatches
+          data.forEach(row => {
+              if (row.sku) {
+                  const trimmedSku = row.sku.trim();
+                  if (trimmedSku) { // Only add non-empty SKUs
+                      allSkus.add(trimmedSku);
+                  }
+              }
+          });
           
-          if (data.length < pageSize) break;
+          totalFetched += data.length;
+          
+          // If we got fewer items than pageSize, we've reached the end
+          if (data.length < pageSize) {
+              console.log(`Completed SKU fetch: ${totalFetched} rows processed, ${allSkus.size} unique SKUs`);
+              break;
+          }
+          
           page++;
+          
+          // Log progress for large datasets
+          if (page % 5 === 0) {
+              console.log(`SKU fetch progress: page ${page}, ${totalFetched} rows, ${allSkus.size} unique SKUs so far...`);
+          }
       }
+      
       return allSkus;
   }
 

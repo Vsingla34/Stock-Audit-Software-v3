@@ -143,10 +143,32 @@ export const FileUploader = ({
         if (type === 'master') {
           const processedItems = processItemMasterData(rawRows);
           
-          await SupabaseDataService.setItemMaster(processedItems.map(i => ({
-             ...i,
-             uploadBatchKey: batchKey
-          })), selectedCompanyId);
+          // Validate required fields: SKU, Name, Category
+          processedItems.forEach((item, index) => {
+            if (!item.sku || !item.sku.trim()) {
+              throw new Error(`Row ${index + 2}: SKU is required`);
+            }
+            if (!item.name || !item.name.trim()) {
+              throw new Error(`Row ${index + 2}: Name is required`);
+            }
+            if (!item.category || !item.category.trim()) {
+              throw new Error(`Row ${index + 2}: Category is required`);
+            }
+          });
+          
+          // TRIM all string fields in Item Master data
+          const trimmedItems = processedItems.map(item => ({
+            ...item,
+            sku: item.sku.trim(),
+            name: item.name.trim(),
+            category: item.category.trim(),
+            location: item.location?.trim() || '',
+            uploadBatchKey: batchKey
+          }));
+          
+          console.log(`Uploading ${trimmedItems.length} items to Item Master...`);
+          
+          await SupabaseDataService.setItemMaster(trimmedItems, selectedCompanyId);
           
           await SupabaseDataService.logUploadBatch({
             batchKey,
@@ -154,15 +176,15 @@ export const FileUploader = ({
             locationId: null,
             locationName: "Master Data",
             uploadType: "item_master",
-            totalItems: processedItems.length
+            totalItems: trimmedItems.length
           });
 
           await refreshData(); 
-          toast.success("Item Master imported successfully!");
+          toast.success(`Item Master imported successfully! (${trimmedItems.length} items)`);
           setItemMasterFile(null);
         
         } else {
-            // CLOSING STOCK UPLOAD
+            // CLOSING STOCK UPLOAD WITH ENHANCED VALIDATION
             if (!selectedAssignmentId) throw new Error("Please select an assignment first");
             
             const processedStock = processClosingStockData(
@@ -172,25 +194,60 @@ export const FileUploader = ({
                 locations
             );
 
-            // OPTIMIZATION: Fetch ALL SKUs for this company to check against (Set is fast!)
+            console.log(`Validating ${processedStock.length} items from Closing Stock CSV...`);
+
+            // CRITICAL: Fetch ALL SKUs for this company (with pagination, already trimmed by service)
             const validSkus = await SupabaseDataService.getAllSkus(selectedCompanyId);
+            console.log(`Loaded ${validSkus.size} SKUs from Item Master for validation`);
 
-            const missingSkus = [];
-            for (const item of processedStock) {
-                if (!validSkus.has(item.sku)) {
-                    missingSkus.push(item.sku);
+            // TRIM CSV data and validate against master SKUs
+            const missingSkus: string[] = [];
+            const trimmedStock = processedStock.map((item, index) => {
+                // Trim the SKU
+                const trimmedSku = item.sku?.trim() || '';
+
+                // Validate SKU exists
+                if (!trimmedSku) {
+                    throw new Error(`Row ${index + 2}: SKU is empty or missing`);
                 }
-            }
 
+                if (!validSkus.has(trimmedSku)) {
+                    missingSkus.push(trimmedSku);
+                }
+
+                // For closing stock, we only need SKU and systemQuantity
+                // Name and Category will come from Item Master
+                return {
+                    sku: trimmedSku,
+                    location: item.location?.trim() || '',
+                    systemQuantity: item.systemQuantity,
+                    customAttributes: item.customAttributes || {},
+                    uploadBatchKey: batchKey
+                };
+            });
+
+            // Report validation errors if any SKUs are missing
             if (missingSkus.length > 0) {
-                const exampleSkus = missingSkus.slice(0, 3).join(", ");
-                throw new Error(`Found ${missingSkus.length} SKUs not in Item Master (e.g., ${exampleSkus}). Please check for whitespace or typos. Upload rejected.`);
+                const uniqueMissing = [...new Set(missingSkus)];
+                const exampleSkus = uniqueMissing.slice(0, 5).join('", "');
+                const remainingCount = uniqueMissing.length > 5 ? ` (and ${uniqueMissing.length - 5} more)` : '';
+                
+                throw new Error(
+                    `Validation Failed: Found ${uniqueMissing.length} SKU(s) not in Item Master.\n\n` +
+                    `Examples: "${exampleSkus}"${remainingCount}\n\n` +
+                    `Please ensure all SKUs exist in the Item Master before uploading Closing Stock. ` +
+                    `Check for typos, extra spaces, or case sensitivity issues.`
+                );
             }
 
-            await SupabaseDataService.setClosingStock(processedStock.map(i => ({
-                ...i,
-                uploadBatchKey: batchKey
-            })), selectedCompanyId, selectedAssignmentId);
+            console.log(`✓ Validation passed: All ${trimmedStock.length} SKUs found in Item Master`);
+
+            // Upload validated and trimmed data
+            await SupabaseDataService.setClosingStock(
+                trimmedStock, 
+                selectedCompanyId, 
+                selectedAssignmentId
+            );
             
             await SupabaseDataService.logUploadBatch({
                 batchKey,
@@ -198,12 +255,12 @@ export const FileUploader = ({
                 locationId: targetLocationId,
                 locationName: locations.find(l => l.id === targetLocationId)?.name || "Unknown",
                 uploadType: "closing_stock",
-                totalItems: processedStock.length,
+                totalItems: trimmedStock.length,
                 assignmentId: parseInt(selectedAssignmentId)
             });
 
             await refreshData();
-            toast.success("Closing Stock imported successfully!");
+            toast.success(`Closing Stock imported successfully! (${trimmedStock.length} items)`);
             setClosingStockFile(null);
         }
 
@@ -211,7 +268,10 @@ export const FileUploader = ({
 
       } catch (error: any) {
         console.error("Import error:", error);
-        toast.error("Import Failed", { description: error.message });
+        toast.error("Import Failed", { 
+          description: error.message,
+          duration: 6000 // Longer duration for validation errors
+        });
       } finally {
         setIsProcessing(false);
       }
@@ -309,7 +369,7 @@ export const FileUploader = ({
         <Alert className="bg-blue-50 border-blue-200">
            <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
            <AlertDescription className="text-blue-700 ml-2">
-              Processing data... This may take a moment for large files.
+              Processing and validating data... This may take a moment for large files.
            </AlertDescription>
         </Alert>
       )}

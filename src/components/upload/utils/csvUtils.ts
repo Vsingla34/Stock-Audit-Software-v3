@@ -38,29 +38,59 @@ const parsePrice = (val: any): number => {
 };
 
 export const processItemMasterData = (rows: CSVRow[]): Omit<InventoryItem, 'id'>[] => {
-  return rows.map((row, index) => {
-    const sku = row['sku'] || row['item code'];
+  // CRITICAL: Track SKUs to detect duplicates
+  const seenSkus = new Map<string, number>(); // SKU -> first occurrence row number
+  const duplicates: string[] = [];
+  
+  const processedItems = rows.map((row, index) => {
+    const sku = (row['sku'] || row['item code'] || '').trim();
     if (!sku) {
       throw new Error(`Row ${index + 2} in Item Master is missing 'sku' column.`);
     }
 
-    const name = row['name'] || row['item name'] || row['description'] || 'Unnamed Item';
-    const category = row['category'] || row['type'] || '';
+    // Check for duplicates
+    if (seenSkus.has(sku)) {
+      duplicates.push(`SKU "${sku}" appears in row ${seenSkus.get(sku)} and row ${index + 2}`);
+    } else {
+      seenSkus.set(sku, index + 2);
+    }
+
+    const name = (row['name'] || row['item name'] || row['description'] || '').trim();
+    if (!name) {
+      throw new Error(`Row ${index + 2} in Item Master is missing 'name' column.`);
+    }
+
+    const category = (row['category'] || row['type'] || '').trim();
+    if (!category) {
+      throw new Error(`Row ${index + 2} in Item Master is missing 'category' column.`);
+    }
     
-    // Quantity logic (if included in master upload)
+    // Quantity logic (if included in master upload) - OPTIONAL
     const quantityStr = row['systemquantity'] || row['system quantity'] || row['quantity'] || row['qty'] || '0';
     const systemQuantity = parseInt(quantityStr, 10) || 0;
 
-    const knownKeys = ['sku', 'item code', 'name', 'item name', 'description', 'category', 'type', 'systemquantity', 'system quantity', 'quantity', 'qty', 'location', 'warehouse', 'store'];
+    // RESERVED FIELDS - These are NOT custom attributes
+    const reservedKeys = [
+      'sku', 'item code', 
+      'name', 'item name', 'description', 
+      'category', 'type', 
+      'systemquantity', 'system quantity', 'quantity', 'qty', 
+      'location', 'warehouse', 'store'
+    ];
+    
     const customAttributes: Record<string, any> = {};
     
-    // --- NEW: Price & Value Logic ---
+    // --- Price & Value Logic ---
     let unitPrice = 0;
     const priceKeywords = ['unit price', 'unit_price', 'price', 'rate', 'cost', 'mrp', 'unit cost'];
 
     Object.keys(row).forEach(key => {
-        if (!knownKeys.includes(key)) {
-            customAttributes[key] = row[key];
+        // Only add to customAttributes if NOT a reserved field
+        if (!reservedKeys.includes(key)) {
+            const value = row[key];
+            if (value !== null && value !== undefined && value !== '') {
+              customAttributes[key] = value;
+            }
 
             // Check if this key is a price column
             if (priceKeywords.includes(key) && unitPrice === 0) {
@@ -89,6 +119,17 @@ export const processItemMasterData = (rows: CSVRow[]): Omit<InventoryItem, 'id'>
       customAttributes,
     };
   });
+
+  // CRITICAL: Throw error if duplicates found
+  if (duplicates.length > 0) {
+    throw new Error(
+      `Duplicate SKUs found in CSV:\n${duplicates.slice(0, 5).join('\n')}` +
+      (duplicates.length > 5 ? `\n...and ${duplicates.length - 5} more duplicates` : '') +
+      `\n\nPlease remove duplicate SKUs and try again.`
+    );
+  }
+
+  return processedItems;
 };
 
 export const processClosingStockData = (
@@ -97,6 +138,10 @@ export const processClosingStockData = (
   selectedLocationId?: string,
   allLocations?: Location[]
 ): any[] => {
+  // CRITICAL: Track SKUs to detect duplicates
+  const seenSkus = new Map<string, number>();
+  const duplicates: string[] = [];
+
   if (userRole === 'auditor') {
     if (!selectedLocationId || selectedLocationId === 'default') {
       throw new Error("Auditor must select a location.");
@@ -108,21 +153,34 @@ export const processClosingStockData = (
     const auditorLocationName = locationObj.name;
 
     return rows.map((row, index) => {
-      const sku = row['sku'] || row['item code'];
+      const sku = (row['sku'] || row['item code'] || '').trim();
       if (!sku) throw new Error(`Row ${index + 2} is missing 'sku'.`);
+
+      // Check for duplicates
+      if (seenSkus.has(sku)) {
+        duplicates.push(`SKU "${sku}" appears in row ${seenSkus.get(sku)} and row ${index + 2}`);
+      } else {
+        seenSkus.set(sku, index + 2);
+      }
 
       const quantityStr = row['systemquantity'] || row['system quantity'] || row['quantity'] || row['qty'] || '0';
       const systemQuantity = parseInt(quantityStr, 10);
       if (isNaN(systemQuantity)) throw new Error(`Row ${index + 2} has invalid quantity.`);
       
-      // Capture extra columns for value calculation if present in stock file
+      // RESERVED FIELDS
+      const reservedKeys = ['sku', 'item code', 'name', 'item name', 'description', 'category', 'type', 'systemquantity', 'system quantity', 'quantity', 'qty'];
+      
       const customAttributes: Record<string, any> = {};
       let unitPrice = 0;
       const priceKeywords = ['unit price', 'unit_price', 'price', 'rate', 'cost', 'mrp'];
       
       Object.keys(row).forEach(key => {
-         if (!['sku', 'item code', 'systemquantity', 'system quantity', 'quantity', 'qty'].includes(key)) {
-             customAttributes[key] = row[key];
+         if (!reservedKeys.includes(key)) {
+             const value = row[key];
+             if (value !== null && value !== undefined && value !== '') {
+               customAttributes[key] = value;
+             }
+             
              if (priceKeywords.includes(key) && unitPrice === 0) {
                  unitPrice = parsePrice(row[key]);
              }
@@ -134,17 +192,34 @@ export const processClosingStockData = (
          customAttributes['system_value'] = unitPrice * systemQuantity;
       }
 
+      // Throw error if duplicates found
+      if (duplicates.length > 0) {
+        throw new Error(
+          `Duplicate SKUs found in Closing Stock CSV:\n${duplicates.slice(0, 5).join('\n')}` +
+          (duplicates.length > 5 ? `\n...and ${duplicates.length - 5} more duplicates` : '') +
+          `\n\nPlease remove duplicate SKUs and try again.`
+        );
+      }
+
       return {
         sku,
         location: auditorLocationName,
         systemQuantity,
-        customAttributes // Pass this through
+        customAttributes
       };
     });
   } else {
+    // ADMIN UPLOAD
     return rows.map((row, index) => {
-      const sku = row['sku'] || row['item code'];
+      const sku = (row['sku'] || row['item code'] || '').trim();
       if (!sku) throw new Error(`Row ${index + 2} is missing 'sku'.`);
+
+      // Check for duplicates
+      if (seenSkus.has(sku)) {
+        duplicates.push(`SKU "${sku}" appears in row ${seenSkus.get(sku)} and row ${index + 2}`);
+      } else {
+        seenSkus.set(sku, index + 2);
+      }
 
       const quantityStr = row['systemquantity'] || row['system quantity'] || row['quantity'] || row['qty'] || '0';
       const systemQuantity = parseInt(quantityStr, 10);
@@ -153,13 +228,19 @@ export const processClosingStockData = (
       const rowLocation = row['location'] || row['warehouse'] || row['store'];
       if (!rowLocation) throw new Error(`Admin upload requires 'location' column in row ${index + 2}.`);
 
+      const reservedKeys = ['sku', 'item code', 'name', 'item name', 'description', 'category', 'type', 'systemquantity', 'system quantity', 'quantity', 'qty', 'location', 'warehouse', 'store'];
+      
       const customAttributes: Record<string, any> = {};
       let unitPrice = 0;
       const priceKeywords = ['unit price', 'unit_price', 'price', 'rate', 'cost', 'mrp'];
       
       Object.keys(row).forEach(key => {
-         if (!['sku', 'item code', 'systemquantity', 'system quantity', 'quantity', 'qty', 'location', 'warehouse', 'store'].includes(key)) {
-             customAttributes[key] = row[key];
+         if (!reservedKeys.includes(key)) {
+             const value = row[key];
+             if (value !== null && value !== undefined && value !== '') {
+               customAttributes[key] = value;
+             }
+             
              if (priceKeywords.includes(key) && unitPrice === 0) {
                  unitPrice = parsePrice(row[key]);
              }
@@ -169,6 +250,15 @@ export const processClosingStockData = (
       if (unitPrice > 0) {
          customAttributes['unit_price'] = unitPrice;
          customAttributes['system_value'] = unitPrice * systemQuantity;
+      }
+
+      // Throw error if duplicates found
+      if (duplicates.length > 0) {
+        throw new Error(
+          `Duplicate SKUs found in Closing Stock CSV:\n${duplicates.slice(0, 5).join('\n')}` +
+          (duplicates.length > 5 ? `\n...and ${duplicates.length - 5} more duplicates` : '') +
+          `\n\nPlease remove duplicate SKUs and try again.`
+        );
       }
 
       return {
