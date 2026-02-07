@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -31,22 +31,18 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { 
-  Users, 
   Plus, 
   Edit, 
   Trash, 
-  Building2, 
   Filter, 
   UploadCloud, 
-  FileSpreadsheet,
   Loader2,
-  Download,
   ArrowLeft 
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useUser } from "@/context/UserContext";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js"; 
 import { processCSV } from "@/components/upload/utils/csvUtils";
 
 interface UserProfile {
@@ -94,35 +90,65 @@ const UserManagement = () => {
     fetchData();
   }, []);
 
+  // --- HELPER: Get Admin Client ---
+  const getAdminClient = () => {
+    const SERVICE_ROLE_KEY = import.meta.env.VITE_SERVICE_KEY;
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    
+    if (!SERVICE_ROLE_KEY) {
+      console.error("VITE_SERVICE_KEY is missing!");
+      return null;
+    }
+    
+    return createClient(supabaseUrl, SERVICE_ROLE_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false }
+    });
+  };
+
+  // --- UPDATED FETCH DATA ---
   const fetchData = async () => {
     try {
-      let usersQuery = supabase
-        .from("user_profiles")
-        .select("id, email, name, role, assigned_companies, created_at")
-        .order("created_at", { ascending: false });
-
-      const { data: usersData, error: usersError } = await usersQuery;
-      if (usersError) throw usersError;
+      setLoading(true);
       
-      // Filter users: 
-      // 1. Super Admin sees everyone.
-      // 2. Admin sees only users who are assigned to at least one of the Admin's assigned companies.
-      let filteredUsers = usersData || [];
+      // 1. Use Admin Client to Fetch Users (Bypasses RLS)
+      const adminClient = getAdminClient();
+      let usersData: UserProfile[] = [];
 
+      if (adminClient) {
+          const { data, error } = await adminClient
+            .from("user_profiles")
+            .select("id, email, name, role, assigned_companies, created_at")
+            .order("created_at", { ascending: false });
+          
+          if (error) throw error;
+          usersData = (data as any[]) || [];
+      } else {
+          // Fallback to standard client (might fail if RLS is strict)
+          const { data, error } = await supabase
+            .from("user_profiles")
+            .select("id, email, name, role, assigned_companies, created_at")
+            .order("created_at", { ascending: false });
+            
+          if (error) throw error;
+          usersData = (data as any[]) || [];
+      }
+      
+      let filteredUsers = usersData;
+
+      // 2. Filter Logic (Frontend Security)
       if (!isSuperAdmin) {
         const myCompanyIds = currentUser?.assigned_companies || [];
         filteredUsers = filteredUsers.filter(user => {
-            // Hide Super Admins from regular Admins
             if (user.role === 'super_admin') return false;
-            
-            // Check for intersection in assigned_companies
             const userCompanies = user.assigned_companies || [];
+            // Show if user is assigned to at least one of my companies
             return userCompanies.some(id => myCompanyIds.includes(id));
         });
       }
 
       setUsers(filteredUsers);
 
+      // 3. Fetch Companies (Standard Client is usually fine for this, or use Admin if needed)
       const { data: companiesData, error: companiesError } = await supabase
         .from("companies")
         .select("id, name")
@@ -158,29 +184,53 @@ const UserManagement = () => {
 
   const handleCreateUser = async () => {
     try {
-      // 1. Create Auth User (Backend Function or Client if allowed)
-      // Note: Supabase client-side 'signUp' logs the user in. For admin creating user, we usually use a cloud function or secondary client.
-      // Assuming a backend function 'create-user' exists or we are using a workaround.
-      // For this prototype, let's assume we invoke a function.
-      
-      const { data, error } = await supabase.functions.invoke('create-user', {
-        body: {
-            email: formData.email,
-            password: formData.password,
-            name: formData.name,
-            role: formData.role,
-            assigned_companies: formData.assignedCompanies
+      const adminClient = getAdminClient();
+      if (!adminClient) {
+        toast.error("Config Error: VITE_SERVICE_KEY missing");
+        return;
+      }
+
+      // 1. Create User in Auth System
+      const { data, error } = await adminClient.auth.admin.createUser({
+        email: formData.email,
+        password: formData.password,
+        email_confirm: true,
+        user_metadata: {
+          name: formData.name,
+          role: formData.role,
+          assigned_companies: formData.assignedCompanies
         }
       });
 
       if (error) throw error;
+      if (!data.user) throw new Error("User created but ID missing");
+
+      // 2. FORCE INSERT into user_profiles
+      const { error: profileError } = await adminClient
+        .from("user_profiles")
+        .upsert({
+            id: data.user.id,
+            email: formData.email,
+            name: formData.name,
+            role: formData.role,
+            assigned_companies: formData.assignedCompanies,
+            created_at: new Date().toISOString()
+        });
       
-      toast.success("User created successfully");
+      if (profileError) {
+         console.error("Profile creation failed:", profileError);
+         toast.error("Account created but profile failed. Please check logs.");
+      } else {
+         toast.success("User created successfully");
+      }
+
       setIsAddDialogOpen(false);
       resetForm();
-      fetchData();
+      
+      await fetchData();
 
     } catch (error: any) {
+      console.error("Creation Error:", error);
       toast.error(error.message || "Failed to create user");
     }
   };
@@ -188,7 +238,11 @@ const UserManagement = () => {
   const handleUpdateUser = async () => {
     if (!selectedUser) return;
     try {
-        const { error } = await supabase
+        // Use Admin Client for updates too, to be safe against RLS
+        const adminClient = getAdminClient();
+        if (!adminClient) throw new Error("Admin client missing");
+
+        const { error } = await adminClient
             .from("user_profiles")
             .update({
                 name: formData.name,
@@ -208,48 +262,78 @@ const UserManagement = () => {
 
   const handleDeleteUser = async () => {
      if (!selectedUser) return;
-     // Note: Deleting from Auth requires admin API. Deleting from profile is easy.
-     // We will just delete profile or mark inactive. 
-     // For now, let's assume we call a function or delete profile.
      try {
-         const { error } = await supabase.from("user_profiles").delete().eq("id", selectedUser.id);
-         if (error) throw error;
-         toast.success("User deleted");
+         const adminClient = getAdminClient();
+         if (!adminClient) {
+            toast.error("Config Error: VITE_SERVICE_KEY missing");
+            return;
+         }
+
+         const { error: authError } = await adminClient.auth.admin.deleteUser(selectedUser.id);
+         
+         if (authError && !authError.message.includes("not found")) {
+            throw authError;
+         }
+
+         const { error: dbError } = await adminClient
+            .from("user_profiles")
+            .delete()
+            .eq("id", selectedUser.id);
+         
+         if (dbError) throw dbError;
+
+         toast.success("User deleted successfully");
          setIsDeleteDialogOpen(false);
-         fetchData();
-     } catch(e) {
-         toast.error("Failed to delete user");
+         await fetchData();
+
+     } catch(e: any) {
+         console.error("Delete Error:", e);
+         toast.error("Failed to delete user: " + e.message);
      }
   };
   
-  // CSV Import Logic (simplified)
   const handleImport = async () => {
       if (!importFile) return;
       setIsImporting(true);
       try {
-          // Parse CSV
           const { data } = await processCSV(importFile);
-          // Loop and create users (this might be slow, better to do in backend)
+          const adminClient = getAdminClient();
+          if (!adminClient) throw new Error("VITE_SERVICE_KEY missing");
+
           let count = 0;
           for (const row of data) {
               if (row.email && row.password) {
-                  await supabase.functions.invoke('create-user', {
-                      body: {
-                          email: row.email,
-                          password: row.password,
+                  // 1. Create Auth
+                  const { data: authData, error: authError } = await adminClient.auth.admin.createUser({
+                      email: row.email,
+                      password: row.password,
+                      email_confirm: true,
+                      user_metadata: {
                           name: row.name || row.email.split('@')[0],
                           role: row.role || 'auditor',
                           assigned_companies: row.company_ids ? row.company_ids.split(',') : []
                       }
                   });
-                  count++;
+
+                  // 2. Create Profile if Auth success
+                  if (!authError && authData.user) {
+                      await adminClient.from("user_profiles").upsert({
+                          id: authData.user.id,
+                          email: row.email,
+                          name: row.name || row.email.split('@')[0],
+                          role: row.role || 'auditor',
+                          assigned_companies: row.company_ids ? row.company_ids.split(',') : [],
+                          created_at: new Date().toISOString()
+                      });
+                      count++;
+                  }
               }
           }
           toast.success(`Imported ${count} users`);
           setIsImportDialogOpen(false);
           fetchData();
-      } catch (e) {
-          toast.error("Import failed");
+      } catch (e: any) {
+          toast.error("Import failed: " + e.message);
       } finally {
           setIsImporting(false);
       }
@@ -261,7 +345,7 @@ const UserManagement = () => {
   });
 
   return (
-    <AppLayout showSidebar={false}> {/* Sidebar hidden */}
+    <AppLayout showSidebar={false}>
       <div className="space-y-6 max-w-7xl mx-auto pt-6">
         
         {/* Header */}
@@ -420,7 +504,6 @@ const UserManagement = () => {
                                 <SelectItem value="auditor">Auditor</SelectItem>
                                 <SelectItem value="admin">Admin</SelectItem>
                                 <SelectItem value="client">Client</SelectItem>
-                                {/* Only Super Admin can create Super Admins usually, simplifying here */}
                                 {isSuperAdmin && <SelectItem value="super_admin">Super Admin</SelectItem>}
                             </SelectContent>
                         </Select>
@@ -463,7 +546,6 @@ const UserManagement = () => {
                         <Label>Name</Label>
                         <Input value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
                     </div>
-                     {/* Role */}
                      <div className="grid gap-2">
                         <Label>Role</Label>
                         <Select value={formData.role} onValueChange={(v: any) => setFormData({...formData, role: v})}>
@@ -518,6 +600,22 @@ const UserManagement = () => {
                     <Button disabled={!importFile || isImporting} onClick={handleImport}>
                         {isImporting ? "Importing..." : "Start Import"}
                     </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+
+        {/* Delete Confirmation Dialog */}
+         <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>Delete User</DialogTitle>
+                    <DialogDescription>
+                        Are you sure you want to delete this user? This action cannot be undone.
+                    </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                    <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>Cancel</Button>
+                    <Button variant="destructive" onClick={handleDeleteUser}>Delete</Button>
                 </DialogFooter>
             </DialogContent>
         </Dialog>

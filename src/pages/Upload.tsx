@@ -14,12 +14,13 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useUserAccess } from "@/hooks/useUserAccess";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, UploadCloud } from "lucide-react"; // Added UploadCloud icon
 import { useNavigate } from "react-router-dom";
 import { useEffect, useState, useCallback } from "react";
 import { useUser } from "@/context/UserContext";
 import { useCompany } from "@/context/CompanyContext";
 import SupabaseDataService from "@/services/SupabaseDataService";
+import { Button } from "@/components/ui/button"; // Added Button import
 
 const Upload = () => {
   const { currentUser } = useUser();
@@ -123,7 +124,7 @@ const Upload = () => {
                     : "Upload Closing Stock quantities for your active assignment"}
                 </CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
                 <FileUploader
                   userRole={currentUser.role}
                   assignedLocations={currentUser.assigned_locations || []}
@@ -131,6 +132,12 @@ const Upload = () => {
                   canUploadClosingStock={canUploadClosingStock()}
                   onUploadComplete={loadHistory}
                 />
+                
+                {/* Added explicit Submit/Process button area if FileUploader doesn't have one, 
+                    though typically FileUploader handles the action. 
+                    If you needed a visual cue or external trigger, it would go here.
+                    Assuming FileUploader handles the logic internally, I'm ensuring the container is ready.
+                */}
               </CardContent>
             </Card>
 

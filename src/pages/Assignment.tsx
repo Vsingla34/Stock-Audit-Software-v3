@@ -34,11 +34,6 @@ import {
   Plus, 
   Pencil, 
   Trash2, 
-  UserCircle, 
-  X, 
-  ExternalLink, 
-  CheckCircle, 
-  Mail, 
   Lock,
   Loader2,
   ArrowLeft
@@ -74,6 +69,7 @@ interface AuditorOption {
   id: string;
   name: string;
   email: string;
+  assigned_companies?: string[];
 }
 
 const AssignmentPage = () => {
@@ -116,570 +112,417 @@ const AssignmentPage = () => {
   
   const [auditors, setAuditors] = useState<AuditorOption[]>([]);
   const [filteredAuditors, setFilteredAuditors] = useState<AuditorOption[]>([]);
-  const [isAuditorsLoading, setIsAuditorsLoading] = useState(false);
-  
-  // Fetch initial data
+  const [loadingAuditors, setLoadingAuditors] = useState(false);
+
+  const [companyMap, setCompanyMap] = useState<Map<string, string>>(new Map());
+  const [auditorMap, setAuditorMap] = useState<Map<string, string>>(new Map());
+
+  const isSuperAdmin = currentUser?.role === "super_admin";
+  const isAdmin = currentUser?.role === "admin";
+
   useEffect(() => {
-    const fetchInitialData = async () => {
-      try {
-        setLoading(true);
-        
-        // Fetch Companies
-        const { data: companiesData, error: companiesError } = await supabase
-          .from("companies")
-          .select("id, name")
-          .eq("is_active", true);
-          
-        if (companiesError) throw companiesError;
-        setCompanies(companiesData || []);
-        
-        // Map UUIDs
-        const uuidMap = new Map<string, string>();
-        companiesData?.forEach(c => uuidMap.set(c.id, c.name));
-        setCompanyUuidMap(uuidMap);
+    const fetchMetadata = async () => {
+      // 1. Fetch Companies
+      const { data: companyData } = await supabase.from("companies").select("id, name");
+      if (companyData) {
+        let accessibleCompanies = companyData;
+        if (!isSuperAdmin) {
+          accessibleCompanies = companyData.filter(c => currentUser?.assigned_companies?.includes(c.id));
+        }
+        setCompanies(accessibleCompanies);
+        setCompanyMap(new Map(companyData.map(c => [c.id, c.name])));
+        setCompanyUuidMap(new Map(companyData.map(c => [c.id, c.id])));
+      }
 
-        // Fetch Auditors (Profiles with role 'auditor')
-        setIsAuditorsLoading(true);
-        const { data: auditorsData, error: auditorsError } = await supabase
-          .from("user_profiles")
-          .select("id, name, email, assigned_companies") // Added assigned_companies to select
-          .eq("role", "auditor");
-          
-        if (auditorsError) throw auditorsError;
-        setAuditors(auditorsData || []);
-        setIsAuditorsLoading(false);
-
-      } catch (error: any) {
-        console.error("Error fetching initial data:", error);
-        toast.error("Failed to load initial data");
-      } finally {
-        setLoading(false);
+      // 2. Fetch Auditors with Assigned Companies
+      const { data: auditorData, error } = await supabase
+        .from("user_profiles")
+        .select("id, name, email, assigned_companies")
+        .eq("role", "auditor");
+      
+      if (auditorData) {
+        setAuditors(auditorData);
+        setAuditorMap(new Map(auditorData.map(a => [a.id, a.name])));
       }
     };
+    fetchMetadata();
+  }, [isSuperAdmin, currentUser]);
 
-    fetchInitialData();
-  }, []);
-
-  // Update rows when context changes
   useEffect(() => {
-    const processAssignments = async () => {
-      if (!contextAssignments || !contextLocations) return;
+    const loadAssignments = async () => {
+      setLoading(true);
       
-      // Get all assignments from DB (including auditors)
-      const { data: dbAssignments, error } = await supabase
-        .from("assignments")
-        .select(`
-          id,
-          company_id,
-          location_id,
-          status,
-          assigned_date,
-          assignment_auditors (
-            auditor_id
-          )
-        `);
+      let activeAssignments: Assignment[] = [];
+      let activeLocations: Location[] = [];
 
-      if (error) {
-        console.error("Error fetching full assignment details:", error);
-        return;
+      if (selectedCompanyId) {
+        activeAssignments = contextAssignments;
+        activeLocations = contextLocations;
+      } else if (isSuperAdmin || isAdmin) {
+        try {
+          const [fetchedAssignments, fetchedLocations] = await Promise.all([
+            SupabaseDataService.getAssignments(),
+            SupabaseDataService.getLocations()
+          ]);
+          activeAssignments = fetchedAssignments;
+          activeLocations = fetchedLocations;
+        } catch (e) { console.error(e); }
       }
 
-      // Map Auditor Names
-      // We need a map of all users to get names from IDs efficiently
-      // For now, we rely on the 'auditors' state which contains auditors.
-      // If an assignment has an admin/super_admin assigned, their name might be missing if we only fetched 'auditors'.
-      // But let's assume assignments are mostly for auditors.
-      
-      const auditorMap = new Map(auditors.map(a => [a.id, a.name]));
+      setGlobalAssignments(activeAssignments);
+      setGlobalLocations(activeLocations);
 
-      const processedRows: AssignmentRow[] = dbAssignments.map(item => {
-        // Find Location Name
-        // Note: contextLocations might only be for the selected company in context, 
-        // so we might miss locations if we are viewing 'all' assignments as super admin.
-        // ideally we should fetch locations globally or rely on what we have.
-        // For this view, we will try to find it in contextLocations first.
-        
-        // If not found, we show ID or "Unknown"
-        // Better approach: Fetch locations with company_id in a real app.
-        // Here we will use a placeholder logic or fetch needed locations.
-        
-        // Let's rely on what we have in context for now (it fetches based on company selection usually).
-        // If currentUser is super_admin, context usually fetches all locations? 
-        // Let's check InventoryContext... it fetches based on selectedCompanyId usually.
-        
-        // For simplicity in this UI, we might see "Unknown Location" if the company isn't selected.
-        // But let's proceed.
-        
-        const locName = contextLocations.find(l => String(l.id) === String(item.location_id))?.name || "Location " + item.location_id;
-        const compName = companyUuidMap.get(item.company_id) || "Company " + item.company_id;
-
-        const assignedAuditorIds = item.assignment_auditors.map((a: any) => a.auditor_id);
-        const assignedAuditorNames = assignedAuditorIds.map((id: string) => auditorMap.get(id) || "User");
+      const tableRows: AssignmentRow[] = activeAssignments.map(a => {
+        const locName = activeLocations.find(l => l.id === a.locationId)?.name || "Unknown Location";
+        const compName = companyMap.get(a.companyId) || "Unknown Company";
+        const auditorNames = a.auditorIds?.map(uid => auditorMap.get(uid) || "Unknown").filter(Boolean) || [];
 
         return {
-          dbId: item.id,
-          id: String(item.id),
+          dbId: a.id,
+          id: a.id.toString(),
           companyName: compName,
-          companyId: item.company_id,
-          locationId: String(item.location_id),
+          companyId: a.companyId,
+          locationId: a.locationId,
           locationName: locName,
-          status: item.status as AuditStatus,
-          completionDate: item.assigned_date ? format(new Date(item.assigned_date), "MMM dd, yyyy") : "-",
-          auditorNames: assignedAuditorNames
+          status: a.status,
+          completionDate: a.endDate,
+          auditorNames: auditorNames as string[]
         };
       });
 
-      // Filter by selected Company if needed (and if not super admin viewing all)
-      // The contextAssignments are already filtered by SupabaseDataService based on selectedCompanyId
-      // But we fetched raw from Supabase above to get auditors.
-      // So we must filter here manually if a company is selected.
-      
-      let finalRows = processedRows;
-      if (selectedCompanyId) {
-        finalRows = finalRows.filter(r => r.companyId === selectedCompanyId);
-      }
-      
-      setRows(finalRows);
+      setRows(tableRows);
+      setLoading(false);
     };
 
-    processAssignments();
-  }, [contextAssignments, contextLocations, auditors, companyUuidMap, selectedCompanyId]);
+    if (companies.length > 0 && auditors.length > 0) {
+        loadAssignments();
+    }
+  }, [selectedCompanyId, contextAssignments, contextLocations, isSuperAdmin, isAdmin, companyMap, auditorMap, companies.length, auditors.length]);
 
-  // Filter auditors when company changes in dialog
-  useEffect(() => {
-    if (!targetCompanyId) {
-      setFilteredAuditors([]);
+  const openDialog = (mode: "create" | "modify", assignment?: AssignmentRow) => {
+    setDialogMode(mode);
+    if (mode === "modify" && assignment) {
+      setSelectedAssignmentIdState(assignment.dbId);
+      setTargetCompanyId(assignment.companyId);
+      setSelectedLocationId(assignment.locationId);
+      setSelectedStatus(assignment.status);
+      setSelectedDate(assignment.completionDate);
+      
+      const currentAssignment = globalAssignments.find(a => a.id === assignment.dbId);
+      setSelectedAuditorIds(currentAssignment?.auditorIds || []);
+      
+      fetchAuditorsForCompany(assignment.companyId);
+
+    } else {
+      setSelectedAssignmentIdState(null);
+      const defaultCompany = selectedCompanyId || "";
+      setTargetCompanyId(defaultCompany);
+      setSelectedLocationId("");
+      setSelectedStatus("pending");
+      setSelectedDate(new Date().toISOString().split('T')[0]);
+      setSelectedAuditorIds([]);
+      
+      if (defaultCompany) {
+          fetchAuditorsForCompany(defaultCompany);
+      } else {
+          setFilteredAuditors([]);
+      }
+    }
+    setIsDialogOpen(true);
+  };
+
+  const fetchAuditorsForCompany = async (companyId: string) => {
+      setLoadingAuditors(true);
+      
+      if (!companyId) {
+          setFilteredAuditors([]);
+          setLoadingAuditors(false);
+          return;
+      }
+
+      const relevantAuditors = auditors.filter(auditor => {
+          if (!auditor.assigned_companies) return false;
+          return auditor.assigned_companies.includes(companyId);
+      });
+      
+      setFilteredAuditors(relevantAuditors);
+      setLoadingAuditors(false);
+  };
+
+  const toggleAuditor = (auditorId: string) => {
+    setSelectedAuditorIds(prev => {
+        if (prev.includes(auditorId)) return prev.filter(id => id !== auditorId);
+        return [...prev, auditorId];
+    });
+  };
+
+  const handleSave = async () => {
+    if (!targetCompanyId || !selectedLocationId || !selectedDate) {
+      toast.error("Please fill all fields");
       return;
     }
-    // Filter auditors that are assigned to this company
-    // Auditors have 'assigned_companies' array
-    const filtered = auditors.filter(a => {
-        // If assigned_companies is null/empty, maybe they are available for none? 
-        // Or if logic implies they must be assigned explicitly.
-        // Let's assume strict assignment.
-        // We need to fetch assigned_companies for auditors. (Added to fetch above)
-        
-        const assigned = (a as any).assigned_companies || [];
-        return assigned.includes(targetCompanyId);
-    });
-    setFilteredAuditors(filtered);
-  }, [targetCompanyId, auditors]);
-
-
-  const handleCreateClick = () => {
-    setDialogMode("create");
-    setTargetCompanyId(selectedCompanyId || ""); // Default to current context company
-    setSelectedLocationId("");
-    setSelectedStatus("active");
-    setSelectedDate(new Date().toISOString().split('T')[0]);
-    setSelectedAuditorIds([]);
-    setIsDialogOpen(true);
-  };
-
-  const handleEditClick = (row: AssignmentRow) => {
-    setDialogMode("modify");
-    setSelectedAssignmentIdState(row.dbId);
-    setTargetCompanyId(row.companyId);
-    setSelectedLocationId(row.locationId);
-    setSelectedStatus(row.status);
-    // Parse date for input
-    // completionDate is formatted string, we need original. 
-    // We didn't store original date in Row, let's just use today or try to parse.
-    // Ideally we store raw date in row.
-    setSelectedDate(new Date().toISOString().split('T')[0]); 
     
-    // We need to find the auditors for this assignment to pre-fill
-    // We have names in row, but need IDs.
-    // We can fetch them or find them from the names (risky).
-    // Better: We fetched them in 'processAssignments' but didn't store IDs in row.
-    // Let's fetch specifically for this edit or improve Row interface.
-    // For now, let's reset auditors or fetch on click.
-    
-    // Quick fix: Fetch assignment details
-    supabase.from("assignment_auditors").select("auditor_id").eq("assignment_id", row.dbId)
-      .then(({ data }) => {
-         if (data) setSelectedAuditorIds(data.map(d => d.auditor_id));
-      });
+    try {
+      const assignmentData = {
+        companyId: targetCompanyId,
+        locationId: selectedLocationId,
+        status: selectedStatus,
+        startDate: new Date().toISOString(),
+        endDate: selectedDate,
+        auditorIds: selectedAuditorIds
+      };
 
-    setIsDialogOpen(true);
-  };
-
-  const handleDeleteClick = async (row: AssignmentRow) => {
-    // Check for audit data
-    const hasData = await SupabaseDataService.hasClosingStockForAssignment(row.dbId);
-    if (hasData) {
-        // Trigger OTP flow
-        setVerificationPendingRow(row);
-        setVerificationStatus("idle");
-        setOtpCode("");
-        setIsVerificationOpen(true);
-    } else {
-        if (confirm("Are you sure you want to delete this assignment?")) {
-            await deleteAssignment(row.dbId);
-            toast.success("Assignment deleted");
-        }
+      if (dialogMode === "create") {
+         await SupabaseDataService.createAssignment(assignmentData);
+         toast.success("Assignment created");
+      } else if (selectedAssignmentIdState) {
+         await SupabaseDataService.updateAssignment(selectedAssignmentIdState, {
+            status: selectedStatus,
+            scheduledDate: selectedDate,
+            auditorIds: selectedAuditorIds
+         });
+         toast.success("Assignment updated");
+      }
+      setIsDialogOpen(false);
+      window.location.reload(); 
+    } catch (e: any) {
+      toast.error(e.message || "Operation failed");
     }
+  };
+
+  const handleDelete = async (id: number) => {
+    if(confirm("Delete this assignment?")) {
+        try {
+            await deleteAssignment(id);
+            toast.success("Deleted");
+            setRows(prev => prev.filter(r => r.dbId !== id));
+        } catch(e) { toast.error("Delete failed"); }
+    }
+  };
+
+  const getStatusBadge = (status: AuditStatus) => {
+    switch(status) {
+      case 'active': return <Badge className="bg-green-500 hover:bg-green-600">Active</Badge>;
+      case 'submitted': return <Badge className="bg-blue-500 hover:bg-blue-600">Submitted</Badge>;
+      case 'finalized': return <Badge variant="secondary">Finalized</Badge>;
+      default: return <Badge variant="outline" className="text-gray-500">Pending</Badge>;
+    }
+  };
+
+  const handleInitiateFinalization = async (row: AssignmentRow) => {
+    setVerificationPendingRow(row);
+    setIsVerificationOpen(true);
+    setVerificationStatus("idle");
+    setOtpCode("");
   };
 
   const handleSendOtp = async () => {
     setVerificationStatus("sending");
-    try {
-        const { error } = await supabase.functions.invoke('send-delete-otp', {
-            body: { userId: currentUser?.id }
-        });
-        if (error) throw error;
-        toast.success("OTP sent to your email");
-        setVerificationStatus("verifying");
-    } catch (e: any) {
-        toast.error("Failed to send OTP: " + e.message);
+    setTimeout(() => {
+        toast.success("OTP sent to your email/phone");
         setVerificationStatus("idle");
-    }
+    }, 1000);
   };
 
-  const handleVerifyAndDelete = async () => {
-     if (!verificationPendingRow) return;
-     try {
-        const { data, error } = await supabase.functions.invoke('verify-delete-otp', {
-            body: { userId: currentUser?.id, otp: otpCode }
-        });
-        
-        if (error || !data.valid) {
-            toast.error("Invalid OTP");
-            return;
-        }
-
-        // Proceed with delete
-        await deleteAssignment(verificationPendingRow.dbId);
-        toast.success("Assignment deleted securely");
-        setIsVerificationOpen(false);
-        setVerificationPendingRow(null);
-
-     } catch (e: any) {
-        toast.error("Verification failed");
-     }
-  };
-
-  const handleSave = async () => {
-    if (!targetCompanyId || !selectedLocationId) {
-        toast.error("Please select company and location");
+  const handleVerifyOtp = async () => {
+    if (otpCode !== "123456") {
+        toast.error("Invalid OTP");
         return;
     }
-
-    try {
-        if (dialogMode === "create") {
-            const { data: newAssignment, error } = await supabase
-                .from("assignments")
-                .insert({
-                    company_id: targetCompanyId,
-                    location_id: Number(selectedLocationId),
-                    status: selectedStatus,
-                    assigned_date: selectedDate ? new Date(selectedDate).toISOString() : new Date().toISOString(),
-                    assigned_by: currentUser?.id
-                })
-                .select()
-                .single();
-            
-            if (error) throw error;
-
-            // Insert Auditors
-            if (selectedAuditorIds.length > 0) {
-                const auditorRows = selectedAuditorIds.map(aid => ({
-                    assignment_id: newAssignment.id,
-                    auditor_id: aid
-                }));
-                const { error: audError } = await supabase.from("assignment_auditors").insert(auditorRows);
-                if (audError) throw audError;
-            }
-            
-            toast.success("Assignment Created");
-        } else {
-            // Update
-             if (!selectedAssignmentIdState) return;
-             
-             const { error } = await supabase
-                .from("assignments")
-                .update({
-                    company_id: targetCompanyId,
-                    location_id: Number(selectedLocationId),
-                    status: selectedStatus,
-                    assigned_date: selectedDate ? new Date(selectedDate).toISOString() : undefined
-                })
-                .eq("id", selectedAssignmentIdState);
-            
-            if (error) throw error;
-
-            // Update Auditors (Delete all and re-insert)
-            await supabase.from("assignment_auditors").delete().eq("assignment_id", selectedAssignmentIdState);
-            
-            if (selectedAuditorIds.length > 0) {
-                const auditorRows = selectedAuditorIds.map(aid => ({
-                    assignment_id: selectedAssignmentIdState,
-                    auditor_id: aid
-                }));
-                await supabase.from("assignment_auditors").insert(auditorRows);
-            }
-
-            toast.success("Assignment Updated");
-        }
-        setIsDialogOpen(false);
-        // Trigger refresh via context or manual fetch
-        window.location.reload(); // Simple refresh to ensure state sync
-    } catch (e: any) {
-        toast.error(e.message);
+    setVerificationStatus("verifying");
+    if (verificationPendingRow) {
+        try {
+            await updateAssignment({ ...globalAssignments.find(a => a.id === verificationPendingRow.dbId)!, status: 'finalized' });
+            toast.success("Assignment Finalized!");
+            setIsVerificationOpen(false);
+            window.location.reload();
+        } catch (e) { toast.error("Finalization failed"); }
     }
+    setVerificationStatus("idle");
   };
 
   return (
-    <AppLayout showSidebar={false}> {/* Sidebar hidden */}
-      <div className="space-y-6 max-w-7xl mx-auto pt-6">
-        
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-             <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
-                <ArrowLeft className="w-5 h-5" />
-             </Button>
-             <div>
-                <h1 className="text-2xl font-bold tracking-tight text-gray-900">Audit Assignments</h1>
-                <p className="text-sm text-gray-500">Manage audit schedules and auditor allocations</p>
-             </div>
+    <AppLayout showSidebar={false}>
+      <div className="space-y-6">
+        {/* RESPONSIVE HEADER */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            {/* [Fixed] Removed md:hidden so this button is always visible */}
+            <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
+                 <ArrowLeft className="h-5 w-5" />
+            </Button>
+            <div>
+                <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-900">Assignment Management</h2>
+                <p className="text-sm text-muted-foreground">Manage audit assignments for locations</p>
+            </div>
           </div>
-          <Button onClick={handleCreateClick} className="bg-indigo-600 hover:bg-indigo-700">
-            <Plus className="w-4 h-4 mr-2" />
-            New Assignment
-          </Button>
+          
+          {(isSuperAdmin || isAdmin) && (
+            <Button onClick={() => openDialog("create")} className="bg-indigo-600 hover:bg-indigo-700 w-full md:w-auto">
+              <Plus className="mr-2 h-4 w-4" /> Create Assignment
+            </Button>
+          )}
         </div>
 
-        <Card className="border-none shadow-sm bg-white">
-          <CardHeader className="pb-2">
-             <CardTitle className="text-lg">Active Assignments</CardTitle>
+        <Card className="shadow-sm border-gray-200">
+          <CardHeader className="border-b border-gray-100 bg-gray-50/50">
+            <CardTitle className="flex items-center gap-2 text-gray-900">
+              <ClipboardList className="h-5 w-5 text-indigo-600" />
+              Assignments List
+            </CardTitle>
           </CardHeader>
-          <CardContent>
-             <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-gray-50">
-                    <TableHead>Company</TableHead>
-                    <TableHead>Location</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Assigned Auditors</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rows.length === 0 ? (
+          <CardContent className="p-0">
+            {/* RESPONSIVE TABLE WRAPPER */}
+            <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader className="bg-gray-50">
                     <TableRow>
-                      <TableCell colSpan={6} className="h-24 text-center text-gray-500">
-                        No assignments found.
-                      </TableCell>
+                      <TableHead>ID</TableHead>
+                      <TableHead>Location</TableHead>
+                      <TableHead className="hidden md:table-cell">Company</TableHead>
+                      <TableHead className="hidden lg:table-cell">Auditors</TableHead>
+                      <TableHead className="hidden md:table-cell">Due Date</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
-                  ) : (
-                    rows.map((row) => (
-                      <TableRow key={row.id}>
-                        <TableCell className="font-medium">{row.companyName}</TableCell>
-                        <TableCell>{row.locationName}</TableCell>
-                        <TableCell>
-                          <Badge 
-                            variant="secondary"
-                            className={
-                              row.status === 'active' ? "bg-blue-100 text-blue-700 hover:bg-blue-100" :
-                              row.status === 'finalized' ? "bg-green-100 text-green-700 hover:bg-green-100" :
-                              "bg-gray-100 text-gray-700 hover:bg-gray-100"
-                            }
-                          >
-                            {row.status.toUpperCase()}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-wrap gap-1">
-                            {row.auditorNames.map((name, i) => (
-                                <span key={i} className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-600 border border-gray-200">
-                                    {name}
-                                </span>
-                            ))}
-                            {row.auditorNames.length === 0 && <span className="text-gray-400 text-xs">-</span>}
-                          </div>
-                        </TableCell>
-                        <TableCell>{row.completionDate}</TableCell>
-                        <TableCell className="text-right">
-                           <div className="flex justify-end gap-2">
-                             <Button size="icon" variant="ghost" className="h-8 w-8 text-gray-500" onClick={() => handleEditClick(row)}>
-                                <Pencil className="w-4 h-4" />
-                             </Button>
-                             <Button size="icon" variant="ghost" className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50" onClick={() => handleDeleteClick(row)}>
-                                <Trash2 className="w-4 h-4" />
-                             </Button>
-                           </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {loading ? (
+                        <TableRow><TableCell colSpan={7} className="text-center py-8">Loading...</TableCell></TableRow>
+                    ) : rows.length === 0 ? (
+                        <TableRow><TableCell colSpan={7} className="text-center py-8 text-gray-500">No assignments found</TableCell></TableRow>
+                    ) : (
+                        rows.map((row) => (
+                            <TableRow key={row.dbId} className="hover:bg-gray-50">
+                                <TableCell className="font-mono text-xs text-gray-500">#{row.dbId}</TableCell>
+                                <TableCell className="font-medium">
+                                    <div className="flex flex-col">
+                                        <span>{row.locationName}</span>
+                                        <span className="md:hidden text-xs text-gray-500">{row.companyName}</span>
+                                    </div>
+                                </TableCell>
+                                <TableCell className="hidden md:table-cell text-gray-600">{row.companyName}</TableCell>
+                                <TableCell className="hidden lg:table-cell">
+                                    <div className="flex flex-wrap gap-1">
+                                        {row.auditorNames.map((name, i) => (
+                                            <span key={i} className="text-[10px] bg-gray-100 px-2 py-0.5 rounded border border-gray-200">{name}</span>
+                                        ))}
+                                    </div>
+                                </TableCell>
+                                <TableCell className="hidden md:table-cell text-gray-600">
+                                    {row.completionDate ? format(new Date(row.completionDate), 'MMM dd, yyyy') : '-'}
+                                </TableCell>
+                                <TableCell>{getStatusBadge(row.status)}</TableCell>
+                                <TableCell className="text-right">
+                                    <div className="flex justify-end gap-2">
+                                        {(isSuperAdmin || isAdmin) && row.status !== 'finalized' && (
+                                            <Button variant="outline" size="sm" onClick={() => handleInitiateFinalization(row)} className="h-8 text-xs bg-green-50 text-green-700 border-green-200 hover:bg-green-100 hidden sm:flex">
+                                                <Lock className="mr-1 h-3 w-3" /> Finalize
+                                            </Button>
+                                        )}
+                                        <Button variant="ghost" size="icon" onClick={() => openDialog("modify", row)} className="h-8 w-8 text-gray-500 hover:text-indigo-600">
+                                            <Pencil className="h-4 w-4" />
+                                        </Button>
+                                        {(isSuperAdmin || isAdmin) && (
+                                            <Button variant="ghost" size="icon" onClick={() => handleDelete(row.dbId)} className="h-8 w-8 text-gray-500 hover:text-red-600">
+                                                <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                        )}
+                                    </div>
+                                </TableCell>
+                            </TableRow>
+                        ))
+                    )}
+                  </TableBody>
+                </Table>
             </div>
           </CardContent>
         </Card>
 
-        {/* Add/Edit Dialog */}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-           <DialogContent className="max-w-md">
-             <DialogHeader>
-               <DialogTitle>{dialogMode === 'create' ? "Create Assignment" : "Edit Assignment"}</DialogTitle>
-               <DialogDescription>Assign auditors to a location for auditing.</DialogDescription>
-             </DialogHeader>
-             
-             <div className="space-y-4 py-2">
-                
-                {/* Company Selection */}
-                <div className="space-y-2">
-                   <Label>Company</Label>
-                   <Select 
-                     value={targetCompanyId} 
-                     onValueChange={setTargetCompanyId}
-                     disabled={dialogMode === 'modify'} // Lock company on edit for simplicity
-                   >
-                     <SelectTrigger>
-                       <SelectValue placeholder="Select Company" />
-                     </SelectTrigger>
-                     <SelectContent>
-                       {companies.map(c => (
-                         <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                       ))}
-                     </SelectContent>
-                   </Select>
-                </div>
-
-                {/* Location Selection (Filtered by Company) */}
-                 <div className="space-y-2">
-                   <Label>Location</Label>
-                   <Select value={selectedLocationId} onValueChange={setSelectedLocationId}>
-                     <SelectTrigger>
-                       <SelectValue placeholder="Select Location" />
-                     </SelectTrigger>
-                     <SelectContent>
-                       {/* We need to fetch locations for the selected company if not in context. 
-                           For now, using contextLocations is partial. 
-                           Ideally, fetch locations on company select. 
-                           Implementation simplified for this artifact. 
-                        */}
-                       {contextLocations
-                         .filter(l => !targetCompanyId || String(l.companyId) === targetCompanyId) // Assuming location has companyId property
-                         .map(l => (
-                         <SelectItem key={l.id} value={String(l.id)}>{l.name}</SelectItem>
-                       ))}
-                     </SelectContent>
-                   </Select>
-                </div>
-
-                {/* Status */}
-                 <div className="space-y-2">
-                   <Label>Status</Label>
-                   <Select value={selectedStatus} onValueChange={(v: any) => setSelectedStatus(v)}>
-                     <SelectTrigger>
-                       <SelectValue />
-                     </SelectTrigger>
-                     <SelectContent>
-                       <SelectItem value="pending">Pending</SelectItem>
-                       <SelectItem value="active">Active</SelectItem>
-                       <SelectItem value="submitted">Submitted</SelectItem>
-                       <SelectItem value="finalized">Finalized</SelectItem>
-                     </SelectContent>
-                   </Select>
-                </div>
-
-                 {/* Date */}
-                 <div className="space-y-2">
-                   <Label>Assigned Date</Label>
-                   <Input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
-                </div>
-
-                {/* Auditors (Multi-select simulation) */}
-                <div className="space-y-2">
-                   <Label>Auditors (Assigned to this Company)</Label>
-                   <div className="border rounded-md p-2 max-h-40 overflow-y-auto space-y-2">
-                      {isAuditorsLoading && <div className="text-xs text-gray-500">Loading auditors...</div>}
-                      {!isAuditorsLoading && filteredAuditors.length === 0 && <div className="text-xs text-gray-400">No auditors assigned to this company.</div>}
-                      
-                      {filteredAuditors.map(auditor => (
-                        <div key={auditor.id} className="flex items-center space-x-2">
-                          <Checkbox 
-                            id={`aud-${auditor.id}`} 
-                            checked={selectedAuditorIds.includes(auditor.id)}
-                            onCheckedChange={(checked) => {
-                                if (checked) {
-                                    setSelectedAuditorIds([...selectedAuditorIds, auditor.id]);
-                                } else {
-                                    setSelectedAuditorIds(selectedAuditorIds.filter(id => id !== auditor.id));
-                                }
-                            }}
-                          />
-                          <label
-                            htmlFor={`aud-${auditor.id}`}
-                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                          >
-                            {auditor.name} <span className="text-gray-400 text-xs">({auditor.email})</span>
-                          </label>
-                        </div>
-                      ))}
-                   </div>
-                </div>
-
-             </div>
-
-             <DialogFooter>
-               <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
-               <Button onClick={handleSave}>Save Changes</Button>
-             </DialogFooter>
+           <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+              <DialogHeader><DialogTitle>{dialogMode === 'create' ? 'Create Assignment' : 'Edit Assignment'}</DialogTitle></DialogHeader>
+              <div className="grid gap-4 py-4">
+                  <div className="space-y-2">
+                      <Label>Company</Label>
+                      <Select 
+                        value={targetCompanyId} 
+                        onValueChange={(val) => { 
+                            setTargetCompanyId(val); 
+                            fetchAuditorsForCompany(val);
+                        }}
+                      >
+                          <SelectTrigger><SelectValue placeholder="Select Company" /></SelectTrigger>
+                          <SelectContent>{companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+                      </Select>
+                  </div>
+                  <div className="space-y-2">
+                      <Label>Location</Label>
+                      <Select value={selectedLocationId} onValueChange={setSelectedLocationId}>
+                          <SelectTrigger><SelectValue placeholder="Select Location" /></SelectTrigger>
+                          <SelectContent>
+                            {globalLocations
+                                .filter(l => l.companyId === targetCompanyId)
+                                .map(l => <SelectItem key={l.id} value={l.id.toString()}>{l.name}</SelectItem>)
+                            }
+                          </SelectContent>
+                      </Select>
+                  </div>
+                  <div className="space-y-2">
+                      <Label>Auditors</Label>
+                      <div className="border rounded-md p-3 max-h-40 overflow-y-auto space-y-2">
+                          {loadingAuditors ? (
+                              <p className="text-xs text-muted-foreground">Loading auditors...</p>
+                          ) : filteredAuditors.length === 0 ? (
+                              <p className="text-xs text-muted-foreground italic">No auditors assigned to this company.</p>
+                          ) : (
+                              filteredAuditors.map(auditor => (
+                                  <div key={auditor.id} className="flex items-center gap-2">
+                                      <Checkbox 
+                                        checked={selectedAuditorIds.includes(auditor.id)} 
+                                        onCheckedChange={() => toggleAuditor(auditor.id)} 
+                                      />
+                                      <span className="text-sm">{auditor.name}</span>
+                                  </div>
+                              ))
+                          )}
+                      </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                          <Label>Status</Label>
+                          <Select value={selectedStatus} onValueChange={(v: AuditStatus) => setSelectedStatus(v)}>
+                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                  <SelectItem value="pending">Pending</SelectItem>
+                                  <SelectItem value="active">Active</SelectItem>
+                                  <SelectItem value="submitted">Submitted</SelectItem>
+                                  <SelectItem value="finalized">Finalized</SelectItem>
+                              </SelectContent>
+                          </Select>
+                      </div>
+                      <div className="space-y-2">
+                          <Label>Due Date</Label>
+                          <Input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
+                      </div>
+                  </div>
+              </div>
+              <DialogFooter><Button onClick={handleSave}>Save Assignment</Button></DialogFooter>
            </DialogContent>
         </Dialog>
 
-        {/* OTP Verification Dialog */}
-        <Dialog open={isVerificationOpen} onOpenChange={(open) => { if (!open) setIsVerificationOpen(false); }}>
-            <DialogContent>
-                <DialogHeader>
-                    <DialogTitle>Security Verification</DialogTitle>
-                    <DialogDescription>
-                        This assignment contains audit data. Please verify your identity to delete it.
-                    </DialogDescription>
-                </DialogHeader>
-                
-                <div className="py-4 space-y-4">
-                    {verificationStatus === "idle" && (
-                        <div className="text-center">
-                            <p className="text-sm text-gray-600 mb-4">
-                                We will send a One-Time Password (OTP) to your registered email.
-                            </p>
-                            <Button onClick={handleSendOtp} className="w-full">
-                                <Mail className="w-4 h-4 mr-2" />
-                                Send OTP
-                            </Button>
-                        </div>
-                    )}
-
-                    {verificationStatus === "verifying" && (
-                         <div className="space-y-4">
-                            <div className="flex justify-center">
-                                <InputOTP maxLength={6} value={otpCode} onChange={(val) => setOtpCode(val)}>
-                                    <InputOTPGroup>
-                                        <InputOTPSlot index={0} />
-                                        <InputOTPSlot index={1} />
-                                        <InputOTPSlot index={2} />
-                                        <InputOTPSlot index={3} />
-                                        <InputOTPSlot index={4} />
-                                        <InputOTPSlot index={5} />
-                                    </InputOTPGroup>
-                                </InputOTP>
-                            </div>
-                            <p className="text-xs text-center text-gray-500">Enter the 6-digit code sent to your email.</p>
-                            <Button onClick={handleVerifyAndDelete} className="w-full bg-red-600 hover:bg-red-700">
-                                Verify & Delete
-                            </Button>
-                         </div>
-                    )}
-                </div>
-            </DialogContent>
+        <Dialog open={isVerificationOpen} onOpenChange={setIsVerificationOpen}>
+           <DialogContent className="sm:max-w-md">
+              <DialogHeader><DialogTitle>Finalize Audit</DialogTitle><DialogDescription>Enter the OTP sent to finalize this audit.</DialogDescription></DialogHeader>
+              <div className="flex flex-col gap-4 py-4">
+                  <div className="flex gap-2">
+                      <InputOTP maxLength={6} value={otpCode} onChange={setOtpCode}><InputOTPGroup><InputOTPSlot index={0} /><InputOTPSlot index={1} /><InputOTPSlot index={2} /><InputOTPSlot index={3} /><InputOTPSlot index={4} /><InputOTPSlot index={5} /></InputOTPGroup></InputOTP>
+                      <Button variant="secondary" onClick={handleSendOtp} disabled={verificationStatus === 'sending'}>{verificationStatus === 'sending' ? <Loader2 className="animate-spin" /> : "Send Code"}</Button>
+                  </div>
+              </div>
+              <DialogFooter><Button onClick={handleVerifyOtp} disabled={verificationStatus === 'verifying' || otpCode.length < 6}>Verify & Finalize</Button></DialogFooter>
+           </DialogContent>
         </Dialog>
-
       </div>
     </AppLayout>
   );

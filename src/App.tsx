@@ -26,7 +26,7 @@ import AssignmentPage from "./pages/Assignment";
 
 const queryClient = new QueryClient();
 
-// ProtectedRoute Component
+
 const ProtectedRoute = ({
   children,
   requiredPermission,
