@@ -220,26 +220,45 @@ class SupabaseDataService {
     return true;
   }
 
+  // UPDATED: Now fetches ALL items using pagination loop to break 1000 row limit
   public async getItemMaster(companyId: string, assignmentId: number | null = null): Promise<InventoryItem[]> {
-    let query = supabase
-      .from("inventory_items")
-      .select("*")
-      .eq("company_id", companyId);
+    let allItems: any[] = [];
+    let page = 0;
+    const pageSize = 1000;
 
-    if (assignmentId) {
-       query = query.or(`assignment_id.eq.${assignmentId},assignment_id.is.null`);
-    } else {
-       query = query.is("assignment_id", null);
+    while (true) {
+        let query = supabase
+          .from("inventory_items")
+          .select("*")
+          .eq("company_id", companyId);
+
+        if (assignmentId) {
+           query = query.or(`assignment_id.eq.${assignmentId},assignment_id.is.null`);
+        } else {
+           query = query.is("assignment_id", null);
+        }
+
+        // Apply Range for Pagination
+        query = query.range(page * pageSize, (page + 1) * pageSize - 1);
+
+        const { data, error } = await query;
+
+        if (error) {
+          console.error("Error fetching item master:", error);
+          throw error;
+        }
+
+        if (!data || data.length === 0) break;
+        
+        allItems = [...allItems, ...data];
+        
+        // If we fetched fewer items than pageSize, we've reached the end
+        if (data.length < pageSize) break;
+        
+        page++;
     }
 
-    const { data, error } = await query;
-
-    if (error) {
-      console.error("Error fetching item master:", error);
-      throw error;
-    }
-
-    return (data || []).map((item: any) => {
+    return allItems.map((item: any) => {
       let parsedEntries = [];
       if (Array.isArray(item.auditor_entries)) {
         parsedEntries = item.auditor_entries;
@@ -282,51 +301,64 @@ class SupabaseDataService {
   public async setItemMaster(items: Partial<InventoryItem>[], companyId: string): Promise<void> {
     if (items.length === 0) return;
     
-    const dbItems = items.map(item => ({
-      sku: item.sku,
-      name: item.name || "Unnamed Item",
-      category: item.category,
-      location: item.location,
-      company_id: companyId,
-      assignment_id: null, 
-      system_quantity: item.systemQuantity || 0,
-      physical_quantity: item.physicalQuantity || 0,
-      status: item.status || 'pending',
-      client_remarks: item.clientRemarks,
-      auditor_entries: item.auditorEntries || [],
-      upload_batch_key: item.uploadBatchKey,
-      custom_attributes: item.customAttributes || {}
-    }));
+    // Process upserts in chunks to avoid payload size limits
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+        const chunk = items.slice(i, i + CHUNK_SIZE);
+        
+        const dbItems = chunk.map(item => ({
+          sku: item.sku,
+          name: item.name || "Unnamed Item",
+          category: item.category,
+          location: item.location,
+          company_id: companyId,
+          assignment_id: null, 
+          system_quantity: item.systemQuantity || 0,
+          physical_quantity: item.physicalQuantity || 0,
+          status: item.status || 'pending',
+          client_remarks: item.clientRemarks,
+          auditor_entries: item.auditorEntries || [],
+          upload_batch_key: item.uploadBatchKey,
+          custom_attributes: item.customAttributes || {}
+        }));
 
-    const { error } = await supabase
-      .from("inventory_items")
-      .upsert(dbItems as any, { onConflict: 'company_id, assignment_id, sku' as any }); 
+        const { error } = await supabase
+          .from("inventory_items")
+          .upsert(dbItems as any, { onConflict: 'company_id, assignment_id, sku' as any }); 
 
-    if (error) throw error;
+        if (error) throw error;
+    }
   }
 
   public async setClosingStock(items: Partial<InventoryItem>[], companyId: string, assignmentId: string): Promise<void> {
      if (items.length === 0) return;
      
-     const dbItems = items.map(item => ({
-       sku: item.sku,
-       name: item.name || "Unnamed Item", 
-       category: item.category,
-       location: item.location,
-       company_id: companyId,
-       assignment_id: parseInt(assignmentId), 
-       system_quantity: item.systemQuantity,
-       physical_quantity: 0, 
-       status: 'pending',
-       upload_batch_key: item.uploadBatchKey,
-       custom_attributes: item.customAttributes || {}
-     }));
+     const assignmentIdInt = parseInt(assignmentId, 10);
+     const CHUNK_SIZE = 500;
+     
+     for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+         const chunk = items.slice(i, i + CHUNK_SIZE);
+         
+         const dbItems = chunk.map(item => ({
+           sku: item.sku,
+           name: item.name || "Unnamed Item", 
+           category: item.category,
+           location: item.location,
+           company_id: companyId,
+           assignment_id: assignmentIdInt, 
+           system_quantity: item.systemQuantity,
+           physical_quantity: 0, 
+           status: 'pending',
+           upload_batch_key: item.uploadBatchKey,
+           custom_attributes: item.customAttributes || {}
+         }));
 
-     const { error } = await supabase
-       .from("inventory_items")
-       .upsert(dbItems as any, { onConflict: 'company_id, assignment_id, sku' as any });
+         const { error } = await supabase
+           .from("inventory_items")
+           .upsert(dbItems as any, { onConflict: 'company_id, assignment_id, sku' as any });
 
-     if (error) throw error;
+         if (error) throw error;
+     }
   }
 
   public async setAuditedItems(items: InventoryItem[]): Promise<void> {
@@ -562,14 +594,14 @@ class SupabaseDataService {
   public async logUploadBatch(params: any): Promise<void> {
      const { data: { user } } = await supabase.auth.getUser();
      const payload = {
-        batch_key: params.batchKey,
-        company_id: params.companyId,
-        location_id: params.locationId || null, 
-        location_name: params.locationName || "Unknown Location",
-        upload_type: params.uploadType,
-        total_items: params.totalItems,
-        uploaded_by: user?.id || null,
-        assignment_id: params.assignmentId || null 
+       batch_key: params.batchKey,
+       company_id: params.companyId,
+       location_id: params.locationId || null, 
+       location_name: params.locationName || "Unknown Location",
+       upload_type: params.uploadType,
+       total_items: params.totalItems,
+       uploaded_by: user?.id || null,
+       assignment_id: params.assignmentId || null 
      };
      await supabase.from("inventory_upload_history").insert(payload);
   }
