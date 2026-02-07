@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import {
   Card,
   CardContent,
-  CardFooter,
+  CardFooter,  
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
