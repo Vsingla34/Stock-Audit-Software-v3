@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { useInventory } from "@/context/InventoryContext";
 import { useUserAccess } from "@/hooks/useUserAccess";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Building } from "lucide-react";
+import { Building, Boxes, CheckCircle2, AlertCircle } from "lucide-react";
 import { useUser } from "@/context/UserContext"; 
 
 interface LocationAuditSummaryProps {
@@ -23,31 +23,58 @@ export const LocationAuditSummary = ({
   hideDropdown = false,
   className 
 }: LocationAuditSummaryProps) => {
-  const { locations, getLocationSummary } = useInventory();
+  const { locations, itemMaster } = useInventory(); // Access itemMaster directly for calc
   const { currentUser } = useUser(); 
   const [internalLocationId, setInternalLocationId] = useState<string>("");
   const { accessibleLocations } = useUserAccess();
   const userAccessibleLocations = accessibleLocations();
 
-  // Use external ID if provided (controlled mode), otherwise use internal state
   const selectedLocation = externalLocationId !== undefined ? externalLocationId : internalLocationId;
-
   const selectedLocationObj = locations.find(loc => loc.id === selectedLocation);
   
-  const locationSummary = selectedLocationObj 
-    ? getLocationSummary(selectedLocationObj.name)
-    : null;
+  // Calculate Stats based on Total Stock Quantity (System Qty)
+  const stats = useMemo(() => {
+    if (!selectedLocationObj) return null;
+
+    const locationName = selectedLocationObj.name;
+    const locationItems = itemMaster.filter(i => i.location === locationName);
+
+    // Sum of System Quantities
+    const totalStock = locationItems.reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
+    
+    // Items that have been touched/audited
+    const auditedItemsList = locationItems.filter(i => i.status && i.status !== 'pending');
+    const auditedStock = auditedItemsList.reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
+    
+    // Matched Quantities
+    const matchedStock = locationItems
+        .filter(i => i.status === 'matched')
+        .reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
+
+    const pendingStock = Math.max(0, totalStock - auditedStock);
+    const matchPercentage = totalStock > 0 ? Math.round((matchedStock / totalStock) * 100) : 0;
+    const progressPercentage = totalStock > 0 ? Math.round((auditedStock / totalStock) * 100) : 0;
+
+    return {
+        totalStock,
+        auditedStock,
+        pendingStock,
+        matchedStock,
+        matchPercentage,
+        progressPercentage
+    };
+  }, [selectedLocationObj, itemMaster]);
 
   return (
     <Card className={`shadow-sm border-gray-200 ${className}`}>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-gray-900">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-gray-900 text-lg">
           <Building className="h-5 w-5 text-indigo-600" />
-          <span>Location Audit Summary</span>
+          <span>Audit Progress (Qty)</span>
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="space-y-4">
+        <div className="space-y-5">
           {!hideDropdown && (
             <Select
               value={selectedLocation}
@@ -84,50 +111,57 @@ export const LocationAuditSummary = ({
             </Select>
           )}
 
-          {locationSummary ? (
-            // RESPONSIVE FIX: Stack on mobile (grid-cols-1), 2 cols on tablet/desktop
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="rounded-lg bg-indigo-50 p-4 border border-indigo-100">
-                <div className="text-sm text-indigo-600 font-medium">Total Items</div>
-                <div className="text-2xl font-bold text-gray-900">{locationSummary.totalItems}</div>
-              </div>
-              <div className="rounded-lg bg-green-50 p-4 border border-green-100">
-                <div className="text-sm text-green-600 font-medium">Audited Items</div>
-                <div className="text-2xl font-bold text-gray-900">{locationSummary.auditedItems}</div>
-              </div>
-              <div className="rounded-lg bg-amber-50 p-4 border border-amber-100">
-                <div className="text-sm text-amber-600 font-medium">Pending Items</div>
-                <div className="text-2xl font-bold text-gray-900">{locationSummary.pendingItems}</div>
-              </div>
-              <div className="rounded-lg bg-violet-50 p-4 border border-violet-100">
-                <div className="text-sm text-violet-600 font-medium">Match Rate</div>
-                <div className="text-2xl font-bold text-gray-900">
-                  {locationSummary.auditedItems > 0
-                    ? `${Math.round((locationSummary.matched / locationSummary.auditedItems) * 100)}%`
-                    : "N/A"}
+          {stats ? (
+            <div className="space-y-4">
+                {/* Main Stats Grid */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl bg-indigo-50 p-3 border border-indigo-100 flex flex-col justify-between">
+                    <div className="flex items-center gap-1.5 mb-1">
+                        <Boxes className="h-3.5 w-3.5 text-indigo-600" />
+                        <span className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">Total Stock</span>
+                    </div>
+                    <div className="text-xl font-bold text-gray-900">{stats.totalStock.toLocaleString()}</div>
+                  </div>
+                  
+                  <div className="rounded-xl bg-green-50 p-3 border border-green-100 flex flex-col justify-between">
+                    <div className="flex items-center gap-1.5 mb-1">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                        <span className="text-xs font-semibold text-green-700 uppercase tracking-wide">Audited Qty</span>
+                    </div>
+                    <div className="text-xl font-bold text-gray-900">{stats.auditedStock.toLocaleString()}</div>
+                  </div>
+
+                  <div className="rounded-xl bg-amber-50 p-3 border border-amber-100 flex flex-col justify-between">
+                    <div className="flex items-center gap-1.5 mb-1">
+                        <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
+                        <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Pending Qty</span>
+                    </div>
+                    <div className="text-xl font-bold text-gray-900">{stats.pendingStock.toLocaleString()}</div>
+                  </div>
+
+                  <div className="rounded-xl bg-violet-50 p-3 border border-violet-100 flex flex-col justify-between">
+                    <div className="text-xs font-semibold text-violet-700 uppercase tracking-wide mb-1">Match Rate</div>
+                    <div className="text-xl font-bold text-gray-900">{stats.matchPercentage}%</div>
+                  </div>
                 </div>
-              </div>
+
+                {/* Progress Bar */}
+                <div>
+                  <div className="mb-2 flex justify-between text-xs font-medium">
+                    <span className="text-gray-500">Overall Progress</span>
+                    <span className="text-indigo-700">{stats.progressPercentage}%</span>
+                  </div>
+                  <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-100 border border-gray-100">
+                    <div
+                      className="h-full bg-indigo-600 rounded-full transition-all duration-700 ease-out shadow-[0_0_10px_rgba(79,70,229,0.3)]"
+                      style={{ width: `${stats.progressPercentage}%` }}
+                    />
+                  </div>
+                </div>
             </div>
           ) : (
-            <div className="py-8 text-center text-gray-500">
-              Select a location to view its audit summary
-            </div>
-          )}
-          
-          {locationSummary && locationSummary.auditedItems > 0 && (
-            <div className="mt-4">
-              <div className="mb-2 flex justify-between text-sm">
-                <span className="text-gray-600 font-medium">Progress</span>
-                <span className="text-indigo-600 font-bold">{locationSummary.totalItems > 0 ? Math.round((locationSummary.auditedItems / locationSummary.totalItems) * 100) : 0}%</span>
-              </div>
-              <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
-                <div
-                  className="h-full bg-indigo-600 rounded-full transition-all duration-500 ease-in-out"
-                  style={{
-                    width: `${locationSummary.totalItems > 0 ? (locationSummary.auditedItems / locationSummary.totalItems) * 100 : 0}%`,
-                  }}
-                />
-              </div>
+            <div className="py-8 text-center text-gray-400 bg-gray-50 rounded-lg border border-dashed border-gray-200">
+              Select a location to view stats
             </div>
           )}
         </div>
