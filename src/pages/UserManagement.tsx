@@ -292,51 +292,97 @@ const UserManagement = () => {
      }
   };
   
-  const handleImport = async () => {
-      if (!importFile) return;
-      setIsImporting(true);
+ const handleImport = async () => {
+    if (!importFile) return;
+    setIsImporting(true);
+    
+    const reader = new FileReader();
+    
+    reader.onload = async (e) => {
       try {
-          const { data } = await processCSV(importFile);
-          const adminClient = getAdminClient();
-          if (!adminClient) throw new Error("VITE_SERVICE_KEY missing");
+        const csvText = e.target?.result as string;
+        
+        // 1. Parse CSV (Returns array of rows)
+        const rows = processCSV(csvText);
+        
+        if (!rows || rows.length === 0) {
+          throw new Error("CSV is empty or could not be parsed.");
+        }
 
-          let count = 0;
-          for (const row of data) {
-              if (row.email && row.password) {
-                  // 1. Create Auth
-                  const { data: authData, error: authError } = await adminClient.auth.admin.createUser({
-                      email: row.email,
-                      password: row.password,
-                      email_confirm: true,
-                      user_metadata: {
-                          name: row.name || row.email.split('@')[0],
-                          role: row.role || 'auditor',
-                          assigned_companies: row.company_ids ? row.company_ids.split(',') : []
-                      }
-                  });
+        // 2. Prepare Company Name-to-ID Lookup Map
+        // We use the 'companies' state already loaded in your component
+        const companyLookup = new Map(
+          companies.map(c => [c.name.toLowerCase().trim(), c.id])
+        );
 
-                  // 2. Create Profile if Auth success
-                  if (!authError && authData.user) {
-                      await adminClient.from("user_profiles").upsert({
-                          id: authData.user.id,
-                          email: row.email,
-                          name: row.name || row.email.split('@')[0],
-                          role: row.role || 'auditor',
-                          assigned_companies: row.company_ids ? row.company_ids.split(',') : [],
-                          created_at: new Date().toISOString()
-                      });
-                      count++;
-                  }
+        const SERVICE_ROLE_KEY = import.meta.env.VITE_SERVICE_KEY;
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const adminClient = createClient(supabaseUrl, SERVICE_ROLE_KEY, {
+          auth: { autoRefreshToken: false, persistSession: false }
+        });
+
+        let successCount = 0;
+
+        for (const row of rows) {
+          const email = row.email?.trim();
+          const password = row.password?.trim();
+          const name = row.name?.trim() || email?.split('@')[0];
+          const role = (row.role?.trim().toLowerCase() || 'auditor') as any;
+          
+          // 3. Convert Company Names to IDs
+          const rawCompanyNames = row['assigned companies'] || row['assigned_companies'] || "";
+          const companyIds = rawCompanyNames
+            .split(',')
+            .map((name: string) => {
+              const cleanedName = name.trim().toLowerCase();
+              return companyLookup.get(cleanedName);
+            })
+            .filter(Boolean) as string[]; // Remove nulls if name wasn't found
+
+          if (email && password) {
+            // 4. Create Auth Account
+            const { data: authData, error: authError } = await adminClient.auth.admin.createUser({
+              email: email,
+              password: password,
+              email_confirm: true,
+              user_metadata: {
+                name: name,
+                role: role,
+                assigned_companies: companyIds
               }
+            });
+
+            // 5. Create Profile with the mapped IDs
+            if (!authError && authData.user) {
+              const { error: profileError } = await adminClient.from("user_profiles").upsert({
+                id: authData.user.id,
+                email: email,
+                name: name,
+                role: role,
+                assigned_companies: companyIds,
+                created_at: new Date().toISOString()
+              });
+              
+              if (!profileError) successCount++;
+            } else if (authError) {
+              console.error(`Auth Error for ${email}:`, authError.message);
+            }
           }
-          toast.success(`Imported ${count} users`);
-          setIsImportDialogOpen(false);
-          fetchData();
+        }
+
+        toast.success(`Imported ${successCount} users. Note: Company names were matched to existing IDs.`);
+        setIsImportDialogOpen(false);
+        setImportFile(null);
+        fetchData();
       } catch (e: any) {
-          toast.error("Import failed: " + e.message);
+        console.error("Import Error:", e);
+        toast.error("Import failed: " + e.message);
       } finally {
-          setIsImporting(false);
+        setIsImporting(false);
       }
+    };
+
+    reader.readAsText(importFile);
   };
 
   const filteredUsers = users.filter(user => {

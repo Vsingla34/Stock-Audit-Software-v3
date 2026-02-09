@@ -393,6 +393,47 @@ class SupabaseDataService {
     return this.getItemMaster(companyId, assignmentId);
   }
 
+  // ... inside SupabaseDataService class ...
+
+  // Fetch sub-locations for a specific location
+  public async getSubLocations(locationId: string): Promise<string[]> {
+    const { data, error } = await supabase
+      .from("sub_locations")
+      .select("name")
+      .eq("location_id", locationId)
+      .order("name");
+
+    if (error) {
+      console.error("Error fetching sub-locations:", error);
+      return [];
+    }
+
+    return data.map((item: any) => item.name);
+  }
+
+  // Create a new sub-location (Ignores if it already exists)
+  public async createSubLocation(params: {
+    name: string;
+    locationId: string;
+    companyId: string;
+  }): Promise<void> {
+    const { error } = await supabase
+      .from("sub_locations")
+      .insert({
+        name: params.name,
+        location_id: params.locationId,
+        company_id: params.companyId
+      })
+      .select()
+      .single();
+
+    // Ignore unique constraint violation (code 23505) if user tries to add same name twice
+    if (error && error.code !== '23505') {
+      console.error("Error creating sub-location:", error);
+      throw error;
+    }
+  }
+
   public async setItemMaster(items: Partial<InventoryItem>[], companyId: string): Promise<void> {
     if (items.length === 0) return;
     

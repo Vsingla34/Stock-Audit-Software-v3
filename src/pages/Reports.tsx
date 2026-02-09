@@ -1,10 +1,22 @@
 import { AppLayout } from "@/components/layout/AppLayout";
-import { useInventory, Question } from "@/context/InventoryContext";
+import { useInventory, Question, InventoryItem } from "@/context/InventoryContext";
 import { useCompany } from "@/context/CompanyContext";
 import { useUser } from "@/context/UserContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Download, FileText, FileType, FileSpreadsheet, Filter, Table as TableIcon, ArrowUpDown, MessageSquare, CheckCheck, Loader2, Send } from "lucide-react";
+import { 
+  Download, 
+  FileText, 
+  FileType, 
+  FileSpreadsheet, 
+  Filter, 
+  Table as TableIcon, 
+  ArrowUpDown, 
+  MessageSquare, 
+  CheckCheck, 
+  Loader2, 
+  Send 
+} from "lucide-react";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
 import { autoTable } from "jspdf-autotable";
@@ -37,6 +49,7 @@ import {
 } from "@/components/ui/select";
 import { useNavigate } from "react-router-dom";
 import { Label } from "@/components/ui/label";
+import SupabaseDataService from "@/services/SupabaseDataService"; 
 
 declare module "jspdf" {
   interface jsPDF {
@@ -47,8 +60,6 @@ declare module "jspdf" {
 const Reports = () => {
   const navigate = useNavigate();
   const {
-    auditedItems,
-    itemMaster,
     questionnaireAnswers,
     questions,
     getQuestionsForLocation,
@@ -64,6 +75,9 @@ const Reports = () => {
   const { selectedCompanyId, selectedAssignmentId } = useCompany();
   const [companyName, setCompanyName] = useState<string>("");
 
+  const [items, setItems] = useState<InventoryItem[]>([]);
+  const [loading, setLoading] = useState(false);
+
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [sortOrder, setSortOrder] = useState<string>("default");
@@ -74,17 +88,43 @@ const Reports = () => {
   const reportRef = useRef(null);
   const [visibleCount, setVisibleCount] = useState(100);
   
-  // OTP States
   const [isOtpDialogOpen, setIsOtpDialogOpen] = useState(false);
   const [otpCode, setOtpCode] = useState("");
   const [isSendingOtp, setIsSendingOtp] = useState(false);
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // AUTO-DETECT LOCATION FROM ASSIGNMENT
   const currentAssignment = assignments.find(a => a.id === selectedAssignmentId);
   const selectedLocation = currentAssignment?.locationId || "";
   const locationName = locations.find(l => l.id === selectedLocation)?.name || "";
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchReportData = async () => {
+      if (!selectedCompanyId || !selectedAssignmentId) return;
+
+      try {
+        setLoading(true);
+        const data = await SupabaseDataService.getItemMaster(
+            selectedCompanyId, 
+            parseInt(String(selectedAssignmentId))
+        );
+
+        if (isMounted) {
+            setItems(data);
+        }
+      } catch (error) {
+        console.error("Error loading report:", error);
+        toast.error("Failed to load report data");
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    };
+
+    fetchReportData();
+
+    return () => { isMounted = false; };
+  }, [selectedCompanyId, selectedAssignmentId]); 
 
   useEffect(() => {
     const fetchCompanyName = async () => {
@@ -106,7 +146,6 @@ const Reports = () => {
     fetchCompanyName();
   }, [selectedCompanyId]);
 
-  // --- PERMISSION LOGIC ---
   const isAuditor = currentUser?.role === 'auditor';
   const isClient = currentUser?.role === 'client';
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
@@ -167,85 +206,100 @@ const Reports = () => {
     }
   };
 
-  const isItemActive = (systemQty: number, physicalQty: number) => {
-    return systemQty > 0 || physicalQty > 0;
-  };
-
-  const { filteredAuditedItems, filteredItemMaster, summary } = useMemo(() => {
-    let relevantAuditedItems = auditedItems.filter(item => item.location === locationName);
-    let relevantItemMaster = itemMaster.filter(item => item.location === locationName);
-
-    const activeItemMaster = relevantItemMaster.filter(masterItem => {
-        const auditedItem = relevantAuditedItems.find(
-            a => a.id === masterItem.id && a.location === masterItem.location
-        );
-        const physicalQty = auditedItem?.physicalQuantity || 0;
-        return isItemActive(masterItem.systemQuantity, physicalQty);
-    });
-
-    const totalItems = activeItemMaster.length;
+  const summary = useMemo(() => {
+    const totalItems = items.length;
+    const auditedItems = items.filter(i => i.status !== 'pending').length;
     
-    const auditedCount = activeItemMaster.filter(masterItem => {
-        const auditedItem = relevantAuditedItems.find(
-            a => a.id === masterItem.id && a.location === masterItem.location
-        );
-        return auditedItem && auditedItem.status !== 'pending';
-    }).length;
-
     let matched = 0;
     let discrepancies = 0;
 
-    activeItemMaster.forEach(masterItem => {
-        const audited = relevantAuditedItems.find(
-            a => a.id === masterItem.id && a.location === masterItem.location
-        );
-        
-        if (audited && audited.status !== 'pending') {
-            if (audited.status === 'matched') matched++;
-            else if (audited.status === 'discrepancy') discrepancies++;
-        }
+    items.forEach(item => {
+        if (item.status === 'matched') matched++;
+        else if (item.status === 'discrepancy') discrepancies++;
     });
 
-    const calculatedSummary = {
+    return {
         totalItems,
-        auditedItems: auditedCount,
+        auditedItems,
         matched,
         discrepancies,
-        pendingItems: Math.max(0, totalItems - auditedCount)
+        pendingItems: Math.max(0, totalItems - auditedItems)
     };
+  }, [items]);
 
-    return {
-      filteredAuditedItems: relevantAuditedItems,
-      filteredItemMaster: activeItemMaster,
-      summary: calculatedSummary
-    };
-
-  }, [selectedLocation, locationName, auditedItems, itemMaster]);
+  // 1. Calculate the Global Start Date (Day 1)
+  const auditStartDate = useMemo(() => {
+    let minTs = Infinity;
+    let found = false;
+    items.forEach(item => {
+        // Check auditor entries for earliest date
+        if (item.auditorEntries && item.auditorEntries.length > 0) {
+            item.auditorEntries.forEach(entry => {
+                if (entry.auditedAt) {
+                    const ts = new Date(entry.auditedAt).getTime();
+                    if (ts < minTs) {
+                        minTs = ts;
+                        found = true;
+                    }
+                }
+            });
+        }
+        // Fallback to lastAudited if no entries but has status
+        else if (item.lastAudited) {
+             const ts = new Date(item.lastAudited).getTime();
+             if (ts < minTs) {
+                 minTs = ts;
+                 found = true;
+             }
+        }
+    });
+    
+    if (!found) return null;
+    
+    // Normalize to midnight for accurate day difference
+    const d = new Date(minTs);
+    d.setHours(0,0,0,0);
+    return d;
+  }, [items]);
 
   const baseTableData = useMemo(() => {
-    return filteredItemMaster.map((item) => {
-      const auditedItem = filteredAuditedItems.find(
-        (a) => a.id === item.id && a.location === item.location
-      );
+    return items.map((item) => {
+        const sysQty = item.systemQuantity || 0;
+        const phyQty = item.physicalQuantity !== null ? item.physicalQuantity : 0;
+        const variance = (item.status !== 'pending' && item.physicalQuantity !== null) 
+            ? phyQty - sysQty 
+            : 0; 
+
+        // 2. Calculate Day for this item
+        let auditDay = "-";
+        if (auditStartDate && item.lastAudited) {
+            const itemDate = new Date(item.lastAudited);
+            itemDate.setHours(0,0,0,0);
+            
+            const diffTime = itemDate.getTime() - auditStartDate.getTime();
+            const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)); 
+            // If same day, diff is 0, so Day 1.
+            auditDay = (diffDays + 1).toString();
+        }
+
       return {
         id: item.id,
         sku: item.sku,
         name: item.name,
         category: item.category,
-        location: item.location,
-        systemQuantity: item.systemQuantity,
-        physicalQuantity: auditedItem?.physicalQuantity || 0,
-        variance: auditedItem
-          ? auditedItem.physicalQuantity - item.systemQuantity
-          : -item.systemQuantity,
-        status: auditedItem?.status || "pending",
-        lastAudited: auditedItem?.lastAudited || "",
-        auditorEntries: auditedItem?.auditorEntries || [],
+        location: item.location || locationName, 
+        systemQuantity: sysQty,
+        physicalQuantity: item.physicalQuantity !== null ? item.physicalQuantity : 0,
+        variance: variance,
+        status: item.status || "pending",
+        lastAudited: item.lastAudited || "",
+        auditorEntries: item.auditorEntries || [],
         clientRemarks: item.clientRemarks,
-        customAttributes: item.customAttributes || {}
+        customAttributes: item.customAttributes || {},
+        auditDay: auditDay // Added field
       };
     });
-  }, [filteredItemMaster, filteredAuditedItems]);
+  }, [items, locationName, auditStartDate]);
 
   const parsePrice = useCallback((val: any): number => {
     if (!val) return 0;
@@ -315,7 +369,6 @@ const Reports = () => {
     } else if (sortOrder === "variance-desc") {
       data = [...data].sort((a, b) => b.variance - a.variance);
     } 
-    // --- NEW: Value Variance Filters ---
     else if (sortOrder === "val-variance-asc") {
       data = [...data].sort((a, b) => getItemValues(a).valueVariance - getItemValues(b).valueVariance);
     } else if (sortOrder === "val-variance-desc") {
@@ -365,6 +418,34 @@ const Reports = () => {
       return String(val);
   }, []);
 
+  const getSubLocationSummary = (entries: any[]) => {
+    if (!entries || entries.length === 0) return "-";
+    const summary: Record<string, number> = {};
+    entries.forEach(entry => {
+        const subLoc = entry.subLocation || "General";
+        summary[subLoc] = (summary[subLoc] || 0) + entry.quantityFound;
+    });
+    return Object.entries(summary)
+        .map(([loc, qty]) => `${loc}: ${qty}`)
+        .join("; ");
+  };
+
+  const fitToColumn = (data: any[]) => {
+    const columnWidths: { wch: number }[] = [];
+    if (!data || data.length === 0) return columnWidths;
+
+    const keys = Object.keys(data[0]);
+    keys.forEach((key) => {
+       let maxLength = key.length;
+       data.slice(0, 50).forEach(row => {
+          const val = row[key] ? String(row[key]) : "";
+          if (val.length > maxLength) maxLength = val.length;
+       });
+       columnWidths.push({ wch: Math.min(maxLength + 2, 50) }); 
+    });
+    return columnWidths;
+  };
+
   const generateCSV = useCallback((data: any[], filename: string) => {
     const headers = Array.from(new Set(data.flatMap((item) => Object.keys(item))));
     let csvContent = headers.join(",") + "\n";
@@ -399,10 +480,12 @@ const Reports = () => {
         name: item.name,
         category: item.category,
         location: item.location,
+        subLocation: getSubLocationSummary(item.auditorEntries),
         systemQuantity: item.systemQuantity,
         physicalQuantity: item.physicalQuantity,
         variance: item.variance,
         status: item.status,
+        auditDay: item.auditDay // Added for CSV
       };
       if (hasPricing) {
          baseObj["Unit Price"] = unitPrice;
@@ -434,6 +517,7 @@ const Reports = () => {
         name: item.name,
         category: item.category,
         location: item.location,
+        "Sub Location": getSubLocationSummary(item.auditorEntries),
         systemQuantity: item.systemQuantity,
       };
       if (hasPricing) {
@@ -446,11 +530,12 @@ const Reports = () => {
       });
       baseData.Total = item.physicalQuantity;
       if (hasPricing) {
-          baseData["Physical Value"] = phyValue;
-          baseData["Value Variance"] = valueVariance;
+         baseData["Physical Value"] = phyValue;
+         baseData["Value Variance"] = valueVariance;
       }
       baseData.variance = item.variance;
       baseData.status = item.status;
+      baseData.auditDay = item.auditDay; // Added
       baseData.remarks = item.clientRemarks || "-";
       baseData.lastAudited = item.lastAudited;
       return baseData;
@@ -468,6 +553,7 @@ const Reports = () => {
             sku: item.sku,
             name: item.name,
             location: item.location,
+            "Sub Location": getSubLocationSummary(item.auditorEntries),
             systemQuantity: item.systemQuantity,
             physicalQuantity: item.physicalQuantity,
             variance: item.variance,
@@ -478,6 +564,7 @@ const Reports = () => {
             baseObj["Physical Value"] = phyValue;
             baseObj["Value Variance"] = valueVariance;
         }
+        baseObj.auditDay = item.auditDay; // Added
         baseObj.remarks = item.clientRemarks || "-";
         baseObj.lastAudited = item.lastAudited;
         return baseObj;
@@ -513,6 +600,7 @@ const Reports = () => {
         Name: item.name,
         Category: item.category,
         Location: item.location,
+        "Sub Location": getSubLocationSummary(item.auditorEntries),
         "System Qty": item.systemQuantity,
       };
       if (hasPricing) {
@@ -530,6 +618,7 @@ const Reports = () => {
       }
       row.Variance = item.variance;
       row.Status = item.status;
+      row["Audit Day"] = item.auditDay; // Added
       row.Remarks = item.clientRemarks || "-";
       row["Last Audited"] = item.lastAudited ? new Date(item.lastAudited).toLocaleString() : "-";
       return row;
@@ -543,6 +632,7 @@ const Reports = () => {
             SKU: item.sku,
             Name: item.name,
             Location: item.location,
+            "Sub Location": getSubLocationSummary(item.auditorEntries),
             Category: item.category,
             "System Qty": item.systemQuantity,
             "Physical Qty": item.physicalQuantity,
@@ -554,6 +644,7 @@ const Reports = () => {
             row["Physical Value"] = phyValue;
             row["Value Variance"] = valueVariance;
         }
+        row["Audit Day"] = item.auditDay; // Added
         row.Remarks = item.clientRemarks || "-";
         row["Last Audited"] = item.lastAudited ? new Date(item.lastAudited).toLocaleString() : "-";
         return row;
@@ -589,6 +680,12 @@ const Reports = () => {
     const wsSummary = XLSX.utils.json_to_sheet(summaryData);
     const wsDiscrepancy = XLSX.utils.json_to_sheet(discrepancyData);
     const wsQuestionnaire = XLSX.utils.json_to_sheet(questionnaireData);
+
+    // Apply Column Widths
+    wsReconciliation['!cols'] = fitToColumn(reconciliationData);
+    wsDiscrepancy['!cols'] = fitToColumn(discrepancyData);
+    wsSummary['!cols'] = fitToColumn(summaryData);
+    wsQuestionnaire['!cols'] = fitToColumn(questionnaireData);
 
     XLSX.utils.book_append_sheet(wb, wsReconciliation, "Reconciliation");
     XLSX.utils.book_append_sheet(wb, wsSummary, "Audit Summary");
@@ -835,11 +932,20 @@ const Reports = () => {
                       <TableHead className="text-center w-[80px]">Phy</TableHead>
                       <TableHead className="text-center w-[80px]">Var</TableHead>
                       <TableHead className="text-center w-[100px]">Status</TableHead>
+                      {/* Added Day Column */}
+                      <TableHead className="text-center w-[60px]">Day</TableHead>
                       <TableHead className="w-[180px]">Remarks</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {visibleTableData.length > 0 ? (
+                    {loading ? (
+                        <TableRow>
+                            <TableCell colSpan={hasPricing ? 14 : 10} className="h-24 text-center">
+                                <Loader2 className="w-6 h-6 animate-spin mx-auto text-indigo-600" />
+                                <span className="text-xs text-muted-foreground mt-2 block">Loading report data...</span>
+                            </TableCell>
+                        </TableRow>
+                    ) : visibleTableData.length > 0 ? (
                       visibleTableData.map((item) => {
                         const isDiscrepancy = item.status === "discrepancy";
                         const canEdit = canEditRemarkForItem(item.location);
@@ -877,6 +983,10 @@ const Reports = () => {
                                 {item.status === "matched" ? "Matched" : item.status === "discrepancy" ? "Discrepancy" : "Pending"}
                               </span>
                             </TableCell>
+                            {/* Added Day Value */}
+                            <TableCell className="text-center text-xs font-mono text-gray-600">
+                                {item.auditDay}
+                            </TableCell>
                             <TableCell>
                               {editingRemark === item.id ? (
                                 <Input 
@@ -909,7 +1019,7 @@ const Reports = () => {
                         );
                       })
                     ) : (
-                      <TableRow><TableCell colSpan={hasPricing ? 13 : 9} className="text-center py-4 text-gray-500">No data available matching filters</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={hasPricing ? 14 : 10} className="text-center py-4 text-gray-500">No data available matching filters</TableCell></TableRow>
                     )}
                   </TableBody>
                 </Table>

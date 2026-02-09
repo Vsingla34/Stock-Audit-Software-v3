@@ -3,7 +3,7 @@ import { useInventory, InventoryItem } from "@/context/InventoryContext";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Search, Plus, Minus, MapPin, AlertCircle, PackagePlus } from "lucide-react";
+import { Search, Plus, Minus, MapPin, AlertCircle, PackagePlus, ScanBarcode, ArrowLeft, Layers } from "lucide-react";
 import { toast } from "sonner";
 import { useUser } from "@/context/UserContext";
 import { useCompany } from "@/context/CompanyContext";
@@ -17,14 +17,21 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { BarcodeScanner } from "@/components/scanner/BarcodeScanner";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export const SearchInventory = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<InventoryItem[]>([]);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   
+  // Sub-Location State
+  const [newSubLocation, setNewSubLocation] = useState("");
+  const [selectedSubLocation, setSelectedSubLocation] = useState<string>("");
+
   // New State for Add Dialog
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [isScanningNewItem, setIsScanningNewItem] = useState(false);
   const [newItem, setNewItem] = useState({
     sku: "",
     name: "",
@@ -32,14 +39,31 @@ export const SearchInventory = () => {
     physicalQuantity: 1
   });
 
-  const { searchItem, addItemToAudit, addSurplusItem, assignments, locations } = useInventory();
+  const { 
+    searchItem, 
+    addItemToAudit, 
+    addSurplusItem, 
+    assignments, 
+    locations, 
+    activeSubLocations, // Fetched from DB
+    fetchSubLocations,  // Action to fetch
+    addSubLocationToDb  // Action to save
+  } = useInventory();
+
   const { currentUser } = useUser();
   const { selectedAssignmentId } = useCompany();
 
-  // AUTO-DETECT LOCATION FROM ASSIGNMENT
   const currentAssignment = assignments.find(a => a.id === selectedAssignmentId);
   const activeLocationId = currentAssignment?.locationId;
   const activeLocationName = locations.find(l => l.id === activeLocationId)?.name;
+
+  // Fetch sub-locations when location is identified
+  useEffect(() => {
+    if (activeLocationId) {
+        fetchSubLocations(activeLocationId).catch(console.error);
+        setSelectedSubLocation("");
+    }
+  }, [activeLocationId]); // Removed fetchSubLocations from dep to prevent loop
 
   const performSearch = useCallback((query: string) => {
     if (!query || query.length < 2) {
@@ -98,7 +122,28 @@ export const SearchInventory = () => {
     }
   };
 
+  const handleAddSubLocation = async () => {
+        if (!newSubLocation.trim()) return;
+        if (!activeLocationId) {
+            toast.error("No active location found");
+            return;
+        }
+
+        try {
+            await addSubLocationToDb(newSubLocation.trim(), activeLocationId);
+            setSelectedSubLocation(newSubLocation.trim());
+            setNewSubLocation("");
+            toast.success(`Sub-location saved: ${newSubLocation.trim()}`);
+        } catch (error) {
+            toast.error("Failed to save sub-location");
+        }
+  };
+
   const handleAddToAudit = async (item: InventoryItem) => {
+    if (!selectedSubLocation) {
+        toast.error("Sub-Location Required", { description: "Please select a Box, Row, or Rack before adding." });
+        return;
+    }
     const itemKey = getItemKey(item);
     const quantity = quantities[itemKey] || 0;
     
@@ -107,11 +152,12 @@ export const SearchInventory = () => {
         item, 
         quantity,
         currentUser?.id,
-        currentUser?.email || currentUser?.name || 'Unknown Auditor'
+        currentUser?.email || currentUser?.name || 'Unknown Auditor',
+        selectedSubLocation
       );
       
       toast.success("Item added to audit", {
-        description: `Added ${quantity} of ${item.name} at ${item.location} as ${currentUser?.email || currentUser?.name}`
+        description: `Added ${quantity} of ${item.name} to ${selectedSubLocation}`
       });
     } catch (error: any) {
       toast.error("Failed to add item", {
@@ -159,9 +205,45 @@ export const SearchInventory = () => {
         </div>
 
         {activeLocationName && (
-            <div className="flex items-center gap-2 mb-4 p-2 bg-gray-50 rounded border border-gray-200 text-sm text-gray-600">
-                <MapPin className="h-4 w-4" />
-                Searching in: <strong>{activeLocationName}</strong>
+             <div className="space-y-4 mb-6">
+                <div className="flex items-center gap-2 p-2 bg-gray-50 rounded border border-gray-200 text-sm text-gray-600">
+                    <MapPin className="h-4 w-4" />
+                    Searching in: <strong>{activeLocationName}</strong>
+                </div>
+
+                <div className="p-3 bg-indigo-50/50 rounded-lg border border-indigo-100">
+                    <Label className="text-xs font-semibold text-gray-500 uppercase mb-2 block">
+                         Audit Sub-Location (Box / Row / Rack)
+                    </Label>
+                    <div className="flex gap-2 mb-2">
+                        <Input 
+                            placeholder="Add Sub-Location (e.g. Box 5)" 
+                            value={newSubLocation}
+                            onChange={(e) => setNewSubLocation(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleAddSubLocation()}
+                            className="bg-white"
+                        />
+                        <Button variant="outline" onClick={handleAddSubLocation} size="icon">
+                            <Plus className="h-4 w-4" />
+                        </Button>
+                    </div>
+                    
+                    <Select value={selectedSubLocation} onValueChange={setSelectedSubLocation}>
+                        <SelectTrigger className="w-full bg-white">
+                            <SelectValue placeholder="Select active sub-location..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {activeSubLocations.length === 0 ? (
+                                <SelectItem value="default" disabled>Add a sub-location above</SelectItem>
+                            ) : (
+                                activeSubLocations.map((sl) => (
+                                    <SelectItem key={sl} value={sl}>{sl}</SelectItem>
+                                ))
+                            )}
+                        </SelectContent>
+                    </Select>
+                    {!selectedSubLocation && <p className="text-xs text-red-500 mt-1 ml-1">* Required to add items</p>}
+                </div>
             </div>
         )}
 
@@ -187,7 +269,6 @@ export const SearchInventory = () => {
               const auditorEntries = item.auditorEntries || [];
               const currentUserEntry = auditorEntries.find(e => e.auditorId === currentUser?.id);
               
-              // FIX: Calculate total dynamically from auditor entries
               const calculatedTotal = auditorEntries.reduce((sum, entry) => sum + (entry.quantityFound || 0), 0);
 
               return (
@@ -203,12 +284,11 @@ export const SearchInventory = () => {
                         <strong className="text-gray-900">Auditor Breakdown:</strong>
                         {auditorEntries.map((entry, idx) => (
                           <div key={idx} className={entry.auditorId === currentUser?.id ? "text-indigo-600 font-medium" : "text-gray-600"}>
-                            • {entry.auditorName}: {entry.quantityFound}
+                            • {entry.auditorName} {entry.subLocation ? `(${entry.subLocation})` : ''}: {entry.quantityFound}
                             {entry.auditorId === currentUser?.id && " (You)"}
                           </div>
                         ))}
                         <div className="mt-1 font-medium text-gray-900">
-                          {/* FIX: Using calculated total */}
                           Total Physical: {calculatedTotal}
                         </div>
                       </div>
@@ -247,7 +327,7 @@ export const SearchInventory = () => {
                       size="sm"
                       className="bg-white hover:bg-indigo-50 border border-gray-200 text-gray-700 hover:text-indigo-700 shadow-sm"
                       onClick={() => handleAddToAudit(item)}
-                      disabled={!(quantities[itemKey] > 0)}
+                      disabled={!(quantities[itemKey] > 0) || !selectedSubLocation}
                     >
                       Add to Audit
                     </Button>
@@ -267,72 +347,108 @@ export const SearchInventory = () => {
               If you found it physically, you can add it as a surplus item.
             </p>
             
-            <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+            <Dialog open={isAddOpen} onOpenChange={(open) => {
+              setIsAddOpen(open);
+              if(!open) setIsScanningNewItem(false); 
+            }}>
               <DialogTrigger asChild>
                 <Button className="bg-indigo-600 hover:bg-indigo-700">
                   <PackagePlus className="mr-2 h-4 w-4" />
                   Add New Item
                 </Button>
               </DialogTrigger>
-              <DialogContent>
+              <DialogContent className="sm:max-w-[425px]">
                 <DialogHeader>
-                  <DialogTitle>Add Surplus Item</DialogTitle>
+                  <DialogTitle>{isScanningNewItem ? "Scan Barcode" : "Add Surplus Item"}</DialogTitle>
                   <DialogDescription>
-                    Add an item that was missing from the closing stock but found physically.
+                    {isScanningNewItem 
+                      ? "Point your camera at the item's barcode." 
+                      : "Add an item that was missing from the closing stock but found physically."}
                   </DialogDescription>
                 </DialogHeader>
                 
-                <div className="grid gap-4 py-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="sku">SKU / Barcode</Label>
-                    <Input 
-                      id="sku" 
-                      value={newItem.sku} 
-                      onChange={(e) => setNewItem({...newItem, sku: e.target.value})}
-                      placeholder="e.g. 100256"
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="name">Item Name</Label>
-                    <Input 
-                      id="name" 
-                      value={newItem.name} 
-                      onChange={(e) => setNewItem({...newItem, name: e.target.value})}
-                      placeholder="e.g. Wireless Mouse"
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="category">Category</Label>
-                    <Input 
-                      id="category" 
-                      value={newItem.category} 
-                      onChange={(e) => setNewItem({...newItem, category: e.target.value})}
-                      placeholder="e.g. Electronics"
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="qty">Physical Quantity Found</Label>
-                    <Input 
-                      id="qty" 
-                      type="number"
-                      min="1"
-                      value={newItem.physicalQuantity} 
-                      onChange={(e) => setNewItem({...newItem, physicalQuantity: parseInt(e.target.value) || 0})}
-                    />
-                  </div>
-                  
-                  <div className="bg-yellow-50 p-3 rounded-md border border-yellow-200 text-xs text-yellow-800">
-                    <strong>Note:</strong> System Quantity will be set to 0. 
-                    Remark "This item was not in the closing stock but it was there" will be added automatically.
-                  </div>
-                </div>
+                {isScanningNewItem ? (
+                    <div className="py-2">
+                        <BarcodeScanner 
+                          onResult={(code) => {
+                             setNewItem(prev => ({ ...prev, sku: code }));
+                             setIsScanningNewItem(false);
+                          }} 
+                        />
+                        <Button 
+                            variant="outline" 
+                            onClick={() => setIsScanningNewItem(false)}
+                            className="w-full mt-4"
+                        >
+                            <ArrowLeft className="mr-2 h-4 w-4" /> Back to Form
+                        </Button>
+                    </div>
+                ) : (
+                    <div className="grid gap-4 py-4">
+                      <div className="grid gap-2">
+                        <Label htmlFor="sku">SKU / Barcode</Label>
+                        <div className="flex gap-2">
+                            <Input 
+                              id="sku" 
+                              value={newItem.sku} 
+                              onChange={(e) => setNewItem({...newItem, sku: e.target.value})}
+                              placeholder="e.g. 100256"
+                            />
+                            <Button 
+                                type="button" 
+                                variant="outline" 
+                                size="icon"
+                                title="Scan Barcode"
+                                onClick={() => setIsScanningNewItem(true)}
+                            >
+                                <ScanBarcode className="h-4 w-4 text-indigo-600" />
+                            </Button>
+                        </div>
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="name">Item Name</Label>
+                        <Input 
+                          id="name" 
+                          value={newItem.name} 
+                          onChange={(e) => setNewItem({...newItem, name: e.target.value})}
+                          placeholder="e.g. Wireless Mouse"
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="category">Category</Label>
+                        <Input 
+                          id="category" 
+                          value={newItem.category} 
+                          onChange={(e) => setNewItem({...newItem, category: e.target.value})}
+                          placeholder="e.g. Electronics"
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="qty">Physical Quantity Found</Label>
+                        <Input 
+                          id="qty" 
+                          type="number"
+                          min="1"
+                          value={newItem.physicalQuantity} 
+                          onChange={(e) => setNewItem({...newItem, physicalQuantity: parseInt(e.target.value) || 0})}
+                        />
+                      </div>
+                      
+                      <div className="bg-yellow-50 p-3 rounded-md border border-yellow-200 text-xs text-yellow-800">
+                        <strong>Note:</strong> System Quantity will be set to 0. 
+                        Remark "This item was not in the closing stock but it was there" will be added automatically.
+                      </div>
+                    </div>
+                )}
 
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setIsAddOpen(false)}>Cancel</Button>
-                  <Button onClick={handleAddSurplus} disabled={!newItem.sku || !newItem.name}>
-                    Add Item
-                  </Button>
-                </DialogFooter>
+                {!isScanningNewItem && (
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setIsAddOpen(false)}>Cancel</Button>
+                      <Button onClick={handleAddSurplus} disabled={!newItem.sku || !newItem.name}>
+                        Add Item
+                      </Button>
+                    </DialogFooter>
+                )}
               </DialogContent>
             </Dialog>
           </div>

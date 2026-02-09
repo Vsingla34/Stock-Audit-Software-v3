@@ -13,6 +13,7 @@ export interface AuditorEntry {
   auditorName: string;
   quantityFound: number;
   auditedAt: string;
+  subLocation?: string;
 }
 
 export interface InventoryItem {
@@ -91,6 +92,8 @@ interface InventoryContextType {
   questionnaireAnswers: QuestionnaireAnswer[];
   closingStockUploaded: boolean; 
   selectedLocationFilter: string;
+  activeSubLocations: string[]; // List of sub-locations for current context
+  
   setSelectedLocationFilter: (locationId: string) => void;
   setItemMaster: (
     items: Omit<InventoryItem, "id">[],
@@ -104,7 +107,8 @@ interface InventoryContextType {
   updateAuditedItem: (
     item: InventoryItem,
     auditorId?: string,
-    auditorName?: string
+    auditorName?: string,
+    subLocation?: string
   ) => Promise<void>;
   updateItemRemark: (itemId: string, remark: string) => Promise<void>;
   updateLocationAuditStatus: (locationId: string, status: AuditStatus) => Promise<void>;
@@ -142,7 +146,8 @@ interface InventoryContextType {
     item: InventoryItem,
     quantity: number,
     auditorId?: string,
-    auditorName?: string
+    auditorName?: string,
+    subLocation?: string
   ) => void;
   
   addSurplusItem: (
@@ -161,6 +166,9 @@ interface InventoryContextType {
   getQuestionById: (questionId: string) => Question | undefined;
   
   uploadFile: (file: File, path: string) => Promise<string>;
+  
+  fetchSubLocations: (locationId: string) => Promise<void>;
+  addSubLocationToDb: (name: string, locationId: string) => Promise<void>;
 
   refreshData: () => Promise<void>;
 }
@@ -179,6 +187,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [closingStockUploaded, setClosingStockUploaded] = useState(false); 
   const [selectedLocationFilter, setSelectedLocationFilter] = useState<string>("all");
+  const [activeSubLocations, setActiveSubLocations] = useState<string[]>([]);
+  
   const { currentUser } = useUser();   
   const [questionnaireAnswers, setQuestionnaireAnswers] = useState<
     QuestionnaireAnswer[]
@@ -284,7 +294,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
   const updateAuditedItem = async (
     item: InventoryItem,
     auditorId?: string,
-    auditorName?: string
+    auditorName?: string,
+    subLocation?: string
   ) => {
     let statusToCheck: AuditStatus | undefined;
     if (selectedAssignmentId) {
@@ -333,14 +344,15 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     let totalPhysicalQuantity = 0;
 
     if (auditorId && auditorName && item.physicalQuantity !== undefined) {
+      
       const existingEntryIndex = auditorEntries.findIndex(
-        (e) => e.auditorId === auditorId
+        (e) => e.auditorId === auditorId && e.subLocation === subLocation
       );
+
       if (existingEntryIndex >= 0) {
         auditorEntries[existingEntryIndex] = {
-          auditorId,
-          auditorName,
-          quantityFound: item.physicalQuantity,
+          ...auditorEntries[existingEntryIndex],
+          quantityFound: item.physicalQuantity, 
           auditedAt: new Date().toISOString(),
         };
       } else {
@@ -349,8 +361,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
           auditorName,
           quantityFound: item.physicalQuantity,
           auditedAt: new Date().toISOString(),
+          subLocation
         });
       }
+      
       totalPhysicalQuantity = auditorEntries.reduce(
         (sum, entry) => sum + entry.quantityFound,
         0
@@ -359,14 +373,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       totalPhysicalQuantity = item.physicalQuantity || 0;
     }
 
-    // --- NEW: Calculate Physical Value ---
     const currentAttributes = item.customAttributes || {};
     let updatedAttributes = { ...currentAttributes };
 
-    // Standardize Unit Price
     const unitPrice = parseFloat(currentAttributes['unit_price'] || 0);
     
-    // Fallback search for loose price keys if not standardized yet
     let effectivePrice = unitPrice;
     if (!effectivePrice) {
        const priceKey = Object.keys(currentAttributes).find(k => 
@@ -381,7 +392,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
        }
     }
 
-    // Update physical_value
     updatedAttributes['physical_value'] = effectivePrice * totalPhysicalQuantity;
 
     const itemToUpdate: InventoryItem = {
@@ -603,22 +613,35 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     item: InventoryItem,
     quantity: number,
     auditorId?: string,
-    auditorName?: string
+    auditorName?: string,
+    subLocation?: string
   ) => {
     if (quantity < 0) return;
     const masterItem = itemMaster.find(
       (i) => i.sku === item.sku && i.location === item.location
     );
     if (!masterItem) throw new Error(`Item not in master list`);
+    
+    const existingAuditedItem = auditedItems.find(i => i.id === masterItem.id && i.assignmentId === (selectedAssignmentId ? parseInt(selectedAssignmentId) : undefined));
+    let currentSubLocQty = 0;
+    
+    if (existingAuditedItem && existingAuditedItem.auditorEntries) {
+         const entry = existingAuditedItem.auditorEntries.find(e => e.auditorId === auditorId && e.subLocation === subLocation);
+         if (entry) currentSubLocQty = entry.quantityFound;
+    }
+
+    const newQuantityForSubLocation = currentSubLocQty + quantity;
+
     await updateAuditedItem(
       {
         ...masterItem,
-        physicalQuantity: quantity,
+        physicalQuantity: newQuantityForSubLocation, 
         status: "pending",
         lastAudited: new Date().toISOString(),
       },
       auditorId,
-      auditorName
+      auditorName,
+      subLocation
     );
   };
 
@@ -779,6 +802,27 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
      return await SupabaseDataService.uploadFile(file, path);
   };
 
+  // --- NEW: Sub-Location Persistence ---
+  const fetchSubLocations = async (locationId: string) => {
+      if (!locationId) {
+          setActiveSubLocations([]);
+          return;
+      }
+      const subs = await SupabaseDataService.getSubLocations(locationId);
+      setActiveSubLocations(subs);
+  };
+
+  const addSubLocationToDb = async (name: string, locationId: string) => {
+      if (!selectedCompanyId) throw new Error("No company selected");
+      await SupabaseDataService.createSubLocation({
+          name,
+          locationId,
+          companyId: selectedCompanyId
+      });
+      // Refresh list after add
+      await fetchSubLocations(locationId);
+  };
+
   return (
     <InventoryContext.Provider
       value={{
@@ -791,6 +835,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         questionnaireAnswers,
         closingStockUploaded, 
         selectedLocationFilter,
+        activeSubLocations, 
         setSelectedLocationFilter,
         setItemMaster,
         setClosingStock,
@@ -823,6 +868,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         finalizeAudit,
         refreshData: loadData,
         uploadFile, 
+        fetchSubLocations,
+        addSubLocationToDb
       }}
     >
       {children}
