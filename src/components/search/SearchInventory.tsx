@@ -3,7 +3,7 @@ import { useInventory, InventoryItem } from "@/context/InventoryContext";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Search, Plus, Minus, MapPin, AlertCircle, PackagePlus, ScanBarcode, ArrowLeft, Layers } from "lucide-react";
+import { Search, Plus, Minus, MapPin, AlertCircle, PackagePlus, ScanBarcode, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import { useUser } from "@/context/UserContext";
 import { useCompany } from "@/context/CompanyContext";
@@ -45,9 +45,9 @@ export const SearchInventory = () => {
     addSurplusItem, 
     assignments, 
     locations, 
-    activeSubLocations, // Fetched from DB
-    fetchSubLocations,  // Action to fetch
-    addSubLocationToDb  // Action to save
+    activeSubLocations, 
+    fetchSubLocations,  
+    addSubLocationToDb  
   } = useInventory();
 
   const { currentUser } = useUser();
@@ -63,7 +63,7 @@ export const SearchInventory = () => {
         fetchSubLocations(activeLocationId).catch(console.error);
         setSelectedSubLocation("");
     }
-  }, [activeLocationId]); // Removed fetchSubLocations from dep to prevent loop
+  }, [activeLocationId]); 
 
   const performSearch = useCallback((query: string) => {
     if (!query || query.length < 2) {

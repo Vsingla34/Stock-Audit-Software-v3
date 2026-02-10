@@ -13,7 +13,12 @@ import { useCompany } from "@/context/CompanyContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 
-export const BarcodeScanner = () => {
+interface BarcodeScannerProps {
+    onResult?: (code: string) => void;
+    className?: string;
+}
+
+export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => {
     const [isScanning, setIsScanning] = useState(false);
     const [isHardwareScannerMode, setIsHardwareScannerMode] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false); 
@@ -49,6 +54,8 @@ export const BarcodeScanner = () => {
     const scannedBufferRef = useRef('');
     const lastKeypressTime = useRef(0);
 
+    const isPickerMode = !!onResult;
+
     // Fetch sub-locations when location is identified
     useEffect(() => {
         if (selectedLocation) {
@@ -75,6 +82,13 @@ export const BarcodeScanner = () => {
     };
 
     const handleItemScan = async (barcode: string, locationId: string) => {
+        // PICKER MODE: Return result immediately and stop
+        if (onResult) {
+            onResult(barcode);
+            toast.success("Barcode scanned");
+            return true;
+        }
+
         if (typeof updateAuditedItem !== 'function') return false;
 
         try {
@@ -111,7 +125,7 @@ export const BarcodeScanner = () => {
             const existingAuditedItem = auditedItems.find(item => item.sku === masterItem.sku && item.location === locationName);
             const targetItem = existingAuditedItem || masterItem;
 
-            // Fetch existing count for this auditor AND this subLocation to add 1
+            // Fetch existing count for this auditor AND this subLocation
             const existingAuditorEntries = targetItem.auditorEntries || [];
             const currentEntry = existingAuditorEntries.find(e => e.auditorId === currentUser?.id && e.subLocation === selectedSubLocation);
             const currentQuantity = currentEntry?.quantityFound || 0;
@@ -133,9 +147,6 @@ export const BarcodeScanner = () => {
             );
 
             // Calculate Total across all sublocations for display
-            // Note: updateAuditedItem logic inside context updates the array, but we might not have the fresh array yet here.
-            // We can estimate the total:
-            // Total = (Sum of all other entries) + newQuantity
             const otherEntriesSum = existingAuditorEntries
                 .filter(e => !(e.auditorId === currentUser?.id && e.subLocation === selectedSubLocation))
                 .reduce((sum, e) => sum + e.quantityFound, 0);
@@ -185,6 +196,7 @@ export const BarcodeScanner = () => {
         } finally {
             setTimeout(() => {
                 try {
+                    // Only resume if not unmounted and in paused state
                     if (html5QrCodeRef.current?.getState() === Html5QrcodeScannerState.PAUSED) {
                         html5QrCodeRef.current.resume();
                     }
@@ -199,7 +211,10 @@ export const BarcodeScanner = () => {
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
-            if (!isHardwareScannerMode || !selectedLocation) return;
+            // In Picker Mode, we don't need selectedLocation/SubLocation to start listening
+            if (!isHardwareScannerMode) return; 
+            if (!isPickerMode && !selectedLocation) return;
+
             const currentTime = Date.now();
             const timeSinceLastKey = currentTime - lastKeypressTime.current;
             lastKeypressTime.current = currentTime;
@@ -234,7 +249,7 @@ export const BarcodeScanner = () => {
                 clearInterval(focusInterval);
             };
         }
-    }, [isHardwareScannerMode, selectedLocation, itemMaster, auditedItems, locations, currentUser, selectedSubLocation]);
+    }, [isHardwareScannerMode, selectedLocation, isPickerMode, selectedSubLocation]);
 
     useEffect(() => {
         return () => {
@@ -246,8 +261,10 @@ export const BarcodeScanner = () => {
     }, []);
 
     const handleStartHardwareScanner = () => {
-        if (!selectedLocation) { toast.error("Location required"); return; }
-        if (!selectedSubLocation) { toast.error("Select Sub-Location first"); return; }
+        if (!isPickerMode && !selectedLocation) { toast.error("Location required"); return; }
+        // In Audit Mode, require sub-location. In Picker Mode, we might just be picking a SKU.
+        if (!isPickerMode && !selectedSubLocation) { toast.error("Select Sub-Location first"); return; }
+        
         setIsHardwareScannerMode(true);
         handleStopScanning(); 
         scannedBufferRef.current = '';
@@ -261,8 +278,8 @@ export const BarcodeScanner = () => {
     };
 
     const handleStartScanning = async () => {
-        if (!selectedLocation) { toast.error("Location required"); return; }
-        if (!selectedSubLocation) { toast.error("Select Sub-Location first"); return; }
+        if (!isPickerMode && !selectedLocation) { toast.error("Location required"); return; }
+        if (!isPickerMode && !selectedSubLocation) { toast.error("Select Sub-Location first"); return; }
 
         if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
             toast.error("Protocol Error", { description: "Camera access requires HTTPS or localhost." });
@@ -353,8 +370,8 @@ export const BarcodeScanner = () => {
 
     const handleManualSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!selectedLocation) { toast.error("Location required"); return; }
-        if (!selectedSubLocation) { toast.error("Select Sub-Location first"); return; }
+        if (!isPickerMode && !selectedLocation) { toast.error("Location required"); return; }
+        if (!isPickerMode && !selectedSubLocation) { toast.error("Select Sub-Location first"); return; }
         if (manualBarcode.trim()) {
             handleItemScan(manualBarcode.trim(), selectedLocation).then(success => {
                 if (success) { setScannedBarcode(manualBarcode.trim()); setManualBarcode(""); }
@@ -363,7 +380,7 @@ export const BarcodeScanner = () => {
     };
 
     return (
-        <div className="flex flex-col lg:grid lg:grid-cols-2 gap-6 pb-20">
+        <div className={className || (isPickerMode ? "" : "flex flex-col lg:grid lg:grid-cols-2 gap-6 pb-20")}>
             <style>{`
                 #barcode-scanner-element video {
                     width: 100% !important;
@@ -373,8 +390,9 @@ export const BarcodeScanner = () => {
                 }
             `}</style>
 
-            <div className="order-1 lg:order-1">
+            <div className={isPickerMode ? "" : "order-1 lg:order-1"}>
                 <Card className="shadow-sm border-gray-200">
+                    {!isPickerMode && (
                     <CardHeader className="pb-3">
                         <CardTitle className="flex items-center justify-between text-gray-900">
                             <div className="flex items-center gap-2">
@@ -385,49 +403,54 @@ export const BarcodeScanner = () => {
                             {isProcessing && <span className="text-xs font-normal text-indigo-600 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin"/> Processing</span>}
                         </CardTitle>
                     </CardHeader>
-                    <CardContent>
+                    )}
+                    <CardContent className={isPickerMode ? "pt-6" : ""}>
                         <div className="space-y-4">
-                            <div className="flex items-center gap-2 mb-2 p-2 bg-gray-50 rounded border border-gray-200">
-                                <MapPin className="h-4 w-4 text-indigo-500" />
-                                <span className="text-sm font-medium text-gray-700 truncate">
-                                    {locations.find(l => l.id === selectedLocation)?.name || 'Select Assignment...'}
-                                </span>
-                            </div>
-
-                            {/* Sub-Location Section */}
-                            <div className="p-3 bg-indigo-50/50 rounded-lg border border-indigo-100">
-                                <Label className="text-xs font-semibold text-gray-500 uppercase mb-2 block">
-                                     Audit Sub-Location (Box / Row / Rack)
-                                </Label>
-                                <div className="flex gap-2 mb-2">
-                                    <Input 
-                                        placeholder="Add Sub-Location (e.g. Box 5)" 
-                                        value={newSubLocation}
-                                        onChange={(e) => setNewSubLocation(e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && handleAddSubLocation()}
-                                        className="bg-white"
-                                    />
-                                    <Button variant="outline" onClick={handleAddSubLocation} size="icon">
-                                        <Plus className="h-4 w-4" />
-                                    </Button>
+                            {!isPickerMode && (
+                                <div className="flex items-center gap-2 mb-2 p-2 bg-gray-50 rounded border border-gray-200">
+                                    <MapPin className="h-4 w-4 text-indigo-500" />
+                                    <span className="text-sm font-medium text-gray-700 truncate">
+                                        {locations.find(l => l.id === selectedLocation)?.name || 'Select Assignment...'}
+                                    </span>
                                 </div>
-                                
-                                <Select value={selectedSubLocation} onValueChange={setSelectedSubLocation}>
-                                    <SelectTrigger className="w-full bg-white">
-                                        <SelectValue placeholder="Select active sub-location..." />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {activeSubLocations.length === 0 ? (
-                                            <SelectItem value="default" disabled>Add a sub-location above</SelectItem>
-                                        ) : (
-                                            activeSubLocations.map((sl) => (
-                                                <SelectItem key={sl} value={sl}>{sl}</SelectItem>
-                                            ))
-                                        )}
-                                    </SelectContent>
-                                </Select>
-                                {!selectedSubLocation && <p className="text-xs text-red-500 mt-1 ml-1">* Required to start scanning</p>}
-                            </div>
+                            )}
+
+                            {/* Sub-Location Section (Only show if NOT in picker mode) */}
+                            {!isPickerMode && (
+                                <div className="p-3 bg-indigo-50/50 rounded-lg border border-indigo-100">
+                                    <Label className="text-xs font-semibold text-gray-500 uppercase mb-2 block">
+                                         Audit Sub-Location (Box / Row / Rack)
+                                    </Label>
+                                    <div className="flex gap-2 mb-2">
+                                        <Input 
+                                            placeholder="Add Sub-Location (e.g. Box 5)" 
+                                            value={newSubLocation}
+                                            onChange={(e) => setNewSubLocation(e.target.value)}
+                                            onKeyDown={(e) => e.key === 'Enter' && handleAddSubLocation()}
+                                            className="bg-white"
+                                        />
+                                        <Button variant="outline" onClick={handleAddSubLocation} size="icon">
+                                            <Plus className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                    
+                                    <Select value={selectedSubLocation} onValueChange={setSelectedSubLocation}>
+                                        <SelectTrigger className="w-full bg-white">
+                                            <SelectValue placeholder="Select active sub-location..." />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {activeSubLocations.length === 0 ? (
+                                                <SelectItem value="default" disabled>Add a sub-location above</SelectItem>
+                                            ) : (
+                                                activeSubLocations.map((sl) => (
+                                                    <SelectItem key={sl} value={sl}>{sl}</SelectItem>
+                                                ))
+                                            )}
+                                        </SelectContent>
+                                    </Select>
+                                    {!selectedSubLocation && <p className="text-xs text-red-500 mt-1 ml-1">* Required to start scanning</p>}
+                                </div>
+                            )}
                             
                             {isHardwareScannerMode ? (
                                 <div>
@@ -482,10 +505,10 @@ export const BarcodeScanner = () => {
                                         </Button>
                                     ) : (
                                         <div className="grid grid-cols-2 gap-3">
-                                            <Button variant="default" className="w-full bg-indigo-600 hover:bg-indigo-700" onClick={handleStartScanning} disabled={!selectedLocation || !selectedSubLocation}>
+                                            <Button variant="default" className="w-full bg-indigo-600 hover:bg-indigo-700" onClick={handleStartScanning} disabled={!isPickerMode && (!selectedLocation || !selectedSubLocation)}>
                                                 <Scan className="mr-2 h-4 w-4" /> Camera
                                             </Button>
-                                            <Button variant="outline" className="w-full border-gray-300 text-gray-700" onClick={handleStartHardwareScanner} disabled={!selectedLocation || !selectedSubLocation}>
+                                            <Button variant="outline" className="w-full border-gray-300 text-gray-700" onClick={handleStartHardwareScanner} disabled={!isPickerMode && (!selectedLocation || !selectedSubLocation)}>
                                                 <Keyboard className="mr-2 h-4 w-4" /> Hardware
                                             </Button>
                                         </div>
@@ -493,35 +516,39 @@ export const BarcodeScanner = () => {
                                 </div>
                             )}
                             
-                            <div className="border-t border-gray-100 pt-4">
-                                <form onSubmit={handleManualSubmit} className="flex gap-2">
-                                    <Input placeholder="Manual barcode..." value={manualBarcode} onChange={(e) => setManualBarcode(e.target.value)} disabled={!selectedLocation} className="focus:ring-indigo-600" />
-                                    <Button type="submit" disabled={!selectedLocation || !selectedSubLocation || !manualBarcode.trim()} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-                                        <Check className="h-4 w-4" />
-                                    </Button>
-                                </form>
-                            </div>
+                            {!isPickerMode && (
+                                <div className="border-t border-gray-100 pt-4">
+                                    <form onSubmit={handleManualSubmit} className="flex gap-2">
+                                        <Input placeholder="Manual barcode..." value={manualBarcode} onChange={(e) => setManualBarcode(e.target.value)} disabled={!selectedLocation} className="focus:ring-indigo-600" />
+                                        <Button type="submit" disabled={!selectedLocation || !selectedSubLocation || !manualBarcode.trim()} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                                            <Check className="h-4 w-4" />
+                                        </Button>
+                                    </form>
+                                </div>
+                            )}
                             <input ref={hardwareScannerInputRef} type="text" className="absolute opacity-0 w-px h-px pointer-events-none" tabIndex={-1} autoComplete="off" />
                         </div>
                     </CardContent>
                 </Card>
             </div>
 
-            <div className="space-y-6 order-2 lg:order-2">
-                {selectedLocation ? (
-                    <>
-                        <LocationAuditSummary locationId={selectedLocation} hideDropdown={true} />
-                        <RecentActivity selectedLocation={selectedLocation} />
-                    </>
-                ) : (
-                    <Card className="h-full flex items-center justify-center p-6 shadow-sm border-gray-200">
-                        <div className="text-center text-gray-400">
-                            <MapPin className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                            <p>Please select an active assignment <br/> to start scanning.</p>
-                        </div>
-                    </Card>
-                )}
-            </div>
+            {!isPickerMode && (
+                <div className="space-y-6 order-2 lg:order-2">
+                    {selectedLocation ? (
+                        <>
+                            <LocationAuditSummary locationId={selectedLocation} hideDropdown={true} />
+                            <RecentActivity selectedLocation={selectedLocation} />
+                        </>
+                    ) : (
+                        <Card className="h-full flex items-center justify-center p-6 shadow-sm border-gray-200">
+                            <div className="text-center text-gray-400">
+                                <MapPin className="h-12 w-12 mx-auto mb-4 opacity-20" />
+                                <p>Please select an active assignment <br/> to start scanning.</p>
+                            </div>
+                        </Card>
+                    )}
+                </div>
+            )}
         </div>
     );
 };
