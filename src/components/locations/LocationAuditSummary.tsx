@@ -23,7 +23,7 @@ export const LocationAuditSummary = ({
   hideDropdown = false,
   className 
 }: LocationAuditSummaryProps) => {
-  const { locations, itemMaster } = useInventory(); // Access itemMaster directly for calc
+  const { locations, itemMaster } = useInventory(); 
   const { currentUser } = useUser(); 
   const [internalLocationId, setInternalLocationId] = useState<string>("");
   const { accessibleLocations } = useUserAccess();
@@ -32,26 +32,30 @@ export const LocationAuditSummary = ({
   const selectedLocation = externalLocationId !== undefined ? externalLocationId : internalLocationId;
   const selectedLocationObj = locations.find(loc => loc.id === selectedLocation);
   
-  // Calculate Stats based on Total Stock Quantity (System Qty)
+  // Calculate Stats based on Total Stock Quantity (System Qty) instead of unique SKUs
   const stats = useMemo(() => {
     if (!selectedLocationObj) return null;
 
     const locationName = selectedLocationObj.name;
+    // Filter items belonging to the selected location
     const locationItems = itemMaster.filter(i => i.location === locationName);
 
-    // Sum of System Quantities
+    // 1. Calculate Total Volume (Sum of all System Quantities)
     const totalStock = locationItems.reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
     
-    // Items that have been touched/audited
-    const auditedItemsList = locationItems.filter(i => i.status && i.status !== 'pending');
-    const auditedStock = auditedItemsList.reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
+    // 2. Calculate Audited Volume (Sum of System Quantities for items NOT pending)
+    const auditedStock = locationItems
+        .filter(i => i.status && i.status !== 'pending')
+        .reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
     
-    // Matched Quantities
+    // 3. Calculate Matched Volume (Sum of System Quantities for items matching exactly)
     const matchedStock = locationItems
         .filter(i => i.status === 'matched')
         .reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
 
     const pendingStock = Math.max(0, totalStock - auditedStock);
+    
+    // Percentages based on quantity/volume
     const matchPercentage = totalStock > 0 ? Math.round((matchedStock / totalStock) * 100) : 0;
     const progressPercentage = totalStock > 0 ? Math.round((auditedStock / totalStock) * 100) : 0;
 
@@ -118,7 +122,7 @@ export const LocationAuditSummary = ({
                   <div className="rounded-xl bg-indigo-50 p-3 border border-indigo-100 flex flex-col justify-between">
                     <div className="flex items-center gap-1.5 mb-1">
                         <Boxes className="h-3.5 w-3.5 text-indigo-600" />
-                        <span className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">Total Stock</span>
+                        <span className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">Total Stock Qty</span>
                     </div>
                     <div className="text-xl font-bold text-gray-900">{stats.totalStock.toLocaleString()}</div>
                   </div>
@@ -140,15 +144,15 @@ export const LocationAuditSummary = ({
                   </div>
 
                   <div className="rounded-xl bg-violet-50 p-3 border border-violet-100 flex flex-col justify-between">
-                    <div className="text-xs font-semibold text-violet-700 uppercase tracking-wide mb-1">Match Rate</div>
+                    <div className="text-xs font-semibold text-violet-700 uppercase tracking-wide mb-1">Match Rate (Qty)</div>
                     <div className="text-xl font-bold text-gray-900">{stats.matchPercentage}%</div>
                   </div>
                 </div>
 
-                {/* Progress Bar */}
+                {/* Progress Bar (Quantity Based) */}
                 <div>
                   <div className="mb-2 flex justify-between text-xs font-medium">
-                    <span className="text-gray-500">Overall Progress</span>
+                    <span className="text-gray-500">Overall Progress (By Volume)</span>
                     <span className="text-indigo-700">{stats.progressPercentage}%</span>
                   </div>
                   <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-100 border border-gray-100">
