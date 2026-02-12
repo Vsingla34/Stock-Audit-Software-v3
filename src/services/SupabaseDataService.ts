@@ -220,9 +220,9 @@ class SupabaseDataService {
     return true;
   }
 
-  // OPTIMIZED: Fetch all items with pagination & array push
+  // OPTIMIZED: Fetch all items with pagination & strict assignment filtering
   public async getItemMaster(companyId: string, assignmentId: number | null = null): Promise<InventoryItem[]> {
-    const allItems: any[] = []; // Constant reference, mutate content
+    const allItems: any[] = []; 
     let page = 0;
     const pageSize = 1000;
 
@@ -232,9 +232,12 @@ class SupabaseDataService {
           .select("*")
           .eq("company_id", companyId);
 
+        // FIX: If an assignmentId is provided, ONLY fetch items for that assignment.
+        // This prevents items from other assignments or the master list from appearing.
         if (assignmentId) {
-           query = query.or(`assignment_id.eq.${assignmentId},assignment_id.is.null`);
+           query = query.eq("assignment_id", assignmentId); 
         } else {
+           // If no assignmentId, we are looking at the Master Inventory
            query = query.is("assignment_id", null);
         }
 
@@ -250,7 +253,6 @@ class SupabaseDataService {
 
         if (!data || data.length === 0) break;
         
-        // Push items instead of spreading (More memory efficient)
         allItems.push(...data);
         
         if (data.length < pageSize) break;
@@ -272,10 +274,8 @@ class SupabaseDataService {
           try { parsedCustomAttributes = JSON.parse(item.custom_attributes); } catch { parsedCustomAttributes = {}; }
       }
 
-      // CRITICAL FIX: Use custom attribute name as fallback if main name is empty
       let itemName = item.name;
       if (!itemName || itemName === "Unnamed Item") {
-        // Check for name in custom attributes (case-insensitive)
         const customName = parsedCustomAttributes['Name'] || 
                           parsedCustomAttributes['name'] || 
                           parsedCustomAttributes['Item Name'] ||
@@ -287,7 +287,6 @@ class SupabaseDataService {
         }
       }
 
-      // CRITICAL FIX: Use custom attribute category as fallback if main category is empty
       let itemCategory = item.category;
       if (!itemCategory || itemCategory === "-") {
         const customCategory = parsedCustomAttributes['Category'] || 
@@ -297,8 +296,6 @@ class SupabaseDataService {
         }
       }
 
-      // CRITICAL FIX: Remove duplicate fields from customAttributes
-      // This prevents duplicate columns in the UI (Name, Category, etc.)
       const reservedFields = ['sku', 'name', 'category', 'location', 'systemQuantity', 'physicalQuantity', 
                               'status', 'lastAudited', 'notes', 'clientRemarks', 'uploadBatchKey', 'assignmentId',
                               'id', 'companyId', 'auditorEntries', 'item_name', 'itemname'];
@@ -306,7 +303,6 @@ class SupabaseDataService {
       const cleanedCustomAttributes = { ...parsedCustomAttributes };
       reservedFields.forEach(field => {
         delete cleanedCustomAttributes[field];
-        // Also check lowercase/uppercase variations
         delete cleanedCustomAttributes[field.toLowerCase()];
         delete cleanedCustomAttributes[field.toUpperCase()];
       });
@@ -332,14 +328,11 @@ class SupabaseDataService {
     });
   }
 
-  // ENHANCED: Lightweight SKU Fetcher with Robust Pagination & Trimming
   public async getAllSkus(companyId: string): Promise<Set<string>> {
       const allSkus = new Set<string>();
       let page = 0;
-      const pageSize = 1000; // Standard page size for reliable fetching
+      const pageSize = 1000;
       let totalFetched = 0;
-
-      console.log(`Starting SKU fetch for company ${companyId}...`);
 
       while(true) {
           const start = page * pageSize;
@@ -349,7 +342,7 @@ class SupabaseDataService {
              .from("inventory_items")
              .select("sku")
              .eq("company_id", companyId)
-             .is("assignment_id", null) // Only fetch Master Items
+             .is("assignment_id", null) 
              .range(start, end);
           
           if (error) {
@@ -357,14 +350,12 @@ class SupabaseDataService {
               throw error;
           }
           
-          // If no data returned, we've reached the end
           if (!data || data.length === 0) break;
 
-          // Populate Set with trimmed SKUs to prevent whitespace mismatches
           data.forEach(row => {
               if (row.sku) {
                   const trimmedSku = row.sku.trim();
-                  if (trimmedSku) { // Only add non-empty SKUs
+                  if (trimmedSku) { 
                       allSkus.add(trimmedSku);
                   }
               }
@@ -372,18 +363,8 @@ class SupabaseDataService {
           
           totalFetched += data.length;
           
-          // If we got fewer items than pageSize, we've reached the end
-          if (data.length < pageSize) {
-              console.log(`Completed SKU fetch: ${totalFetched} rows processed, ${allSkus.size} unique SKUs`);
-              break;
-          }
-          
+          if (data.length < pageSize) break;
           page++;
-          
-          // Log progress for large datasets
-          if (page % 5 === 0) {
-              console.log(`SKU fetch progress: page ${page}, ${totalFetched} rows, ${allSkus.size} unique SKUs so far...`);
-          }
       }
       
       return allSkus;
@@ -393,9 +374,6 @@ class SupabaseDataService {
     return this.getItemMaster(companyId, assignmentId);
   }
 
-  // ... inside SupabaseDataService class ...
-
-  // Fetch sub-locations for a specific location
   public async getSubLocations(locationId: string): Promise<string[]> {
     const { data, error } = await supabase
       .from("sub_locations")
@@ -411,7 +389,6 @@ class SupabaseDataService {
     return data.map((item: any) => item.name);
   }
 
-  // Create a new sub-location (Ignores if it already exists)
   public async createSubLocation(params: {
     name: string;
     locationId: string;
@@ -427,7 +404,6 @@ class SupabaseDataService {
       .select()
       .single();
 
-    // Ignore unique constraint violation (code 23505) if user tries to add same name twice
     if (error && error.code !== '23505') {
       console.error("Error creating sub-location:", error);
       throw error;
@@ -437,7 +413,6 @@ class SupabaseDataService {
   public async setItemMaster(items: Partial<InventoryItem>[], companyId: string): Promise<void> {
     if (items.length === 0) return;
     
-    // Process upserts in chunks
     const CHUNK_SIZE = 500;
     for (let i = 0; i < items.length; i += CHUNK_SIZE) {
         const chunk = items.slice(i, i + CHUNK_SIZE);
@@ -450,7 +425,7 @@ class SupabaseDataService {
           company_id: companyId,
           assignment_id: null, 
           system_quantity: item.systemQuantity || 0,
-          physical_quantity: item.physicalQuantity || 0,
+          physical_quantity: item.physical_quantity || 0,
           status: item.status || 'pending',
           client_remarks: item.clientRemarks,
           auditor_entries: item.auditorEntries || [],
@@ -466,10 +441,6 @@ class SupabaseDataService {
     }
   }
 
-// src/services/SupabaseDataService.ts
-
-// ... (Inside SupabaseDataService class)
-
   public async setClosingStock(items: Partial<InventoryItem>[], companyId: string, assignmentId: string): Promise<void> {
      if (items.length === 0) return;
      
@@ -481,8 +452,8 @@ class SupabaseDataService {
          
          const dbItems = chunk.map(item => ({
            sku: item.sku,
-           name: item.name || "Unnamed Item", // FIXED: Now mapping the name
-           category: item.category || "-",    // FIXED: Now mapping the category
+           name: item.name || "Unnamed Item", 
+           category: item.category || "-",    
            location: item.location,
            company_id: companyId,
            assignment_id: assignmentIdInt, 

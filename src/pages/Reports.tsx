@@ -101,13 +101,19 @@ const Reports = () => {
   useEffect(() => {
     let isMounted = true;
     const fetchReportData = async () => {
+      // Clear current items immediately when assignment changes to avoid showing old data
+      setItems([]); 
+      
       if (!selectedCompanyId || !selectedAssignmentId) return;
 
       try {
         setLoading(true);
+        // Ensure ID is a clean integer
+        const assignmentIdInt = parseInt(String(selectedAssignmentId), 10);
+        
         const data = await SupabaseDataService.getItemMaster(
             selectedCompanyId, 
-            parseInt(String(selectedAssignmentId))
+            assignmentIdInt
         );
 
         if (isMounted) {
@@ -227,12 +233,10 @@ const Reports = () => {
     };
   }, [items]);
 
-  // 1. Calculate the Global Start Date (Day 1)
   const auditStartDate = useMemo(() => {
     let minTs = Infinity;
     let found = false;
     items.forEach(item => {
-        // Check auditor entries for earliest date
         if (item.auditorEntries && item.auditorEntries.length > 0) {
             item.auditorEntries.forEach(entry => {
                 if (entry.auditedAt) {
@@ -244,7 +248,6 @@ const Reports = () => {
                 }
             });
         }
-        // Fallback to lastAudited if no entries but has status
         else if (item.lastAudited) {
              const ts = new Date(item.lastAudited).getTime();
              if (ts < minTs) {
@@ -256,7 +259,6 @@ const Reports = () => {
     
     if (!found) return null;
     
-    // Normalize to midnight for accurate day difference
     const d = new Date(minTs);
     d.setHours(0,0,0,0);
     return d;
@@ -270,7 +272,6 @@ const Reports = () => {
             ? phyQty - sysQty 
             : 0; 
 
-        // 2. Calculate Day for this item
         let auditDay = "-";
         if (auditStartDate && item.lastAudited) {
             const itemDate = new Date(item.lastAudited);
@@ -278,7 +279,6 @@ const Reports = () => {
             
             const diffTime = itemDate.getTime() - auditStartDate.getTime();
             const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)); 
-            // If same day, diff is 0, so Day 1.
             auditDay = (diffDays + 1).toString();
         }
 
@@ -296,7 +296,7 @@ const Reports = () => {
         auditorEntries: item.auditorEntries || [],
         clientRemarks: item.clientRemarks,
         customAttributes: item.customAttributes || {},
-        auditDay: auditDay // Added field
+        auditDay: auditDay 
       };
     });
   }, [items, locationName, auditStartDate]);
@@ -485,7 +485,7 @@ const Reports = () => {
         physicalQuantity: item.physicalQuantity,
         variance: item.variance,
         status: item.status,
-        auditDay: item.auditDay // Added for CSV
+        auditDay: item.auditDay 
       };
       if (hasPricing) {
          baseObj["Unit Price"] = unitPrice;
@@ -535,7 +535,7 @@ const Reports = () => {
       }
       baseData.variance = item.variance;
       baseData.status = item.status;
-      baseData.auditDay = item.auditDay; // Added
+      baseData.auditDay = item.auditDay; 
       baseData.remarks = item.clientRemarks || "-";
       baseData.lastAudited = item.lastAudited;
       return baseData;
@@ -564,7 +564,7 @@ const Reports = () => {
             baseObj["Physical Value"] = phyValue;
             baseObj["Value Variance"] = valueVariance;
         }
-        baseObj.auditDay = item.auditDay; // Added
+        baseObj.auditDay = item.auditDay; 
         baseObj.remarks = item.clientRemarks || "-";
         baseObj.lastAudited = item.lastAudited;
         return baseObj;
@@ -618,7 +618,7 @@ const Reports = () => {
       }
       row.Variance = item.variance;
       row.Status = item.status;
-      row["Audit Day"] = item.auditDay; // Added
+      row["Audit Day"] = item.auditDay; 
       row.Remarks = item.clientRemarks || "-";
       row["Last Audited"] = item.lastAudited ? new Date(item.lastAudited).toLocaleString() : "-";
       return row;
@@ -644,7 +644,7 @@ const Reports = () => {
             row["Physical Value"] = phyValue;
             row["Value Variance"] = valueVariance;
         }
-        row["Audit Day"] = item.auditDay; // Added
+        row["Audit Day"] = item.auditDay; 
         row.Remarks = item.clientRemarks || "-";
         row["Last Audited"] = item.lastAudited ? new Date(item.lastAudited).toLocaleString() : "-";
         return row;
@@ -681,7 +681,6 @@ const Reports = () => {
     const wsDiscrepancy = XLSX.utils.json_to_sheet(discrepancyData);
     const wsQuestionnaire = XLSX.utils.json_to_sheet(questionnaireData);
 
-    // Apply Column Widths
     wsReconciliation['!cols'] = fitToColumn(reconciliationData);
     wsDiscrepancy['!cols'] = fitToColumn(discrepancyData);
     wsSummary['!cols'] = fitToColumn(summaryData);
@@ -932,7 +931,6 @@ const Reports = () => {
                       <TableHead className="text-center w-[80px]">Phy</TableHead>
                       <TableHead className="text-center w-[80px]">Var</TableHead>
                       <TableHead className="text-center w-[100px]">Status</TableHead>
-                      {/* Added Day Column */}
                       <TableHead className="text-center w-[60px]">Day</TableHead>
                       <TableHead className="w-[180px]">Remarks</TableHead>
                     </TableRow>
@@ -983,7 +981,6 @@ const Reports = () => {
                                 {item.status === "matched" ? "Matched" : item.status === "discrepancy" ? "Discrepancy" : "Pending"}
                               </span>
                             </TableCell>
-                            {/* Added Day Value */}
                             <TableCell className="text-center text-xs font-mono text-gray-600">
                                 {item.auditDay}
                             </TableCell>
