@@ -3,7 +3,7 @@ import { useInventory } from "@/context/InventoryContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Barcode, Scan, Check, MapPin, Keyboard, Camera, X, Loader2, Plus } from "lucide-react";
+import { Barcode, Scan, Check, MapPin, Keyboard, Camera, X, Loader2, Plus, AlertCircle, PackagePlus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Html5Qrcode, Html5QrcodeSupportedFormats, Html5QrcodeScannerState } from "html5-qrcode";
 import { useUser } from "@/context/UserContext"; 
@@ -12,6 +12,14 @@ import { RecentActivity } from "@/components/dashboard/RecentActivity";
 import { useCompany } from "@/context/CompanyContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface BarcodeScannerProps {
     onResult?: (code: string) => void;
@@ -29,6 +37,17 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
     const [newSubLocation, setNewSubLocation] = useState("");
     const [selectedSubLocation, setSelectedSubLocation] = useState<string>("");
 
+    // New State for "Item Not Found" Workflow
+    const [isNotFoundOpen, setIsNotFoundOpen] = useState(false);
+    const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+    const [scannedUnknownBarcode, setScannedUnknownBarcode] = useState("");
+    const [newItem, setNewItem] = useState({
+        sku: "",
+        name: "",
+        category: "",
+        physicalQuantity: 1
+    });
+
     const { 
         itemMaster, 
         auditedItems, 
@@ -37,7 +56,8 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
         assignments,
         activeSubLocations, 
         fetchSubLocations, 
-        addSubLocationToDb 
+        addSubLocationToDb,
+        addSurplusItem 
     } = useInventory();
 
     const { currentUser } = useUser();
@@ -56,7 +76,6 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
 
     const isPickerMode = !!onResult;
 
-    // Fetch sub-locations when location is identified
     useEffect(() => {
         if (selectedLocation) {
             fetchSubLocations(selectedLocation).catch(console.error);
@@ -82,7 +101,6 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
     };
 
     const handleItemScan = async (barcode: string, locationId: string) => {
-        // PICKER MODE: Return result immediately and stop
         if (onResult) {
             onResult(barcode);
             toast.success("Barcode scanned");
@@ -105,11 +123,6 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
             const locationObj = locations.find(loc => loc.id === locationId);
             const locationName = locationObj?.name || '';
             
-            if (!locationName) {
-                 toast.error("Invalid Location", { description: "Location name mismatch." });
-                 return false;
-            }
-            
             const masterItem = itemMaster.find(item => (item.sku === barcode) && item.location === locationName);
             
             if (!masterItem) {
@@ -117,7 +130,12 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                 if (itemInOtherLocation) {
                     toast.error("Item mismatch", { description: `Item exists at ${itemInOtherLocation.location}, not ${locationName}.` });
                 } else {
-                    toast.error("Unknown Item", { description: `Barcode ${barcode} not found in master data.` });
+                    // Trigger the Not Found Workflow
+                    setScannedUnknownBarcode(barcode);
+                    setIsNotFoundOpen(true);
+                    if (isScanning && html5QrCodeRef.current?.getState() === Html5QrcodeScannerState.SCANNING) {
+                        html5QrCodeRef.current.pause();
+                    }
                 }
                 return false;
             }
@@ -125,7 +143,6 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
             const existingAuditedItem = auditedItems.find(item => item.sku === masterItem.sku && item.location === locationName);
             const targetItem = existingAuditedItem || masterItem;
 
-            // Fetch existing count for this auditor AND this subLocation
             const existingAuditorEntries = targetItem.auditorEntries || [];
             const currentEntry = existingAuditorEntries.find(e => e.auditorId === currentUser?.id && e.subLocation === selectedSubLocation);
             const currentQuantity = currentEntry?.quantityFound || 0;
@@ -146,7 +163,6 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                 selectedSubLocation
             );
 
-            // Calculate Total across all sublocations for display
             const otherEntriesSum = existingAuditorEntries
                 .filter(e => !(e.auditorId === currentUser?.id && e.subLocation === selectedSubLocation))
                 .reduce((sum, e) => sum + e.quantityFound, 0);
@@ -175,6 +191,24 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
         }
     };
 
+    const handleAddSurplus = async () => {
+        if (!newItem.sku || !newItem.name) return;
+        try {
+            await addSurplusItem(newItem);
+            toast.success("Surplus item added successfully");
+            setIsAddDialogOpen(false);
+            setScannedBarcode(newItem.sku);
+            setNewItem({ sku: "", name: "", category: "", physicalQuantity: 1 });
+            
+            // Resume scanner if it was active
+            if (isScanning && html5QrCodeRef.current?.getState() === Html5QrcodeScannerState.PAUSED) {
+                html5QrCodeRef.current.resume();
+            }
+        } catch (error: any) {
+            toast.error("Failed to add surplus item", { description: error.message });
+        }
+    };
+
     const onScanSuccess = async (decodedText: string) => {
         if (isProcessingRef.current) return;
         isProcessingRef.current = true;
@@ -195,13 +229,13 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
             console.error(e);
         } finally {
             setTimeout(() => {
-                try {
-                    // Only resume if not unmounted and in paused state
-                    if (html5QrCodeRef.current?.getState() === Html5QrcodeScannerState.PAUSED) {
+                // Only resume automatically if we didn't open the "Not Found" dialog
+                if (!isNotFoundOpen && !isAddDialogOpen && html5QrCodeRef.current?.getState() === Html5QrcodeScannerState.PAUSED) {
+                    try {
                         html5QrCodeRef.current.resume();
+                    } catch (e) {
+                        console.warn("Failed to resume scanner:", e);
                     }
-                } catch (e) {
-                    console.warn("Failed to resume scanner:", e);
                 }
                 isProcessingRef.current = false;
                 setIsProcessing(false);
@@ -209,9 +243,22 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
         }
     };
 
+    // Close logic to resume scanner on decline
+    const handleDeclineNotFound = () => {
+        setIsNotFoundOpen(false);
+        if (isScanning && html5QrCodeRef.current?.getState() === Html5QrcodeScannerState.PAUSED) {
+            html5QrCodeRef.current.resume();
+        }
+    };
+
+    const handleOpenAddForm = () => {
+        setIsNotFoundOpen(false);
+        setNewItem(prev => ({ ...prev, sku: scannedUnknownBarcode }));
+        setIsAddDialogOpen(true);
+    };
+
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
-            // In Picker Mode, we don't need selectedLocation/SubLocation to start listening
             if (!isHardwareScannerMode) return; 
             if (!isPickerMode && !selectedLocation) return;
 
@@ -262,7 +309,6 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
 
     const handleStartHardwareScanner = () => {
         if (!isPickerMode && !selectedLocation) { toast.error("Location required"); return; }
-        // In Audit Mode, require sub-location. In Picker Mode, we might just be picking a SKU.
         if (!isPickerMode && !selectedSubLocation) { toast.error("Select Sub-Location first"); return; }
         
         setIsHardwareScannerMode(true);
@@ -323,33 +369,16 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
             };
 
             try {
-                try {
-                    const devices = await Html5Qrcode.getCameras();
-                    if (devices && devices.length > 0) {
-                         const backCamera = devices.find(d => d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('rear') || d.label.toLowerCase().includes('environment'));
-                         const deviceId = backCamera ? backCamera.id : devices[0].id;
-                         await startCamera(deviceId);
-                         return; 
-                    }
-                } catch (cameraListError) {
-                    console.warn("Listing cameras failed:", cameraListError);
-                }
-
-                try {
+                const devices = await Html5Qrcode.getCameras();
+                if (devices && devices.length > 0) {
+                     const backCamera = devices.find(d => d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('rear') || d.label.toLowerCase().includes('environment'));
+                     await startCamera(backCamera ? backCamera.id : devices[0].id);
+                } else {
                     await startCamera({ facingMode: "environment" });
-                    return;
-                } catch (envError) {
-                    console.warn("Env camera failed:", envError);
                 }
-
-                await startCamera({ facingMode: "user" });
-                toast.info("Using front camera (Rear camera unavailable)");
-
             } catch (finalError: any) {
-                 console.error("FATAL:", finalError);
                  setIsScanning(false);
                  toast.error("Camera Failed", { description: "Could not start video stream." });
-                 html5QrCode.clear();
             }
         }, 300);
     };
@@ -361,9 +390,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                 html5QrCodeRef.current.clear();
             }
             setIsScanning(false);
-            setIsProcessing(false);
         } catch (err) {
-            console.error("Error stopping scanner:", err);
             setIsScanning(false);
         }
     };
@@ -415,7 +442,6 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                                 </div>
                             )}
 
-                            {/* Sub-Location Section (Only show if NOT in picker mode) */}
                             {!isPickerMode && (
                                 <div className="p-3 bg-indigo-50/50 rounded-lg border border-indigo-100">
                                     <Label className="text-xs font-semibold text-gray-500 uppercase mb-2 block">
@@ -478,8 +504,6 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                                         style={{ minHeight: '250px' }} 
                                     >
                                         <div id={scannerElementId} className="w-full h-full" />
-                                        
-                                        {/* Freeze Overlay */}
                                         {isProcessing && (
                                             <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-10 backdrop-blur-[2px]">
                                                 <div className="bg-white px-4 py-2 rounded-full flex items-center gap-2 shadow-lg">
@@ -549,6 +573,86 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                     )}
                 </div>
             )}
+
+            {/* Workflow Dialogs */}
+            <Dialog open={isNotFoundOpen} onOpenChange={setIsNotFoundOpen}>
+                <DialogContent className="sm:max-w-[425px]">
+                    <DialogHeader>
+                        <div className="flex items-center gap-2 text-orange-600">
+                            <AlertCircle className="h-5 w-5" />
+                            <DialogTitle>Item Not Found</DialogTitle>
+                        </div>
+                        <DialogDescription className="pt-2 text-gray-700">
+                            The barcode <span className="font-mono font-bold text-gray-900">{scannedUnknownBarcode}</span> was not found in the master data for this location.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter className="flex flex-row gap-2 sm:justify-end">
+                        <Button variant="outline" onClick={handleDeclineNotFound} className="flex-1 sm:flex-none">
+                            Decline
+                        </Button>
+                        <Button onClick={handleOpenAddForm} className="bg-indigo-600 hover:bg-indigo-700 flex-1 sm:flex-none">
+                            <PackagePlus className="mr-2 h-4 w-4" />
+                            Add New Item
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+                <DialogContent className="sm:max-w-[425px]">
+                    <DialogHeader>
+                        <DialogTitle>Add Surplus Item</DialogTitle>
+                        <DialogDescription>
+                            Found an item missing from the system? Enter its details below.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-4">
+                        <div className="grid gap-2">
+                            <Label htmlFor="scan-sku" className="text-gray-500">SKU / Barcode</Label>
+                            <Input id="scan-sku" value={newItem.sku} readOnly className="bg-gray-50 font-mono" />
+                        </div>
+                        <div className="grid gap-2">
+                            <Label htmlFor="scan-name">Item Name</Label>
+                            <Input 
+                                id="scan-name" 
+                                value={newItem.name} 
+                                onChange={(e) => setNewItem({...newItem, name: e.target.value})}
+                                placeholder="e.g. Wireless Mouse"
+                                autoFocus
+                            />
+                        </div>
+                        <div className="grid gap-2">
+                            <Label htmlFor="scan-cat">Category</Label>
+                            <Input 
+                                id="scan-cat" 
+                                value={newItem.category} 
+                                onChange={(e) => setNewItem({...newItem, category: e.target.value})}
+                                placeholder="e.g. Electronics"
+                            />
+                        </div>
+                        <div className="grid gap-2">
+                            <Label htmlFor="scan-qty">Physical Quantity Found</Label>
+                            <Input 
+                                id="scan-qty" 
+                                type="number"
+                                min="1"
+                                value={newItem.physicalQuantity} 
+                                onChange={(e) => setNewItem({...newItem, physicalQuantity: parseInt(e.target.value) || 0})}
+                            />
+                        </div>
+                        <div className="bg-indigo-50 p-3 rounded-md border border-indigo-100 text-xs text-indigo-800">
+                            <strong>Note:</strong> System Quantity will be 0. 
+                            This item will be recorded at <strong>{selectedSubLocation}</strong>.
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
+                        <Button onClick={handleAddSurplus} disabled={!newItem.name} className="bg-indigo-600 hover:bg-indigo-700">
+                            Save Item
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 };
