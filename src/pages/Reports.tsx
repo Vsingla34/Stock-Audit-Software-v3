@@ -525,8 +525,12 @@ const Reports = () => {
          baseData["System Value"] = sysValue;
       }
       Array.from(allAuditors).forEach((auditorName) => {
-        const auditorEntry = item.auditorEntries.find((e: any) => e.auditorName === auditorName);
-        baseData[auditorName] = auditorEntry ? auditorEntry.quantityFound : 0;
+        // FIX: Aggregate all quantities for this auditor (summing across sub-locations)
+        const totalQty = (item.auditorEntries || [])
+          .filter((e: any) => e.auditorName === auditorName)
+          .reduce((sum: number, e: any) => sum + (e.quantityFound || 0), 0);
+          
+        baseData[auditorName] = totalQty;
       });
       baseData.Total = item.physicalQuantity;
       if (hasPricing) {
@@ -608,8 +612,12 @@ const Reports = () => {
         row["System Value"] = sysValue;
       }
       auditorList.forEach((auditorName) => {
-        const entry = item.auditorEntries.find((e: any) => e.auditorName === auditorName);
-        row[auditorName] = entry ? entry.quantityFound : 0;
+        // FIX: Aggregate all quantities for this auditor (summing across sub-locations)
+        const totalQty = (item.auditorEntries || [])
+            .filter((e: any) => e.auditorName === auditorName)
+            .reduce((sum: number, e: any) => sum + (e.quantityFound || 0), 0);
+            
+        row[auditorName] = totalQty;
       });
       row["Physical Qty"] = item.physicalQuantity;
       if (hasPricing) {
