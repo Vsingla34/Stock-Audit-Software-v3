@@ -67,12 +67,11 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
     const selectedLocation = currentAssignment?.locationId || "";
     
     const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
-    const hardwareScannerInputRef = useRef<HTMLInputElement>(null);
     const isProcessingRef = useRef(false); 
     const scannerElementId = "barcode-scanner-element";
 
-    const scannedBufferRef = useRef('');
-    const lastKeypressTime = useRef(0);
+    // Ref for the hidden input that captures hardware scanner data
+    const hardwareInputRef = useRef<HTMLInputElement>(null);
 
     const isPickerMode = !!onResult;
 
@@ -130,7 +129,6 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                 if (itemInOtherLocation) {
                     toast.error("Item mismatch", { description: `Item exists at ${itemInOtherLocation.location}, not ${locationName}.` });
                 } else {
-                    // Trigger the Not Found Workflow
                     setScannedUnknownBarcode(barcode);
                     setIsNotFoundOpen(true);
                     if (isScanning && html5QrCodeRef.current?.getState() === Html5QrcodeScannerState.SCANNING) {
@@ -200,7 +198,6 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
             setScannedBarcode(newItem.sku);
             setNewItem({ sku: "", name: "", category: "", physicalQuantity: 1 });
             
-            // Resume scanner if it was active
             if (isScanning && html5QrCodeRef.current?.getState() === Html5QrcodeScannerState.PAUSED) {
                 html5QrCodeRef.current.resume();
             }
@@ -229,7 +226,6 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
             console.error(e);
         } finally {
             setTimeout(() => {
-                // Only resume automatically if we didn't open the "Not Found" dialog
                 if (!isNotFoundOpen && !isAddDialogOpen && html5QrCodeRef.current?.getState() === Html5QrcodeScannerState.PAUSED) {
                     try {
                         html5QrCodeRef.current.resume();
@@ -243,7 +239,6 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
         }
     };
 
-    // Close logic to resume scanner on decline
     const handleDeclineNotFound = () => {
         setIsNotFoundOpen(false);
         if (isScanning && html5QrCodeRef.current?.getState() === Html5QrcodeScannerState.PAUSED) {
@@ -257,57 +252,40 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
         setIsAddDialogOpen(true);
     };
 
- useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-        if (!isHardwareScannerMode) return; 
-        if (!isPickerMode && !selectedLocation) return;
-
-        const currentTime = Date.now();
-        const timeSinceLastKey = currentTime - lastKeypressTime.current;
-        lastKeypressTime.current = currentTime;
-
-        // Reset buffer if there's a long pause between keys
-        if (timeSinceLastKey > 100) scannedBufferRef.current = '';
-
-        if (event.key === 'Enter') {
-            event.preventDefault();
-            event.stopPropagation();
-
-            // FIX: Use a small timeout to ensure the buffer is fully populated 
-            // before processing. This fixes "Empty Scan" on mobile phones.
-            setTimeout(() => {
-                const barcode = scannedBufferRef.current.trim();
-                if (barcode) {
-                    handleItemScan(barcode, selectedLocation).then(success => { 
-                        if (success) setScannedBarcode(barcode); 
-                    });
-                } else {
-                    toast.error("Empty scan - Try scanning again");
+    // Hardware Scanner Logic using a focused hidden input
+    useEffect(() => {
+        let focusInterval: any;
+        if (isHardwareScannerMode) {
+            // Keep focusing the hidden input so it captures OTG scanner data
+            focusInterval = setInterval(() => {
+                if (hardwareInputRef.current && document.activeElement !== hardwareInputRef.current) {
+                    hardwareInputRef.current.focus();
                 }
-                scannedBufferRef.current = '';
-            }, 20); // 20ms delay is sufficient for mobile processing
-            return;
+            }, 300);
         }
+        return () => {
+            if (focusInterval) clearInterval(focusInterval);
+        };
+    }, [isHardwareScannerMode]);
 
-        // Capture single characters from the scanner
-        if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
-            scannedBufferRef.current += event.key;
+    const handleHardwareInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const barcode = e.currentTarget.value.trim();
+            
+            if (barcode) {
+                handleItemScan(barcode, selectedLocation).then(success => { 
+                    if (success) setScannedBarcode(barcode); 
+                });
+            } else {
+                toast.error("Empty scan - Try scanning again");
+            }
+            
+            // Clear input for next scan
+            e.currentTarget.value = "";
         }
     };
 
-    if (isHardwareScannerMode) {
-        document.addEventListener('keydown', handleKeyDown, true);
-        const focusInterval = setInterval(() => {
-            if (hardwareScannerInputRef.current && document.activeElement !== hardwareScannerInputRef.current) {
-                hardwareScannerInputRef.current.focus();
-            }
-        }, 100);
-        return () => {
-            document.removeEventListener('keydown', handleKeyDown, true);
-            clearInterval(focusInterval);
-        };
-    }
-}, [isHardwareScannerMode, selectedLocation, isPickerMode, selectedSubLocation]);
     useEffect(() => {
         return () => {
             isProcessingRef.current = false; 
@@ -323,14 +301,12 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
         
         setIsHardwareScannerMode(true);
         handleStopScanning(); 
-        scannedBufferRef.current = '';
         toast.success("Hardware scanner activated");
-        setTimeout(() => hardwareScannerInputRef.current?.focus(), 100);
+        setTimeout(() => hardwareInputRef.current?.focus(), 100);
     };
 
     const handleStopHardwareScanner = () => {
         setIsHardwareScannerMode(false);
-        scannedBufferRef.current = '';
     };
 
     const handleStartScanning = async () => {
@@ -560,7 +536,17 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                                     </form>
                                 </div>
                             )}
-                            <input ref={hardwareScannerInputRef} type="text" className="absolute opacity-0 w-px h-px pointer-events-none" tabIndex={-1} autoComplete="off" />
+
+                            {/* ROBUST HIDDEN INPUT FOR OTG SCANNERS */}
+                            <input 
+                                ref={hardwareInputRef} 
+                                type="text" 
+                                className="absolute opacity-0 pointer-events-none" 
+                                style={{ position: 'absolute', left: '-9999px' }}
+                                onKeyDown={handleHardwareInputKeyDown}
+                                tabIndex={-1} 
+                                autoComplete="off" 
+                            />
                         </div>
                     </CardContent>
                 </Card>
