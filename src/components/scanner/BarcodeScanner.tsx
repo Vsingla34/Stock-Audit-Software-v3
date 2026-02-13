@@ -257,47 +257,57 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
         setIsAddDialogOpen(true);
     };
 
-    useEffect(() => {
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (!isHardwareScannerMode) return; 
-            if (!isPickerMode && !selectedLocation) return;
+ useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+        if (!isHardwareScannerMode) return; 
+        if (!isPickerMode && !selectedLocation) return;
 
-            const currentTime = Date.now();
-            const timeSinceLastKey = currentTime - lastKeypressTime.current;
-            lastKeypressTime.current = currentTime;
-            if (timeSinceLastKey > 100) scannedBufferRef.current = '';
+        const currentTime = Date.now();
+        const timeSinceLastKey = currentTime - lastKeypressTime.current;
+        lastKeypressTime.current = currentTime;
 
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                event.stopPropagation();
+        // Reset buffer if there's a long pause between keys
+        if (timeSinceLastKey > 100) scannedBufferRef.current = '';
+
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            event.stopPropagation();
+
+            // FIX: Use a small timeout to ensure the buffer is fully populated 
+            // before processing. This fixes "Empty Scan" on mobile phones.
+            setTimeout(() => {
                 const barcode = scannedBufferRef.current.trim();
                 if (barcode) {
-                    handleItemScan(barcode, selectedLocation).then(success => { if (success) setScannedBarcode(barcode); });
+                    handleItemScan(barcode, selectedLocation).then(success => { 
+                        if (success) setScannedBarcode(barcode); 
+                    });
                 } else {
-                    toast.error("Empty scan");
+                    toast.error("Empty scan - Try scanning again");
                 }
                 scannedBufferRef.current = '';
-                return;
-            }
-            if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
-                scannedBufferRef.current += event.key;
-            }
-        };
-
-        if (isHardwareScannerMode) {
-            document.addEventListener('keydown', handleKeyDown, true);
-            const focusInterval = setInterval(() => {
-                if (hardwareScannerInputRef.current && document.activeElement !== hardwareScannerInputRef.current) {
-                    hardwareScannerInputRef.current.focus();
-                }
-            }, 100);
-            return () => {
-                document.removeEventListener('keydown', handleKeyDown, true);
-                clearInterval(focusInterval);
-            };
+            }, 20); // 20ms delay is sufficient for mobile processing
+            return;
         }
-    }, [isHardwareScannerMode, selectedLocation, isPickerMode, selectedSubLocation]);
 
+        // Capture single characters from the scanner
+        if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
+            scannedBufferRef.current += event.key;
+        }
+    };
+
+    if (isHardwareScannerMode) {
+        document.addEventListener('keydown', handleKeyDown, true);
+        const focusInterval = setInterval(() => {
+            if (hardwareScannerInputRef.current && document.activeElement !== hardwareScannerInputRef.current) {
+                hardwareScannerInputRef.current.focus();
+            }
+        }, 100);
+        return () => {
+            document.removeEventListener('keydown', handleKeyDown, true);
+            clearInterval(focusInterval);
+        };
+    }
+}, [isHardwareScannerMode, selectedLocation, isPickerMode, selectedSubLocation]);
     useEffect(() => {
         return () => {
             isProcessingRef.current = false; 
