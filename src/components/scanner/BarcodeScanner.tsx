@@ -257,43 +257,60 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
         setIsAddDialogOpen(true);
     };
 
- useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-        if (!isHardwareScannerMode) return; 
-        if (!isPickerMode && !selectedLocation) return;
+useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            // In Picker Mode, we don't need selectedLocation/SubLocation to start listening
+            if (!isHardwareScannerMode) return; 
+            if (!isPickerMode && !selectedLocation) return;
 
-        const currentTime = Date.now();
-        const timeSinceLastKey = currentTime - lastKeypressTime.current;
-        lastKeypressTime.current = currentTime;
+            const currentTime = Date.now();
+            const timeSinceLastKey = currentTime - lastKeypressTime.current;
+            lastKeypressTime.current = currentTime;
+            
+            // If there's a long pause between keys, reset the buffer (distinguishes scanner from manual typing)
+            if (timeSinceLastKey > 100) scannedBufferRef.current = '';
 
-        // Reset buffer if there's a long pause between keys
-        if (timeSinceLastKey > 100) scannedBufferRef.current = '';
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                event.stopPropagation();
+                
+                // FIX: Small delay ensures the mobile browser finishes populating the 
+                // character buffer before we try to process the scan.
+                setTimeout(() => {
+                    const barcode = scannedBufferRef.current.trim();
+                    if (barcode) {
+                        handleItemScan(barcode, selectedLocation).then(success => { 
+                            if (success) setScannedBarcode(barcode); 
+                        });
+                    } else {
+                        // This triggers if the buffer is empty when Enter is hit
+                        toast.error("Empty scan - Try scanning again");
+                    }
+                    scannedBufferRef.current = '';
+                }, 20); // 20ms is the ideal "debounce" for mobile OTG devices
+                
+                return;
+            }
+            
+            // Capture character keys into the buffer
+            if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
+                scannedBufferRef.current += event.key;
+            }
+        };
 
-        if (event.key === 'Enter') {
-            event.preventDefault();
-            event.stopPropagation();
-
-            // FIX: Use a small timeout to ensure the buffer is fully populated 
-            // before processing. This fixes "Empty Scan" on mobile phones.
-            setTimeout(() => {
-                const barcode = scannedBufferRef.current.trim();
-                if (barcode) {
-                    handleItemScan(barcode, selectedLocation).then(success => { 
-                        if (success) setScannedBarcode(barcode); 
-                    });
-                } else {
-                    toast.error("Empty scan - Try scanning again");
+        if (isHardwareScannerMode) {
+            document.addEventListener('keydown', handleKeyDown, true);
+            const focusInterval = setInterval(() => {
+                if (hardwareScannerInputRef.current && document.activeElement !== hardwareScannerInputRef.current) {
+                    hardwareScannerInputRef.current.focus();
                 }
-                scannedBufferRef.current = '';
-            }, 20); // 20ms delay is sufficient for mobile processing
-            return;
+            }, 100);
+            return () => {
+                document.removeEventListener('keydown', handleKeyDown, true);
+                clearInterval(focusInterval);
+            };
         }
-
-        // Capture single characters from the scanner
-        if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
-            scannedBufferRef.current += event.key;
-        }
-    };
+    }, [isHardwareScannerMode, selectedLocation, isPickerMode, selectedSubLocation]);
 
     if (isHardwareScannerMode) {
         document.addEventListener('keydown', handleKeyDown, true);
