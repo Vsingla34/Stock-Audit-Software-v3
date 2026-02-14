@@ -17,7 +17,8 @@ import {
   Loader2, 
   Send,
   CalendarDays,
-  MapPin
+  MapPin,
+  PieChart
 } from "lucide-react";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
@@ -592,12 +593,14 @@ const Reports = () => {
     generateCSV(reportData, `day_wise_auditor_report${locationInfo}.csv`);
   }, [baseTableData, locationName, generateCSV]);
 
+  // Updated to include BOTH Summary and Detail Logic if user wants csv for both
   const downloadSubLocationReport = useCallback(() => {
      if (baseTableData.length === 0) {
        toast.error("No data to generate report.");
        return;
      }
 
+     // Use the Details (Normalized) format for CSV
      const reportData: any[] = [];
      
      baseTableData.forEach(item => {
@@ -696,7 +699,7 @@ const Reports = () => {
     baseTableData.forEach((item) => { item.auditorEntries.forEach((entry: any) => { allAuditors.add(entry.auditorName); }); });
     const auditorList = Array.from(allAuditors).sort();
 
-    // 1. Reconciliation Sheet (Standard View)
+    // 1. Reconciliation Sheet (Standard View with single Sub-Location Column)
     const reconciliationData = baseTableData.map((item) => {
       const { unitPrice, sysValue, phyValue, valueVariance } = getItemValues(item);
       const row: any = {
@@ -704,7 +707,7 @@ const Reports = () => {
         Name: item.name,
         Category: item.category,
         Location: item.location,
-        "Sub Location": getSubLocationSummary(item.auditorEntries),
+        "Sub Location": getSubLocationSummary(item.auditorEntries), // Single Column Summary
         "System Qty": item.systemQuantity,
       };
       if (hasPricing) {
@@ -812,8 +815,10 @@ const Reports = () => {
         return row;
     });
 
-    // 3. Sub-Location Wise Details (Flattened)
+    // 3. Sub-Location Wise Details (Flattened/Normalized)
     const subLocDetailsData: any[] = [];
+    const subLocSummaryMap: Record<string, number> = {}; // Aggregate for Charting
+    
     baseTableData.forEach(item => {
          const subLocMap: Record<string, { qty: number, auditors: Set<string> }> = {};
          if (item.auditorEntries.length === 0) {
@@ -836,7 +841,12 @@ const Reports = () => {
                  }
                  subLocMap[subLoc].qty += entry.quantityFound;
                  subLocMap[subLoc].auditors.add(entry.auditorName);
+                 
+                 // Aggregate for Summary
+                 subLocSummaryMap[subLoc] = (subLocSummaryMap[subLoc] || 0) + entry.quantityFound;
              });
+             
+             // Create Normalized Detail Rows
              Object.entries(subLocMap).forEach(([subLoc, data]) => {
                  subLocDetailsData.push({
                      SKU: item.sku,
@@ -853,12 +863,20 @@ const Reports = () => {
          }
     });
 
+    // 4. Sub-Location Summary (NEW: For Pie Charts)
+    const subLocSummaryData = Object.entries(subLocSummaryMap).map(([subLoc, qty]) => ({
+        "Sub Location": subLoc,
+        "Total Quantity Found": qty,
+        "Percentage": summary.totalPhysicalQty > 0 ? ((qty / summary.totalPhysicalQty) * 100).toFixed(2) + "%" : "0%"
+    })).sort((a,b) => b["Total Quantity Found"] - a["Total Quantity Found"]);
+
     const wb = XLSX.utils.book_new();
     const wsReconciliation = XLSX.utils.json_to_sheet(reconciliationData);
     const wsSummary = XLSX.utils.json_to_sheet(summaryData);
     const wsDiscrepancy = XLSX.utils.json_to_sheet(discrepancyData);
     const wsDayWise = XLSX.utils.json_to_sheet(dayWiseData);
     const wsSubLocDetails = XLSX.utils.json_to_sheet(subLocDetailsData);
+    const wsSubLocSummary = XLSX.utils.json_to_sheet(subLocSummaryData);
     const wsQuestionnaire = XLSX.utils.json_to_sheet(questionnaireData);
 
     wsReconciliation['!cols'] = fitToColumn(reconciliationData);
@@ -866,6 +884,7 @@ const Reports = () => {
     wsSummary['!cols'] = fitToColumn(summaryData);
     wsDayWise['!cols'] = fitToColumn(dayWiseData);
     wsSubLocDetails['!cols'] = fitToColumn(subLocDetailsData);
+    wsSubLocSummary['!cols'] = fitToColumn(subLocSummaryData);
     wsQuestionnaire['!cols'] = fitToColumn(questionnaireData);
 
     XLSX.utils.book_append_sheet(wb, wsReconciliation, "Reconciliation");
@@ -873,6 +892,7 @@ const Reports = () => {
     XLSX.utils.book_append_sheet(wb, wsDiscrepancy, "Discrepancies");
     XLSX.utils.book_append_sheet(wb, wsDayWise, "Day Wise Report");
     XLSX.utils.book_append_sheet(wb, wsSubLocDetails, "Sub-Location Details");
+    XLSX.utils.book_append_sheet(wb, wsSubLocSummary, "Sub-Location Summary"); // NEW
     XLSX.utils.book_append_sheet(wb, wsQuestionnaire, "Questionnaire");
 
     const locationInfo = locationName ? `_${locationName}` : "";

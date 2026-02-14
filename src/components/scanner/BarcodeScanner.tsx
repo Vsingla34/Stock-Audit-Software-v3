@@ -45,7 +45,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
         sku: "",
         name: "",
         category: "",
-        physicalQuantity: 1
+        physicalQuantity: 1 as number | string // Allow string for empty input state
     });
 
     const { 
@@ -192,7 +192,13 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
     const handleAddSurplus = async () => {
         if (!newItem.sku || !newItem.name) return;
         try {
-            await addSurplusItem(newItem);
+            // FIX: Ensure quantity is a valid number before submission
+            const submissionItem = {
+                ...newItem,
+                physicalQuantity: Number(newItem.physicalQuantity) || 0
+            };
+            
+            await addSurplusItem(submissionItem);
             toast.success("Surplus item added successfully");
             setIsAddDialogOpen(false);
             setScannedBarcode(newItem.sku);
@@ -255,10 +261,16 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
     // Hardware Scanner Logic using a focused hidden input
     useEffect(() => {
         let focusInterval: any;
-        if (isHardwareScannerMode) {
+        
+        // FIX: Stop aggressive focusing if a dialog is open or user is typing manually
+        if (isHardwareScannerMode && !isAddDialogOpen && !isNotFoundOpen) {
             // Keep focusing the hidden input so it captures OTG scanner data
             focusInterval = setInterval(() => {
-                if (hardwareInputRef.current && document.activeElement !== hardwareInputRef.current) {
+                // Check if user is focused on another valid input (like manual barcode entry or sublocation input)
+                const activeElement = document.activeElement;
+                const isUserTyping = activeElement?.tagName === 'INPUT' && activeElement !== hardwareInputRef.current;
+
+                if (hardwareInputRef.current && activeElement !== hardwareInputRef.current && !isUserTyping) {
                     hardwareInputRef.current.focus();
                 }
             }, 300);
@@ -266,7 +278,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
         return () => {
             if (focusInterval) clearInterval(focusInterval);
         };
-    }, [isHardwareScannerMode]);
+    }, [isHardwareScannerMode, isAddDialogOpen, isNotFoundOpen]); // Added dependencies
 
     const handleHardwareInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter') {
@@ -633,7 +645,13 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                                 type="number"
                                 min="1"
                                 value={newItem.physicalQuantity} 
-                                onChange={(e) => setNewItem({...newItem, physicalQuantity: parseInt(e.target.value) || 0})}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    setNewItem({
+                                        ...newItem,
+                                        physicalQuantity: val === "" ? "" : parseInt(val)
+                                    });
+                                }}
                             />
                         </div>
                         <div className="bg-indigo-50 p-3 rounded-md border border-indigo-100 text-xs text-indigo-800">
