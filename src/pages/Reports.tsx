@@ -213,10 +213,9 @@ const Reports = () => {
   };
 
   const summary = useMemo(() => {
-    const totalItems = items.length; // Unique SKUs
+    const totalItems = items.length;
     const auditedItems = items.filter(i => i.status !== 'pending').length;
     
-    // UPDATED: Calculate totals based on STOCK QUANTITY, not just unique items
     const totalSystemQty = items.reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
     const totalPhysicalQty = items.reduce((sum, item) => sum + (item.physicalQuantity || 0), 0);
 
@@ -424,7 +423,7 @@ const Reports = () => {
       return String(val);
   }, []);
 
-  const getSubLocationSummary = (entries: any[]) => {
+  const getSubLocationSummary = useCallback((entries: any[]) => {
     if (!entries || entries.length === 0) return "-";
     const summary: Record<string, number> = {};
     entries.forEach(entry => {
@@ -434,7 +433,7 @@ const Reports = () => {
     return Object.entries(summary)
         .map(([loc, qty]) => `${loc}: ${qty}`)
         .join("; ");
-  };
+  }, []);
 
   const fitToColumn = (data: any[]) => {
     const columnWidths: { wch: number }[] = [];
@@ -508,7 +507,7 @@ const Reports = () => {
     const categoryTag = categoryFilter !== 'all' ? `_${categoryFilter}` : "";
     const sortTag = sortOrder !== 'default' ? `_${sortOrder}` : "";
     generateCSV(reportData, `filtered_inventory_report${locationTag}${statusTag}${categoryTag}${sortTag}.csv`);
-  }, [filteredTableData, locationName, statusFilter, categoryFilter, sortOrder, generateCSV, hasPricing, getItemValues]);
+  }, [filteredTableData, locationName, statusFilter, categoryFilter, sortOrder, generateCSV, hasPricing, getItemValues, getSubLocationSummary]);
 
   const downloadReconciliationReport = useCallback(() => {
     const allAuditors = new Set<string>();
@@ -551,7 +550,7 @@ const Reports = () => {
     });
     const locationInfo = locationName ? `_${locationName}` : "";
     generateCSV(reportData, `inventory_reconciliation_report${locationInfo}.csv`);
-  }, [baseTableData, locationName, generateCSV, hasPricing, getItemValues]);
+  }, [baseTableData, locationName, generateCSV, hasPricing, getItemValues, getSubLocationSummary]);
 
   const downloadDayWiseReport = useCallback(() => {
     if (baseTableData.length === 0) {
@@ -673,10 +672,9 @@ const Reports = () => {
     });
     const locationInfo = locationName ? `_${locationName}` : "";
     generateCSV(reportData, `discrepancy_report${locationInfo}.csv`);
-  }, [baseTableData, locationName, generateCSV, hasPricing, getItemValues]);
+  }, [baseTableData, locationName, generateCSV, hasPricing, getItemValues, getSubLocationSummary]);
 
   const downloadSummaryReport = useCallback(() => {
-    // UPDATED: Use the new totalSystemQty/totalPhysicalQty for summary
     const summaryData = [{
       "Total Unique Items": summary.totalItems,
       "Total System Qty": summary.totalSystemQty,
@@ -685,7 +683,6 @@ const Reports = () => {
       "Matched SKUs": summary.matched,
       "Discrepancies": summary.discrepancies,
       "Pending SKUs": summary.pendingItems,
-      // UPDATED: Completion percentage based on QTY not SKU count
       "Audit Completion (Qty %)": summary.totalSystemQty > 0 ? Math.round((summary.totalPhysicalQty / summary.totalSystemQty) * 100) : 0,
       "Generated Date": new Date().toISOString(),
       "Location": locationName || "All Locations",
@@ -699,6 +696,7 @@ const Reports = () => {
     baseTableData.forEach((item) => { item.auditorEntries.forEach((entry: any) => { allAuditors.add(entry.auditorName); }); });
     const auditorList = Array.from(allAuditors).sort();
 
+    // 1. Reconciliation Sheet (Standard View)
     const reconciliationData = baseTableData.map((item) => {
       const { unitPrice, sysValue, phyValue, valueVariance } = getItemValues(item);
       const row: any = {
@@ -770,7 +768,6 @@ const Reports = () => {
       "Matched SKUs": summary.matched,
       "Discrepancies": summary.discrepancies,
       "Pending SKUs": summary.pendingItems,
-      // UPDATED: Completion percentage based on QTY not SKU count
       "Completion Rate (Qty)": summary.totalSystemQty > 0 ? Math.round((summary.totalPhysicalQty / summary.totalSystemQty) * 100) + "%" : "0%",
     }];
 
@@ -787,7 +784,8 @@ const Reports = () => {
         };
     }).filter(Boolean);
 
-    const dataMap: Record<string, Record<string, number>> = {};
+    // 2. Day Wise Data Preparation
+    const dayDataMap: Record<string, Record<string, number>> = {};
     const dayWiseAuditors = new Set<string>();
     baseTableData.forEach((item) => {
        item.auditorEntries.forEach((entry: any) => {
@@ -795,18 +793,18 @@ const Reports = () => {
                const dateKey = new Date(entry.auditedAt).toLocaleDateString();
                const auditor = entry.auditorName;
                dayWiseAuditors.add(auditor);
-               if (!dataMap[dateKey]) dataMap[dateKey] = {};
-               dataMap[dateKey][auditor] = (dataMap[dateKey][auditor] || 0) + (entry.quantityFound || 0);
+               if (!dayDataMap[dateKey]) dayDataMap[dateKey] = {};
+               dayDataMap[dateKey][auditor] = (dayDataMap[dateKey][auditor] || 0) + (entry.quantityFound || 0);
            }
        });
     });
-    const dates = Object.keys(dataMap).sort((a,b) => new Date(a).getTime() - new Date(b).getTime());
+    const dates = Object.keys(dayDataMap).sort((a,b) => new Date(a).getTime() - new Date(b).getTime());
     const dayWiseAuditorList = Array.from(dayWiseAuditors).sort();
     const dayWiseData = dates.map(date => {
         const row: any = { Date: date };
         let dailyTotal = 0;
         dayWiseAuditorList.forEach(auditor => {
-            const qty = dataMap[date][auditor] || 0;
+            const qty = dayDataMap[date][auditor] || 0;
             row[auditor] = qty;
             dailyTotal += qty;
         });
@@ -814,29 +812,73 @@ const Reports = () => {
         return row;
     });
 
+    // 3. Sub-Location Wise Details (Flattened)
+    const subLocDetailsData: any[] = [];
+    baseTableData.forEach(item => {
+         const subLocMap: Record<string, { qty: number, auditors: Set<string> }> = {};
+         if (item.auditorEntries.length === 0) {
+             subLocDetailsData.push({
+                 SKU: item.sku,
+                 Name: item.name,
+                 Category: item.category,
+                 Location: item.location,
+                 "Sub Location": "-",
+                 "System Qty": item.systemQuantity,
+                 "Physical Qty": 0,
+                 "Auditors": "-",
+                 "Status": item.status
+             });
+         } else {
+             item.auditorEntries.forEach((entry: any) => {
+                 const subLoc = entry.subLocation || "General";
+                 if (!subLocMap[subLoc]) {
+                     subLocMap[subLoc] = { qty: 0, auditors: new Set() };
+                 }
+                 subLocMap[subLoc].qty += entry.quantityFound;
+                 subLocMap[subLoc].auditors.add(entry.auditorName);
+             });
+             Object.entries(subLocMap).forEach(([subLoc, data]) => {
+                 subLocDetailsData.push({
+                     SKU: item.sku,
+                     Name: item.name,
+                     Category: item.category,
+                     Location: item.location,
+                     "Sub Location": subLoc,
+                     "System Qty": item.systemQuantity,
+                     "Physical Qty": data.qty,
+                     "Auditors": Array.from(data.auditors).join(", "),
+                     "Status": item.status
+                 });
+             });
+         }
+    });
+
     const wb = XLSX.utils.book_new();
     const wsReconciliation = XLSX.utils.json_to_sheet(reconciliationData);
     const wsSummary = XLSX.utils.json_to_sheet(summaryData);
     const wsDiscrepancy = XLSX.utils.json_to_sheet(discrepancyData);
-    const wsQuestionnaire = XLSX.utils.json_to_sheet(questionnaireData);
     const wsDayWise = XLSX.utils.json_to_sheet(dayWiseData);
+    const wsSubLocDetails = XLSX.utils.json_to_sheet(subLocDetailsData);
+    const wsQuestionnaire = XLSX.utils.json_to_sheet(questionnaireData);
 
     wsReconciliation['!cols'] = fitToColumn(reconciliationData);
     wsDiscrepancy['!cols'] = fitToColumn(discrepancyData);
     wsSummary['!cols'] = fitToColumn(summaryData);
-    wsQuestionnaire['!cols'] = fitToColumn(questionnaireData);
     wsDayWise['!cols'] = fitToColumn(dayWiseData);
+    wsSubLocDetails['!cols'] = fitToColumn(subLocDetailsData);
+    wsQuestionnaire['!cols'] = fitToColumn(questionnaireData);
 
     XLSX.utils.book_append_sheet(wb, wsReconciliation, "Reconciliation");
     XLSX.utils.book_append_sheet(wb, wsSummary, "Audit Summary");
     XLSX.utils.book_append_sheet(wb, wsDiscrepancy, "Discrepancies");
     XLSX.utils.book_append_sheet(wb, wsDayWise, "Day Wise Report");
+    XLSX.utils.book_append_sheet(wb, wsSubLocDetails, "Sub-Location Details");
     XLSX.utils.book_append_sheet(wb, wsQuestionnaire, "Questionnaire");
 
     const locationInfo = locationName ? `_${locationName}` : "";
     XLSX.writeFile(wb, `complete_audit_data${locationInfo}.xlsx`);
     toast.success("Combined Excel report downloaded");
-  }, [baseTableData, summary, locationName, companyName, questionnaireAnswers, questions, locations, formatQuestionnaireAnswer, hasPricing, getItemValues]);
+  }, [baseTableData, summary, locationName, companyName, questionnaireAnswers, questions, locations, formatQuestionnaireAnswer, hasPricing, getItemValues, getSubLocationSummary]);
 
   const generatePDFReport = useCallback(() => {
     const doc = new jsPDF();
@@ -873,7 +915,6 @@ const Reports = () => {
     currentY += 14;
     doc.setFontSize(14); doc.setTextColor(0); doc.text("Audit Summary", 14, currentY);
     
-    // UPDATED: PDF Summary now shows Stock Quantity totals as well
     const summaryTableBody = [
       ["Total SKUs (Unique Items)", summary.totalItems.toString()],
       ["Total System Qty", summary.totalSystemQty.toString()],
@@ -997,7 +1038,6 @@ const Reports = () => {
               <CardContent className="space-y-2"><p className="text-sm text-gray-500">All reports combined in one Excel file.</p><Button variant="outline" className="w-full bg-white hover:bg-indigo-50 border-slate-200 text-slate-700 hover:text-indigo-700" onClick={downloadCombinedExcelReport}><Download className="mr-2 h-4 w-4" />Download XLSX</Button></CardContent>
             </Card>
 
-            {/* RESTORED: PDF Report Card */}
             <Card className="bg-gradient-to-br from-violet-50 to-white shadow-sm border-violet-100">
               <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><FileType className="h-5 w-5 text-violet-600" />Complete PDF</CardTitle></CardHeader>
               <CardContent className="space-y-2"><p className="text-sm text-gray-500">Formal printable audit report.</p><Button variant="outline" className="w-full bg-white hover:bg-violet-50 border-violet-200 text-violet-700 hover:text-violet-800" onClick={generatePDFReport}><Download className="mr-2 h-4 w-4" />Download PDF</Button></CardContent>
