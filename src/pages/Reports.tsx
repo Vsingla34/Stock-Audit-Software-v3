@@ -15,7 +15,9 @@ import {
   MessageSquare, 
   CheckCheck, 
   Loader2, 
-  Send 
+  Send,
+  CalendarDays,
+  MapPin
 } from "lucide-react";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
@@ -101,14 +103,12 @@ const Reports = () => {
   useEffect(() => {
     let isMounted = true;
     const fetchReportData = async () => {
-      // Clear current items immediately when assignment changes to avoid showing old data
       setItems([]); 
       
       if (!selectedCompanyId || !selectedAssignmentId) return;
 
       try {
         setLoading(true);
-        // Ensure ID is a clean integer
         const assignmentIdInt = parseInt(String(selectedAssignmentId), 10);
         
         const data = await SupabaseDataService.getItemMaster(
@@ -213,9 +213,13 @@ const Reports = () => {
   };
 
   const summary = useMemo(() => {
-    const totalItems = items.length;
+    const totalItems = items.length; // Unique SKUs
     const auditedItems = items.filter(i => i.status !== 'pending').length;
     
+    // UPDATED: Calculate totals based on STOCK QUANTITY, not just unique items
+    const totalSystemQty = items.reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
+    const totalPhysicalQty = items.reduce((sum, item) => sum + (item.physicalQuantity || 0), 0);
+
     let matched = 0;
     let discrepancies = 0;
 
@@ -229,7 +233,9 @@ const Reports = () => {
         auditedItems,
         matched,
         discrepancies,
-        pendingItems: Math.max(0, totalItems - auditedItems)
+        pendingItems: Math.max(0, totalItems - auditedItems),
+        totalSystemQty,
+        totalPhysicalQty
     };
   }, [items]);
 
@@ -525,7 +531,6 @@ const Reports = () => {
          baseData["System Value"] = sysValue;
       }
       Array.from(allAuditors).forEach((auditorName) => {
-        // FIX: Aggregate all quantities for this auditor (summing across sub-locations)
         const totalQty = (item.auditorEntries || [])
           .filter((e: any) => e.auditorName === auditorName)
           .reduce((sum: number, e: any) => sum + (e.quantityFound || 0), 0);
@@ -547,6 +552,99 @@ const Reports = () => {
     const locationInfo = locationName ? `_${locationName}` : "";
     generateCSV(reportData, `inventory_reconciliation_report${locationInfo}.csv`);
   }, [baseTableData, locationName, generateCSV, hasPricing, getItemValues]);
+
+  const downloadDayWiseReport = useCallback(() => {
+    if (baseTableData.length === 0) {
+      toast.error("No data to generate report.");
+      return;
+    }
+
+    const dataMap: Record<string, Record<string, number>> = {};
+    const allAuditors = new Set<string>();
+
+    baseTableData.forEach((item) => {
+       item.auditorEntries.forEach((entry: any) => {
+           if (entry.auditedAt && entry.auditorName) {
+               const dateKey = new Date(entry.auditedAt).toLocaleDateString();
+               const auditor = entry.auditorName;
+               allAuditors.add(auditor);
+               if (!dataMap[dateKey]) dataMap[dateKey] = {};
+               dataMap[dateKey][auditor] = (dataMap[dateKey][auditor] || 0) + (entry.quantityFound || 0);
+           }
+       });
+    });
+
+    const dates = Object.keys(dataMap).sort((a,b) => new Date(a).getTime() - new Date(b).getTime());
+    const auditorList = Array.from(allAuditors).sort();
+
+    const reportData = dates.map(date => {
+        const row: any = { Date: date };
+        let dailyTotal = 0;
+        auditorList.forEach(auditor => {
+            const qty = dataMap[date][auditor] || 0;
+            row[auditor] = qty;
+            dailyTotal += qty;
+        });
+        row["Total Items"] = dailyTotal;
+        return row;
+    });
+
+    const locationInfo = locationName ? `_${locationName}` : "";
+    generateCSV(reportData, `day_wise_auditor_report${locationInfo}.csv`);
+  }, [baseTableData, locationName, generateCSV]);
+
+  const downloadSubLocationReport = useCallback(() => {
+     if (baseTableData.length === 0) {
+       toast.error("No data to generate report.");
+       return;
+     }
+
+     const reportData: any[] = [];
+     
+     baseTableData.forEach(item => {
+         const subLocMap: Record<string, { qty: number, auditors: Set<string> }> = {};
+         
+         if (item.auditorEntries.length === 0) {
+             reportData.push({
+                 SKU: item.sku,
+                 Name: item.name,
+                 Category: item.category,
+                 Location: item.location,
+                 "Sub Location": "-",
+                 "System Qty": item.systemQuantity,
+                 "Physical Qty": 0,
+                 "Auditors": "-",
+                 "Status": item.status
+             });
+         } else {
+             item.auditorEntries.forEach((entry: any) => {
+                 const subLoc = entry.subLocation || "General";
+                 if (!subLocMap[subLoc]) {
+                     subLocMap[subLoc] = { qty: 0, auditors: new Set() };
+                 }
+                 subLocMap[subLoc].qty += entry.quantityFound;
+                 subLocMap[subLoc].auditors.add(entry.auditorName);
+             });
+
+             Object.entries(subLocMap).forEach(([subLoc, data]) => {
+                 reportData.push({
+                     SKU: item.sku,
+                     Name: item.name,
+                     Category: item.category,
+                     Location: item.location,
+                     "Sub Location": subLoc,
+                     "System Qty": item.systemQuantity,
+                     "Physical Qty": data.qty,
+                     "Auditors": Array.from(data.auditors).join(", "),
+                     "Status": item.status
+                 });
+             });
+         }
+     });
+
+     const locationInfo = locationName ? `_${locationName}` : "";
+     generateCSV(reportData, `sub_location_report${locationInfo}.csv`);
+  }, [baseTableData, locationName, generateCSV]);
 
   const downloadDiscrepancyReport = useCallback(() => {
     const discrepancies = baseTableData.filter((item) => item.variance !== 0);
@@ -578,15 +676,19 @@ const Reports = () => {
   }, [baseTableData, locationName, generateCSV, hasPricing, getItemValues]);
 
   const downloadSummaryReport = useCallback(() => {
+    // UPDATED: Use the new totalSystemQty/totalPhysicalQty for summary
     const summaryData = [{
-      totalItems: summary.totalItems,
-      auditedItems: summary.auditedItems,
-      pendingItems: summary.pendingItems,
-      matchedItems: summary.matched,
-      discrepancies: summary.discrepancies,
-      auditCompletionPercentage: summary.totalItems > 0 ? Math.round((summary.auditedItems / summary.totalItems) * 100) : 0,
-      generatedDate: new Date().toISOString(),
-      location: locationName || "All Locations",
+      "Total Unique Items": summary.totalItems,
+      "Total System Qty": summary.totalSystemQty,
+      "Total Physical Qty": summary.totalPhysicalQty,
+      "Audited SKUs": summary.auditedItems,
+      "Matched SKUs": summary.matched,
+      "Discrepancies": summary.discrepancies,
+      "Pending SKUs": summary.pendingItems,
+      // UPDATED: Completion percentage based on QTY not SKU count
+      "Audit Completion (Qty %)": summary.totalSystemQty > 0 ? Math.round((summary.totalPhysicalQty / summary.totalSystemQty) * 100) : 0,
+      "Generated Date": new Date().toISOString(),
+      "Location": locationName || "All Locations",
     }];
     const locationInfo = locationName ? `_${locationName}` : "";
     generateCSV(summaryData, `audit_summary_report${locationInfo}.csv`);
@@ -612,7 +714,6 @@ const Reports = () => {
         row["System Value"] = sysValue;
       }
       auditorList.forEach((auditorName) => {
-        // FIX: Aggregate all quantities for this auditor (summing across sub-locations)
         const totalQty = (item.auditorEntries || [])
             .filter((e: any) => e.auditorName === auditorName)
             .reduce((sum: number, e: any) => sum + (e.quantityFound || 0), 0);
@@ -662,12 +763,15 @@ const Reports = () => {
       "Company": companyName,
       "Location": locationName || "All Locations",
       "Generated Date": new Date().toLocaleString(),
-      "Total Items": summary.totalItems,
-      "Audited Items": summary.auditedItems,
-      "Matched Items": summary.matched,
+      "Total Unique Items": summary.totalItems,
+      "Total System Qty": summary.totalSystemQty,
+      "Total Physical Qty": summary.totalPhysicalQty,
+      "Audited SKUs": summary.auditedItems,
+      "Matched SKUs": summary.matched,
       "Discrepancies": summary.discrepancies,
-      "Pending Items": summary.pendingItems,
-      "Completion Rate": summary.totalItems > 0 ? Math.round((summary.auditedItems / summary.totalItems) * 100) + "%" : "0%",
+      "Pending SKUs": summary.pendingItems,
+      // UPDATED: Completion percentage based on QTY not SKU count
+      "Completion Rate (Qty)": summary.totalSystemQty > 0 ? Math.round((summary.totalPhysicalQty / summary.totalSystemQty) * 100) + "%" : "0%",
     }];
 
     const questionnaireData = questionnaireAnswers.map(ans => {
@@ -683,20 +787,50 @@ const Reports = () => {
         };
     }).filter(Boolean);
 
+    const dataMap: Record<string, Record<string, number>> = {};
+    const dayWiseAuditors = new Set<string>();
+    baseTableData.forEach((item) => {
+       item.auditorEntries.forEach((entry: any) => {
+           if (entry.auditedAt && entry.auditorName) {
+               const dateKey = new Date(entry.auditedAt).toLocaleDateString();
+               const auditor = entry.auditorName;
+               dayWiseAuditors.add(auditor);
+               if (!dataMap[dateKey]) dataMap[dateKey] = {};
+               dataMap[dateKey][auditor] = (dataMap[dateKey][auditor] || 0) + (entry.quantityFound || 0);
+           }
+       });
+    });
+    const dates = Object.keys(dataMap).sort((a,b) => new Date(a).getTime() - new Date(b).getTime());
+    const dayWiseAuditorList = Array.from(dayWiseAuditors).sort();
+    const dayWiseData = dates.map(date => {
+        const row: any = { Date: date };
+        let dailyTotal = 0;
+        dayWiseAuditorList.forEach(auditor => {
+            const qty = dataMap[date][auditor] || 0;
+            row[auditor] = qty;
+            dailyTotal += qty;
+        });
+        row["Total Items"] = dailyTotal;
+        return row;
+    });
+
     const wb = XLSX.utils.book_new();
     const wsReconciliation = XLSX.utils.json_to_sheet(reconciliationData);
     const wsSummary = XLSX.utils.json_to_sheet(summaryData);
     const wsDiscrepancy = XLSX.utils.json_to_sheet(discrepancyData);
     const wsQuestionnaire = XLSX.utils.json_to_sheet(questionnaireData);
+    const wsDayWise = XLSX.utils.json_to_sheet(dayWiseData);
 
     wsReconciliation['!cols'] = fitToColumn(reconciliationData);
     wsDiscrepancy['!cols'] = fitToColumn(discrepancyData);
     wsSummary['!cols'] = fitToColumn(summaryData);
     wsQuestionnaire['!cols'] = fitToColumn(questionnaireData);
+    wsDayWise['!cols'] = fitToColumn(dayWiseData);
 
     XLSX.utils.book_append_sheet(wb, wsReconciliation, "Reconciliation");
     XLSX.utils.book_append_sheet(wb, wsSummary, "Audit Summary");
     XLSX.utils.book_append_sheet(wb, wsDiscrepancy, "Discrepancies");
+    XLSX.utils.book_append_sheet(wb, wsDayWise, "Day Wise Report");
     XLSX.utils.book_append_sheet(wb, wsQuestionnaire, "Questionnaire");
 
     const locationInfo = locationName ? `_${locationName}` : "";
@@ -738,12 +872,15 @@ const Reports = () => {
 
     currentY += 14;
     doc.setFontSize(14); doc.setTextColor(0); doc.text("Audit Summary", 14, currentY);
+    
+    // UPDATED: PDF Summary now shows Stock Quantity totals as well
     const summaryTableBody = [
-      ["Total Items", summary.totalItems.toString()],
-      ["Audited Items", summary.auditedItems.toString()],
-      ["Matched Items", summary.matched.toString()],
+      ["Total SKUs (Unique Items)", summary.totalItems.toString()],
+      ["Total System Qty", summary.totalSystemQty.toString()],
+      ["Total Physical Qty", summary.totalPhysicalQty.toString()],
+      ["Audited SKUs", summary.auditedItems.toString()],
       ["Discrepancies", summary.discrepancies.toString()],
-      ["Completion Rate", `${summary.totalItems > 0 ? Math.round((summary.auditedItems / summary.totalItems) * 100) : 0}%`],
+      ["Completion Rate (Qty)", `${summary.totalSystemQty > 0 ? Math.round((summary.totalPhysicalQty / summary.totalSystemQty) * 100) : 0}%`],
     ];
     autoTable(doc, { startY: currentY + 4, head: [["Metric", "Value"]], body: summaryTableBody, theme: "grid", headStyles: { fillColor: [79, 70, 229] } });
     currentY = (doc as any)["lastAutoTable"] ? (doc as any)["lastAutoTable"].finalY + 10 : currentY + 60;
@@ -839,18 +976,28 @@ const Reports = () => {
               <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><FileSpreadsheet className="h-5 w-5 text-indigo-600" />Reconciliation</CardTitle></CardHeader>
               <CardContent className="space-y-2"><p className="text-sm text-gray-500">Complete report with auditor breakdown.</p><Button variant="outline" className="w-full bg-white hover:bg-indigo-50 border-indigo-200 text-indigo-700 hover:text-indigo-800" onClick={downloadReconciliationReport}><Download className="mr-2 h-4 w-4" />Download CSV</Button></CardContent>
             </Card>
+            
+            <Card className="bg-gradient-to-br from-blue-50 to-white shadow-sm border-blue-100">
+              <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><CalendarDays className="h-5 w-5 text-blue-600" />Day Wise Report</CardTitle></CardHeader>
+              <CardContent className="space-y-2"><p className="text-sm text-gray-500">Auditor performance by date.</p><Button variant="outline" className="w-full bg-white hover:bg-blue-50 border-blue-200 text-blue-700 hover:text-blue-800" onClick={downloadDayWiseReport}><Download className="mr-2 h-4 w-4" />Download CSV</Button></CardContent>
+            </Card>
+
+            <Card className="bg-gradient-to-br from-amber-50 to-white shadow-sm border-amber-100">
+              <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><MapPin className="h-5 w-5 text-amber-600" />Sub-Location</CardTitle></CardHeader>
+              <CardContent className="space-y-2"><p className="text-sm text-gray-500">Breakdown by sub-location & shelf.</p><Button variant="outline" className="w-full bg-white hover:bg-amber-50 border-amber-200 text-amber-700 hover:text-amber-800" onClick={downloadSubLocationReport}><Download className="mr-2 h-4 w-4" />Download CSV</Button></CardContent>
+            </Card>
+
             <Card className="bg-gradient-to-br from-red-50 to-white shadow-sm border-red-100">
               <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><FileText className="h-5 w-5 text-red-600" />Discrepancies</CardTitle></CardHeader>
               <CardContent className="space-y-2"><p className="text-sm text-gray-500">Filtered report showing only variances.</p><Button variant="outline" className="w-full bg-white hover:bg-red-50 border-red-200 text-red-700 hover:text-red-800" onClick={downloadDiscrepancyReport}><Download className="mr-2 h-4 w-4" />Download CSV</Button></CardContent>
             </Card>
-            <Card className="bg-gradient-to-br from-green-50 to-white shadow-sm border-green-100">
-              <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><FileText className="h-5 w-5 text-green-600" />Audit Summary</CardTitle></CardHeader>
-              <CardContent className="space-y-2"><p className="text-sm text-gray-500">High-level summary of the audit metrics.</p><Button variant="outline" className="w-full bg-white hover:bg-green-50 border-green-200 text-green-700 hover:text-green-800" onClick={downloadSummaryReport}><Download className="mr-2 h-4 w-4" />Download CSV</Button></CardContent>
-            </Card>
+
             <Card className="bg-gradient-to-br from-slate-50 to-white shadow-sm border-slate-100">
               <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><TableIcon className="h-5 w-5 text-slate-600" />Combined Excel</CardTitle></CardHeader>
               <CardContent className="space-y-2"><p className="text-sm text-gray-500">All reports combined in one Excel file.</p><Button variant="outline" className="w-full bg-white hover:bg-indigo-50 border-slate-200 text-slate-700 hover:text-indigo-700" onClick={downloadCombinedExcelReport}><Download className="mr-2 h-4 w-4" />Download XLSX</Button></CardContent>
             </Card>
+
+            {/* RESTORED: PDF Report Card */}
             <Card className="bg-gradient-to-br from-violet-50 to-white shadow-sm border-violet-100">
               <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><FileType className="h-5 w-5 text-violet-600" />Complete PDF</CardTitle></CardHeader>
               <CardContent className="space-y-2"><p className="text-sm text-gray-500">Formal printable audit report.</p><Button variant="outline" className="w-full bg-white hover:bg-violet-50 border-violet-200 text-violet-700 hover:text-violet-800" onClick={generatePDFReport}><Download className="mr-2 h-4 w-4" />Download PDF</Button></CardContent>
