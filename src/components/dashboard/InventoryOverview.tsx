@@ -57,8 +57,7 @@ export const InventoryOverview = () => {
     
     const auditedItems = relevantItems.filter(item => item.status && item.status !== 'pending');
     
-    // FIX: Calculate "Audited Stock" as the Physical Quantity Found (what was scanned)
-    // Previously it was summing the system quantity of audited items.
+    // Total Physical Quantity Found (Stock Found)
     const auditedStock = auditedItems.reduce((sum, item) => sum + (item.physicalQuantity || 0), 0);
     
     const matchedItems = relevantItems.filter(item => item.status === 'matched');
@@ -66,12 +65,12 @@ export const InventoryOverview = () => {
     
     const discrepancyItems = relevantItems.filter(item => item.status === 'discrepancy');
     
-    // FIX: Calculate Discrepancy as the Sum of Absolute Variances
-    // This prevents negative variances (missing items) from canceling out positive ones (surplus).
+    // FIX: Calculate Discrepancy as Net Variance (Physical - System)
+    // Negative values (shortages) reduce the total; positive (surpluses) increase it.
     const discrepancyStock = discrepancyItems.reduce((sum, item) => {
         const sys = item.systemQuantity || 0;
         const phy = item.physicalQuantity || 0;
-        return sum + Math.abs(phy - sys);
+        return sum + (phy - sys);
     }, 0);
 
     const progressPercentage = totalStock > 0 
@@ -84,7 +83,7 @@ export const InventoryOverview = () => {
       matchedStock,
       discrepancyStock,
       progressPercentage,
-      pendingStock: totalStock - auditedStock, // This might be negative if surplus, but visually acceptable or can be clamped
+      pendingStock: totalStock - auditedStock,
       totalSkus: relevantItems.length,
       auditedSkus: auditedItems.length
     };
@@ -204,14 +203,16 @@ export const InventoryOverview = () => {
             <div className="text-xs text-green-600 mt-1">Quantity fully matched</div>
           </div>
 
-          {/* 4. Discrepancy Stock (Sum of Absolute Variances) */}
+          {/* 4. Discrepancy Stock (Net Variance) */}
           <div className="p-4 bg-red-50 rounded-xl border border-red-100">
             <div className="flex justify-between items-start mb-2">
-              <span className="text-red-600 text-sm font-medium">Discrepancy Qty</span>
+              <span className="text-red-600 text-sm font-medium">Net Variance</span>
               <AlertCircle className="h-4 w-4 text-red-500" />
             </div>
-            <div className="text-2xl font-bold text-red-900">{stats.discrepancyStock.toLocaleString()}</div>
-            <div className="text-xs text-red-600 mt-1">Total variance volume</div>
+            <div className={`text-2xl font-bold ${stats.discrepancyStock < 0 ? 'text-orange-700' : 'text-red-900'}`}>
+                {stats.discrepancyStock > 0 ? "+" : ""}{stats.discrepancyStock.toLocaleString()}
+            </div>
+            <div className="text-xs text-red-600 mt-1">Physical - System Qty</div>
           </div>
         </div>
 
