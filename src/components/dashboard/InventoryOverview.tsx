@@ -46,7 +46,7 @@ export const InventoryOverview = () => {
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
   const isClient = isClientUser();
 
-  // 2. Calculate Stats based on Total Stock (Quantities)
+  // 2. Calculate Stats
   const stats = useMemo(() => {
     // Filter items relevant to the current assignment
     const relevantItems = selectedAssignmentId 
@@ -56,13 +56,23 @@ export const InventoryOverview = () => {
     const totalStock = relevantItems.reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
     
     const auditedItems = relevantItems.filter(item => item.status && item.status !== 'pending');
-    const auditedStock = auditedItems.reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
+    
+    // FIX: Calculate "Audited Stock" as the Physical Quantity Found (what was scanned)
+    // Previously it was summing the system quantity of audited items.
+    const auditedStock = auditedItems.reduce((sum, item) => sum + (item.physicalQuantity || 0), 0);
     
     const matchedItems = relevantItems.filter(item => item.status === 'matched');
-    const matchedStock = matchedItems.reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
+    const matchedStock = matchedItems.reduce((sum, item) => sum + (item.physicalQuantity || 0), 0);
     
     const discrepancyItems = relevantItems.filter(item => item.status === 'discrepancy');
-    const discrepancyStock = discrepancyItems.reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
+    
+    // FIX: Calculate Discrepancy as the Sum of Absolute Variances
+    // This prevents negative variances (missing items) from canceling out positive ones (surplus).
+    const discrepancyStock = discrepancyItems.reduce((sum, item) => {
+        const sys = item.systemQuantity || 0;
+        const phy = item.physicalQuantity || 0;
+        return sum + Math.abs(phy - sys);
+    }, 0);
 
     const progressPercentage = totalStock > 0 
       ? Math.round((auditedStock / totalStock) * 100) 
@@ -74,8 +84,7 @@ export const InventoryOverview = () => {
       matchedStock,
       discrepancyStock,
       progressPercentage,
-      pendingStock: totalStock - auditedStock,
-      // Keep item counts for secondary display if needed
+      pendingStock: totalStock - auditedStock, // This might be negative if surplus, but visually acceptable or can be clamped
       totalSkus: relevantItems.length,
       auditedSkus: auditedItems.length
     };
@@ -161,7 +170,7 @@ export const InventoryOverview = () => {
         {/* Adjusted Grid Layout */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
           
-          {/* 1. Total Stock (Quantity) */}
+          {/* 1. Total Stock (System Quantity) */}
           <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
             <div className="flex justify-between items-start mb-2">
               <span className="text-blue-600 text-sm font-medium">Total Stock</span>
@@ -171,16 +180,18 @@ export const InventoryOverview = () => {
             <div className="text-xs text-blue-600 mt-1">Total items in system</div>
           </div>
 
-          {/* 2. Audit Progress (Quantity Based) */}
+          {/* 2. Audit Progress (Physical Quantity Found) */}
           <div className="p-4 bg-indigo-50 rounded-xl border border-indigo-100">
             <div className="flex justify-between items-start mb-2">
-              <span className="text-indigo-600 text-sm font-medium">Audit Progress</span>
+              <span className="text-indigo-600 text-sm font-medium">Quantity Found</span>
               <div className="h-4 w-4 text-indigo-400">
                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
               </div>
             </div>
-            <div className="text-2xl font-bold text-indigo-900">{stats.progressPercentage}%</div>
-            <div className="text-xs text-indigo-600 mt-1">{stats.auditedStock.toLocaleString()} of {stats.totalStock.toLocaleString()} qty audited</div>
+            <div className="text-2xl font-bold text-indigo-900">{stats.auditedStock.toLocaleString()}</div>
+            <div className="text-xs text-indigo-600 mt-1">
+                {stats.progressPercentage}% of total stock
+            </div>
           </div>
 
           {/* 3. Matched Stock */}
@@ -193,14 +204,14 @@ export const InventoryOverview = () => {
             <div className="text-xs text-green-600 mt-1">Quantity fully matched</div>
           </div>
 
-          {/* 4. Discrepancy Stock */}
+          {/* 4. Discrepancy Stock (Sum of Absolute Variances) */}
           <div className="p-4 bg-red-50 rounded-xl border border-red-100">
             <div className="flex justify-between items-start mb-2">
               <span className="text-red-600 text-sm font-medium">Discrepancy Qty</span>
               <AlertCircle className="h-4 w-4 text-red-500" />
             </div>
             <div className="text-2xl font-bold text-red-900">{stats.discrepancyStock.toLocaleString()}</div>
-            <div className="text-xs text-red-600 mt-1">Quantity with variance</div>
+            <div className="text-xs text-red-600 mt-1">Total variance volume</div>
           </div>
         </div>
 
@@ -212,12 +223,12 @@ export const InventoryOverview = () => {
           <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
             <div 
               className="h-full bg-indigo-500 transition-all duration-500 ease-out"
-              style={{ width: `${stats.progressPercentage}%` }}
+              style={{ width: `${Math.min(stats.progressPercentage, 100)}%` }}
             />
           </div>
           <div className="flex justify-between text-xs text-gray-500 mt-2">
             <span>{stats.auditedSkus} of {stats.totalSkus} SKUs touched</span>
-            <span>{stats.pendingStock.toLocaleString()} quantity pending</span>
+            <span>{stats.auditedStock.toLocaleString()} of {stats.totalStock.toLocaleString()} quantity found</span>
           </div>
         </div>
       </CardContent>
