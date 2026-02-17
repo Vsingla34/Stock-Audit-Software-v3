@@ -57,7 +57,8 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
         activeSubLocations, 
         fetchSubLocations, 
         addSubLocationToDb,
-        addSurplusItem 
+        addSurplusItem,
+        fetchGlobalItem
     } = useInventory();
 
     const { currentUser } = useUser();
@@ -122,8 +123,46 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
             const locationObj = locations.find(loc => loc.id === locationId);
             const locationName = locationObj?.name || '';
             
-            const masterItem = itemMaster.find(item => (item.sku === barcode) && item.location === locationName);
+            // 1. Try to find item in the current Assignment (Closing Stock)
+            let masterItem = itemMaster.find(item => (item.sku === barcode) && item.location === locationName);
             
+            // 2. If not found in Closing Stock, check Global Item Master
+            if (!masterItem) {
+                try {
+                    const globalItem = await fetchGlobalItem(barcode);
+                    if (globalItem) {
+                        // Found in Global Master! Import it as a "Surplus" item automatically
+                        // This sets System Qty = 0 and Physical Qty = 1 (initially)
+                        
+                        const newItemPayload = {
+                            sku: globalItem.sku,
+                            name: globalItem.name || "Unnamed Item",
+                            category: globalItem.category || "-",
+                            physicalQuantity: 1 
+                        };
+                        
+                        // Add to current audit assignment
+                        await addSurplusItem(newItemPayload);
+                        
+                        toast.success("Item Found in Master", { 
+                            description: `${newItemPayload.name} added to audit (Sys Qty: 0).`,
+                            className: "border-blue-500 bg-blue-50"
+                        });
+                        
+                        return true; 
+                    }
+                } catch (err) {
+                    console.error("Global lookup failed", err);
+                }
+            }
+
+            // Re-fetch masterItem if we just added it? 
+            // Actually, addSurplusItem calls loadData() which updates itemMaster. 
+            // However, due to async state updates, itemMaster might not be updated in this very closure yet.
+            // But since we returned `true` above, we stop here. 
+            // The NEXT scan of the same item will fall through to the normal logic below because it will exist in itemMaster.
+
+            // If still not found (not in closing stock AND not in global master)
             if (!masterItem) {
                 const itemInOtherLocation = itemMaster.find(item => item.sku === barcode);
                 if (itemInOtherLocation) {
@@ -138,6 +177,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                 return false;
             }
 
+            // ... (Normal Scan Logic for Existing Items) ...
             const existingAuditedItem = auditedItems.find(item => item.sku === masterItem.sku && item.location === locationName);
             const targetItem = existingAuditedItem || masterItem;
 

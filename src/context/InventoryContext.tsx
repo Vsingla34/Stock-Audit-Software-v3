@@ -154,6 +154,9 @@ interface InventoryContextType {
     item: { sku: string; name: string; category: string; physicalQuantity: number }
   ) => Promise<void>;
 
+  // New method exposed
+  fetchGlobalItem: (sku: string) => Promise<any | null>;
+
   addQuestion: (question: Omit<Question, "id">) => Promise<void>;
   updateQuestion: (question: Question) => Promise<void>;
   deleteQuestion: (questionId: string) => Promise<void>;
@@ -663,6 +666,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     await loadData();
   };
 
+  const fetchGlobalItem = async (sku: string) => {
+      if (!selectedCompanyId) return null;
+      return await SupabaseDataService.getGlobalMasterItem(selectedCompanyId, sku);
+  };
+
   const getInventorySummary = () => {
     const totalItems = itemMaster.filter((item) => item.location !== "").length;
     const activeAuditedItems = auditedItems.filter(
@@ -869,7 +877,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         refreshData: loadData,
         uploadFile, 
         fetchSubLocations,
-        addSubLocationToDb
+        addSubLocationToDb,
+        fetchGlobalItem
       }}
     >
       {children}

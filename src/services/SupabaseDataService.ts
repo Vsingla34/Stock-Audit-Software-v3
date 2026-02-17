@@ -220,7 +220,6 @@ class SupabaseDataService {
     return true;
   }
 
-  // OPTIMIZED: Fetch all items with pagination & strict assignment filtering
   public async getItemMaster(companyId: string, assignmentId: number | null = null): Promise<InventoryItem[]> {
     const allItems: any[] = []; 
     let page = 0;
@@ -232,16 +231,12 @@ class SupabaseDataService {
           .select("*")
           .eq("company_id", companyId);
 
-        // FIX: If an assignmentId is provided, ONLY fetch items for that assignment.
-        // This prevents items from other assignments or the master list from appearing.
         if (assignmentId) {
            query = query.eq("assignment_id", assignmentId); 
         } else {
-           // If no assignmentId, we are looking at the Master Inventory
            query = query.is("assignment_id", null);
         }
 
-        // Apply Range for Pagination
         query = query.range(page * pageSize, (page + 1) * pageSize - 1);
 
         const { data, error } = await query;
@@ -326,6 +321,23 @@ class SupabaseDataService {
         customAttributes: cleanedCustomAttributes
       };
     });
+  }
+
+  // --- NEW: Helper to find item in Global Master (Single Lookup) ---
+  public async getGlobalMasterItem(companyId: string, sku: string): Promise<any | null> {
+    const { data, error } = await supabase
+      .from("inventory_items")
+      .select("*")
+      .eq("company_id", companyId)
+      .is("assignment_id", null) 
+      .eq("sku", sku)
+      .maybeSingle();
+    
+    if (error) {
+       console.error("Error fetching global master item:", error);
+       return null;
+    }
+    return data;
   }
 
   public async getAllSkus(companyId: string): Promise<Set<string>> {
@@ -530,7 +542,7 @@ class SupabaseDataService {
       system_quantity: 0, 
       physical_quantity: item.physicalQuantity,
       status: 'discrepancy', 
-      client_remarks: "This item was not in the closing stock but it was there",
+      client_remarks: "Added from Master / Surplus",
       auditor_entries: [auditorEntry],
       last_audited: new Date().toISOString(),
       custom_attributes: {}
