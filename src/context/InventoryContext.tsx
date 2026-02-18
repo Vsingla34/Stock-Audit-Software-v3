@@ -92,7 +92,7 @@ interface InventoryContextType {
   questionnaireAnswers: QuestionnaireAnswer[];
   closingStockUploaded: boolean; 
   selectedLocationFilter: string;
-  activeSubLocations: string[]; // List of sub-locations for current context
+  activeSubLocations: string[]; 
   
   setSelectedLocationFilter: (locationId: string) => void;
   setItemMaster: (
@@ -154,6 +154,8 @@ interface InventoryContextType {
     item: { sku: string; name: string; category: string; physicalQuantity: number }
   ) => Promise<void>;
 
+  fetchGlobalItem: (sku: string) => Promise<any | null>;
+
   addQuestion: (question: Omit<Question, "id">) => Promise<void>;
   updateQuestion: (question: Question) => Promise<void>;
   deleteQuestion: (questionId: string) => Promise<void>;
@@ -198,17 +200,46 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const loadData = async () => {
     if (!selectedCompanyId) return;
+    
+    // 1. Fetch Assignments FIRST
     try {
-      const dbItems = await SupabaseDataService.getItemMaster(selectedCompanyId, selectedAssignmentId);
-      setItemMasterState(dbItems);
+      const fetchedAssignments = await SupabaseDataService.getAssignments(selectedCompanyId);
+      setAssignments(fetchedAssignments);
+    } catch (error) {
+      console.error("Error fetching assignments:", error);
+    }
 
-      const audited = await SupabaseDataService.getAuditedItems(selectedCompanyId, selectedAssignmentId);
-      setAuditedItemsState(audited);
-
+    // 2. Fetch Locations
+    try {
       const locs = await SupabaseDataService.getLocations();
       const filteredLocs = locs.filter((l) => l.companyId === selectedCompanyId);
       setLocations(filteredLocs);
+    } catch (error) {
+      console.error("Error fetching locations:", error);
+    }
 
+    // 3. Fetch Inventory Data (Wrapped in try/catch to not block other data)
+    try {
+      const assignmentIdParam = selectedAssignmentId ? parseInt(String(selectedAssignmentId), 10) : null;
+      
+      const dbItems = await SupabaseDataService.getItemMaster(selectedCompanyId, assignmentIdParam);
+      setItemMasterState(dbItems);
+
+      const audited = await SupabaseDataService.getAuditedItems(selectedCompanyId, assignmentIdParam);
+      setAuditedItemsState(audited);
+
+      if (selectedAssignmentId) {
+        const hasStock = await SupabaseDataService.hasClosingStockForAssignment(selectedAssignmentId);
+        setClosingStockUploaded(hasStock);
+      } else {
+        setClosingStockUploaded(false);
+      }
+    } catch (error) {
+      console.error("Error fetching inventory items:", error);
+    }
+
+    // 4. Fetch Extras
+    try {
       const qs = await SupabaseDataService.getQuestions(selectedCompanyId);
       setQuestions((qs || []).map((q: any) => ({
         id: q.id,
@@ -221,19 +252,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
       const answers = await SupabaseDataService.getQuestionnaireAnswers(selectedCompanyId);
       setQuestionnaireAnswers(answers || []);
-
-      const fetchedAssignments = await SupabaseDataService.getAssignments(selectedCompanyId);
-      setAssignments(fetchedAssignments);
-
-      if (selectedAssignmentId) {
-        const hasStock = await SupabaseDataService.hasClosingStockForAssignment(selectedAssignmentId);
-        setClosingStockUploaded(hasStock);
-      } else {
-        setClosingStockUploaded(false);
-      }
-
     } catch (error) {
-      console.error(error);
+      console.error("Error fetching questions/answers:", error);
     }
   };
 
@@ -291,6 +311,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     await loadData();
   };
 
+  // Standard Update (Legacy/Table Edits)
   const updateAuditedItem = async (
     item: InventoryItem,
     auditorId?: string,
@@ -590,6 +611,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       (i) => (i.id === barcode || i.sku === barcode) && i.location === locationName
     );
     if (!item) throw new Error(`Item not found`);
+    // For manual scan trigger, still rely on standard flow or update to use addItemToAudit logic if needed
     await updateAuditedItem({
       ...item,
       physicalQuantity: (item.physicalQuantity ?? 0) + 1,
@@ -622,27 +644,47 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     );
     if (!masterItem) throw new Error(`Item not in master list`);
     
-    const existingAuditedItem = auditedItems.find(i => i.id === masterItem.id && i.assignmentId === (selectedAssignmentId ? parseInt(selectedAssignmentId) : undefined));
-    let currentSubLocQty = 0;
-    
-    if (existingAuditedItem && existingAuditedItem.auditorEntries) {
-         const entry = existingAuditedItem.auditorEntries.find(e => e.auditorId === auditorId && e.subLocation === subLocation);
-         if (entry) currentSubLocQty = entry.quantityFound;
+    // Calculate new total based on current STATE
+    const existingItem = auditedItems.find(i => i.id === masterItem.id) || masterItem;
+    const currentTotal = existingItem.physicalQuantity || 0;
+    const newTotal = currentTotal + quantity;
+
+    const newEntry = {
+        auditorId: auditorId || "unknown",
+        auditorName: auditorName || "Unknown",
+        quantityFound: quantity,
+        auditedAt: new Date().toISOString(),
+        subLocation: subLocation || "General"
+    };
+
+    // Optimistic UI Update
+    setAuditedItemsState(prev => {
+        const idx = prev.findIndex(i => i.id === masterItem.id);
+        const updatedItem = {
+            ...existingItem,
+            physicalQuantity: newTotal,
+            status: "pending" as const,
+            lastAudited: new Date().toISOString(),
+            auditorEntries: [...(existingItem.auditorEntries || []), newEntry]
+        };
+
+        if (idx >= 0) {
+            const newArr = [...prev];
+            newArr[idx] = updatedItem;
+            return newArr;
+        }
+        return [...prev, updatedItem];
+    });
+
+    // DB Update using Secure Append
+    if (masterItem.id) {
+        await SupabaseDataService.secureAppendAuditEntry(
+            masterItem.id,
+            newEntry,
+            newTotal,
+            "pending"
+        );
     }
-
-    const newQuantityForSubLocation = currentSubLocQty + quantity;
-
-    await updateAuditedItem(
-      {
-        ...masterItem,
-        physicalQuantity: newQuantityForSubLocation, 
-        status: "pending",
-        lastAudited: new Date().toISOString(),
-      },
-      auditorId,
-      auditorName,
-      subLocation
-    );
   };
 
   const addSurplusItem = async (item: { sku: string; name: string; category: string; physicalQuantity: number }) => {
@@ -661,6 +703,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         userName
     });
     await loadData();
+  };
+
+  const fetchGlobalItem = async (sku: string) => {
+      if (!selectedCompanyId) return null;
+      return await SupabaseDataService.getGlobalMasterItem(selectedCompanyId, sku);
   };
 
   const getInventorySummary = () => {
@@ -814,13 +861,29 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const addSubLocationToDb = async (name: string, locationId: string) => {
       if (!selectedCompanyId) throw new Error("No company selected");
-      await SupabaseDataService.createSubLocation({
-          name,
-          locationId,
-          companyId: selectedCompanyId
+      
+      // FIX: Optimistic Update Only (Don't re-fetch immediately)
+      // This ensures the new item STAYS in the list so BarcodeScanner can select it.
+      setActiveSubLocations(prev => {
+          if (prev.includes(name)) return prev;
+          const newList = [...prev, name].sort();
+          return newList;
       });
-      // Refresh list after add
-      await fetchSubLocations(locationId);
+
+      try {
+          await SupabaseDataService.createSubLocation({
+              name,
+              locationId,
+              companyId: selectedCompanyId
+          });
+          // Do NOT call fetchSubLocations(locationId) here.
+          // Trust the optimistic update.
+      } catch (e) {
+          // Revert on error
+          console.error(e);
+          setActiveSubLocations(prev => prev.filter(s => s !== name));
+          throw e;
+      }
   };
 
   return (
@@ -869,7 +932,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         refreshData: loadData,
         uploadFile, 
         fetchSubLocations,
-        addSubLocationToDb
+        addSubLocationToDb,
+        fetchGlobalItem
       }}
     >
       {children}

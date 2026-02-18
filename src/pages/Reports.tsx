@@ -71,7 +71,9 @@ const Reports = () => {
     assignments,
     finalizeAudit,
     sendFinalizationOtp,
-    submitAudit 
+    submitAudit,
+    fetchSubLocations, // Added to fetch the master list
+    activeSubLocations // Access the master list
   } = useInventory();
 
   const { currentUser } = useUser();
@@ -100,6 +102,13 @@ const Reports = () => {
   const currentAssignment = assignments.find(a => a.id === selectedAssignmentId);
   const selectedLocation = currentAssignment?.locationId || "";
   const locationName = locations.find(l => l.id === selectedLocation)?.name || "";
+
+  // NEW: Fetch sub-locations when location loads
+  useEffect(() => {
+    if (selectedLocation) {
+        fetchSubLocations(selectedLocation);
+    }
+  }, [selectedLocation]);
 
   useEffect(() => {
     let isMounted = true;
@@ -213,19 +222,27 @@ const Reports = () => {
     }
   };
 
+  const calculateTotalFromEntries = (item: InventoryItem) => {
+      if (!item.auditorEntries || item.auditorEntries.length === 0) return 0;
+      return item.auditorEntries.reduce((sum, entry) => sum + (entry.quantityFound || 0), 0);
+  };
+
   const summary = useMemo(() => {
     const totalItems = items.length;
     const auditedItems = items.filter(i => i.status !== 'pending').length;
     
     const totalSystemQty = items.reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
-    const totalPhysicalQty = items.reduce((sum, item) => sum + (item.physicalQuantity || 0), 0);
+    const totalPhysicalQty = items.reduce((sum, item) => sum + calculateTotalFromEntries(item), 0);
 
     let matched = 0;
     let discrepancies = 0;
 
     items.forEach(item => {
-        if (item.status === 'matched') matched++;
-        else if (item.status === 'discrepancy') discrepancies++;
+        const phy = calculateTotalFromEntries(item);
+        if (item.status === 'pending' && phy === 0) return; 
+        
+        if (phy === item.systemQuantity) matched++;
+        else discrepancies++;
     });
 
     return {
@@ -273,10 +290,13 @@ const Reports = () => {
   const baseTableData = useMemo(() => {
     return items.map((item) => {
         const sysQty = item.systemQuantity || 0;
-        const phyQty = item.physicalQuantity !== null ? item.physicalQuantity : 0;
-        const variance = (item.status !== 'pending' && item.physicalQuantity !== null) 
-            ? phyQty - sysQty 
-            : 0; 
+        const phyQty = calculateTotalFromEntries(item);
+        const variance = (item.status !== 'pending' || phyQty > 0) ? phyQty - sysQty : 0; 
+        
+        let status = item.status || "pending";
+        if (phyQty > 0 || item.status !== 'pending') {
+            status = (phyQty === sysQty) ? "matched" : "discrepancy";
+        }
 
         let auditDay = "-";
         if (auditStartDate && item.lastAudited) {
@@ -295,9 +315,9 @@ const Reports = () => {
         category: item.category,
         location: item.location || locationName, 
         systemQuantity: sysQty,
-        physicalQuantity: item.physicalQuantity !== null ? item.physicalQuantity : 0,
-        variance: variance,
-        status: item.status || "pending",
+        physicalQuantity: phyQty, 
+        variance: variance,       
+        status: status,           
         lastAudited: item.lastAudited || "",
         auditorEntries: item.auditorEntries || [],
         clientRemarks: item.clientRemarks,
@@ -339,7 +359,7 @@ const Reports = () => {
      if (sysValue === 0 && unitPrice > 0) {
          sysValue = unitPrice * item.systemQuantity;
      }
-     if (phyValue === 0 && unitPrice > 0) {
+     if (unitPrice > 0) {
          phyValue = unitPrice * (item.physicalQuantity || 0);
      }
 
@@ -600,7 +620,6 @@ const Reports = () => {
        return;
      }
 
-     // Use the Details (Normalized) format for CSV
      const reportData: any[] = [];
      
      baseTableData.forEach(item => {
@@ -699,7 +718,7 @@ const Reports = () => {
     baseTableData.forEach((item) => { item.auditorEntries.forEach((entry: any) => { allAuditors.add(entry.auditorName); }); });
     const auditorList = Array.from(allAuditors).sort();
 
-    // 1. Reconciliation Sheet (Standard View with single Sub-Location Column)
+    // 1. Reconciliation Sheet
     const reconciliationData = baseTableData.map((item) => {
       const { unitPrice, sysValue, phyValue, valueVariance } = getItemValues(item);
       const row: any = {
@@ -707,7 +726,7 @@ const Reports = () => {
         Name: item.name,
         Category: item.category,
         Location: item.location,
-        "Sub Location": getSubLocationSummary(item.auditorEntries), // Single Column Summary
+        "Sub Location": getSubLocationSummary(item.auditorEntries), 
         "System Qty": item.systemQuantity,
       };
       if (hasPricing) {
@@ -787,7 +806,7 @@ const Reports = () => {
         };
     }).filter(Boolean);
 
-    // 2. Day Wise Data Preparation
+    // 2. Day Wise Data
     const dayDataMap: Record<string, Record<string, number>> = {};
     const dayWiseAuditors = new Set<string>();
     baseTableData.forEach((item) => {
@@ -797,7 +816,7 @@ const Reports = () => {
                const auditor = entry.auditorName;
                dayWiseAuditors.add(auditor);
                if (!dayDataMap[dateKey]) dayDataMap[dateKey] = {};
-               dayDataMap[dateKey][auditor] = (dayDataMap[dateKey][auditor] || 0) + (entry.quantityFound || 0);
+               dataMap[dateKey][auditor] = (dataMap[dateKey][auditor] || 0) + (entry.quantityFound || 0);
            }
        });
     });
@@ -815,9 +834,9 @@ const Reports = () => {
         return row;
     });
 
-    // 3. Sub-Location Wise Details (Flattened/Normalized)
+    // 3. Sub-Location Wise Details (Flattened)
     const subLocDetailsData: any[] = [];
-    const subLocSummaryMap: Record<string, number> = {}; // Aggregate for Charting
+    const subLocScannedMap: Record<string, number> = {}; 
     
     baseTableData.forEach(item => {
          const subLocMap: Record<string, { qty: number, auditors: Set<string> }> = {};
@@ -842,11 +861,9 @@ const Reports = () => {
                  subLocMap[subLoc].qty += entry.quantityFound;
                  subLocMap[subLoc].auditors.add(entry.auditorName);
                  
-                 // Aggregate for Summary
-                 subLocSummaryMap[subLoc] = (subLocSummaryMap[subLoc] || 0) + entry.quantityFound;
+                 subLocScannedMap[subLoc] = (subLocScannedMap[subLoc] || 0) + entry.quantityFound;
              });
              
-             // Create Normalized Detail Rows
              Object.entries(subLocMap).forEach(([subLoc, data]) => {
                  subLocDetailsData.push({
                      SKU: item.sku,
@@ -863,12 +880,18 @@ const Reports = () => {
          }
     });
 
-    // 4. Sub-Location Summary (NEW: For Pie Charts)
-    const subLocSummaryData = Object.entries(subLocSummaryMap).map(([subLoc, qty]) => ({
-        "Sub Location": subLoc,
-        "Total Quantity Found": qty,
-        "Percentage": summary.totalPhysicalQty > 0 ? ((qty / summary.totalPhysicalQty) * 100).toFixed(2) + "%" : "0%"
-    })).sort((a,b) => b["Total Quantity Found"] - a["Total Quantity Found"]);
+    // 4. Sub-Location Summary (NEW: Merging Scanned + Master List)
+    // Combine known scanned locations with the master list 'activeSubLocations' to ensure 0 counts appear
+    const allKnownSubLocs = new Set([...Object.keys(subLocScannedMap), ...activeSubLocations]);
+    
+    const subLocSummaryData = Array.from(allKnownSubLocs).map(subLoc => {
+        const qty = subLocScannedMap[subLoc] || 0;
+        return {
+            "Sub Location": subLoc,
+            "Total Quantity Found": qty,
+            "Percentage": summary.totalPhysicalQty > 0 ? ((qty / summary.totalPhysicalQty) * 100).toFixed(2) + "%" : "0%"
+        };
+    }).sort((a,b) => b["Total Quantity Found"] - a["Total Quantity Found"]);
 
     const wb = XLSX.utils.book_new();
     const wsReconciliation = XLSX.utils.json_to_sheet(reconciliationData);
@@ -892,13 +915,13 @@ const Reports = () => {
     XLSX.utils.book_append_sheet(wb, wsDiscrepancy, "Discrepancies");
     XLSX.utils.book_append_sheet(wb, wsDayWise, "Day Wise Report");
     XLSX.utils.book_append_sheet(wb, wsSubLocDetails, "Sub-Location Details");
-    XLSX.utils.book_append_sheet(wb, wsSubLocSummary, "Sub-Location Summary"); // NEW
+    XLSX.utils.book_append_sheet(wb, wsSubLocSummary, "Sub-Location Summary"); 
     XLSX.utils.book_append_sheet(wb, wsQuestionnaire, "Questionnaire");
 
     const locationInfo = locationName ? `_${locationName}` : "";
     XLSX.writeFile(wb, `complete_audit_data${locationInfo}.xlsx`);
     toast.success("Combined Excel report downloaded");
-  }, [baseTableData, summary, locationName, companyName, questionnaireAnswers, questions, locations, formatQuestionnaireAnswer, hasPricing, getItemValues, getSubLocationSummary]);
+  }, [baseTableData, summary, locationName, companyName, questionnaireAnswers, questions, locations, formatQuestionnaireAnswer, hasPricing, getItemValues, getSubLocationSummary, activeSubLocations]);
 
   const generatePDFReport = useCallback(() => {
     const doc = new jsPDF();
