@@ -385,12 +385,23 @@ class SupabaseDataService {
     return this.getItemMaster(companyId, assignmentId);
   }
 
-  public async getSubLocations(locationId: string): Promise<string[]> {
-    const { data, error } = await supabase
+  public async getSubLocations(locationId: string, query: string = ""): Promise<string[]> {
+    let dbQuery = supabase
       .from("sub_locations")
       .select("name")
-      .eq("location_id", locationId)
-      .order("name");
+      .eq("location_id", locationId);
+
+    if (query) {
+        dbQuery = dbQuery.ilike("name", `%${query}%`);
+    }
+
+    if (!query) {
+        dbQuery = dbQuery.limit(20);
+    } else {
+        dbQuery = dbQuery.limit(50);
+    }
+
+    const { data, error } = await dbQuery.order("name");
 
     if (error) {
       console.error("Error fetching sub-locations:", error);
@@ -790,47 +801,21 @@ class SupabaseDataService {
     if (error) throw error;
   }
 
-  // --- NEW: Secure Audit Update (Fixes Race Condition) ---
-  public async secureAppendAuditEntry(
+  // --- TRUE ATOMIC UPDATE ---
+  public async secureRecordScan(
     itemId: string, 
     newEntry: any, 
-    newTotalQty: number, 
-    newStatus: string
+    quantityAdded: number
   ): Promise<void> {
-    // Attempt to use the RPC function first
-    const { error } = await supabase.rpc('append_audit_entry', {
+    const { error } = await supabase.rpc('record_scan', {
       p_item_id: itemId,
       p_new_entry: newEntry,
-      p_physical_qty: newTotalQty,
-      p_status: newStatus
+      p_quantity_added: quantityAdded
     });
 
     if (error) {
-      console.error("RPC Failed, falling back to standard update (Potential Race Condition):", error);
-      
-      // Fallback logic if RPC fails (e.g., function not created yet)
-      const { data: currentItem } = await supabase
-        .from("inventory_items")
-        .select("auditor_entries")
-        .eq("id", itemId)
-        .single();
-        
-      let entries = currentItem?.auditor_entries || [];
-      if (typeof entries === 'string') {
-          try { entries = JSON.parse(entries); } catch {} 
-      }
-      
-      // Safely check if it's an array
-      if (!Array.isArray(entries)) entries = [];
-      
-      entries.push(newEntry);
-      
-      await supabase.from("inventory_items").update({
-        physical_quantity: newTotalQty,
-        status: newStatus,
-        last_audited: new Date().toISOString(),
-        auditor_entries: entries
-      } as any).eq("id", itemId);
+      console.error("Database Atomic Update Failed:", error);
+      throw new Error("Failed to record scan securely. Please try again.");
     }
   }
 }

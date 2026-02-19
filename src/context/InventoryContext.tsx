@@ -169,7 +169,7 @@ interface InventoryContextType {
   
   uploadFile: (file: File, path: string) => Promise<string>;
   
-  fetchSubLocations: (locationId: string) => Promise<void>;
+  fetchSubLocations: (locationId: string, query?: string) => Promise<void>;
   addSubLocationToDb: (name: string, locationId: string) => Promise<void>;
 
   refreshData: () => Promise<void>;
@@ -201,7 +201,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
   const loadData = async () => {
     if (!selectedCompanyId) return;
     
-    // 1. Fetch Assignments FIRST
     try {
       const fetchedAssignments = await SupabaseDataService.getAssignments(selectedCompanyId);
       setAssignments(fetchedAssignments);
@@ -209,7 +208,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       console.error("Error fetching assignments:", error);
     }
 
-    // 2. Fetch Locations
     try {
       const locs = await SupabaseDataService.getLocations();
       const filteredLocs = locs.filter((l) => l.companyId === selectedCompanyId);
@@ -218,10 +216,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       console.error("Error fetching locations:", error);
     }
 
-    // 3. Fetch Inventory Data (Wrapped in try/catch to not block other data)
     try {
       const assignmentIdParam = selectedAssignmentId ? parseInt(String(selectedAssignmentId), 10) : null;
-      
       const dbItems = await SupabaseDataService.getItemMaster(selectedCompanyId, assignmentIdParam);
       setItemMasterState(dbItems);
 
@@ -238,7 +234,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       console.error("Error fetching inventory items:", error);
     }
 
-    // 4. Fetch Extras
     try {
       const qs = await SupabaseDataService.getQuestions(selectedCompanyId);
       setQuestions((qs || []).map((q: any) => ({
@@ -311,7 +306,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     await loadData();
   };
 
-  // Standard Update (Legacy/Table Edits)
+  // TRUE ATOMIC SCAN LOGIC
   const updateAuditedItem = async (
     item: InventoryItem,
     auditorId?: string,
@@ -330,12 +325,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     if (statusToCheck === 'finalized') {
        throw new Error("Audit is finalized. No further modifications allowed.");
     }
-
     if (statusToCheck === 'submitted') {
       const isSuperAdmin = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
-      if (!isSuperAdmin) {
-        throw new Error(`Audit is ${statusToCheck}. Modifications are restricted to Admins.`);
-      }
+      if (!isSuperAdmin) throw new Error(`Audit is ${statusToCheck}. Modifications are restricted to Admins.`);
     }
     
     let targetId = item.id;
@@ -352,100 +344,93 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
             if (existingFork) {
                 targetId = existingFork.id;
                 targetAssignmentId = selectedIdNum;
-                item.auditorEntries = existingFork.auditorEntries;
             } else {
+                // Should theoretically never happen with strict closing stock matching
                 targetId = undefined as any; 
                 targetAssignmentId = selectedIdNum;
-                item.auditorEntries = []; 
             }
         }
     }
 
-    let auditorEntries: AuditorEntry[] = item.auditorEntries || [];
-    let totalPhysicalQuantity = 0;
+    // IF THIS IS A SCANNER ACTION (It has an auditor and a sublocation)
+    if (auditorId && auditorName && subLocation && targetId) {
+        // 1. Calculate the exact Delta (+1, +5, etc) to send to the database
+        const oldItem = auditedItems.find(i => i.id === targetId) || itemMaster.find(i => i.id === targetId);
+        
+        // Sum up everything this specific user previously found in this specific sub-location
+        const oldEntriesSumForUserSubloc = (oldItem?.auditorEntries || [])
+            .filter(e => e.auditorId === auditorId && e.subLocation === subLocation)
+            .reduce((sum, e) => sum + (e.quantityFound || 0), 0);
 
-    if (auditorId && auditorName && item.physicalQuantity !== undefined) {
-      
-      const existingEntryIndex = auditorEntries.findIndex(
-        (e) => e.auditorId === auditorId && e.subLocation === subLocation
-      );
+        // The scanner passes the 'item.physicalQuantity' as the NEW desired total for this user/sublocation
+        const quantityToAdd = (item.physicalQuantity || 0) - oldEntriesSumForUserSubloc;
 
-      if (existingEntryIndex >= 0) {
-        auditorEntries[existingEntryIndex] = {
-          ...auditorEntries[existingEntryIndex],
-          quantityFound: item.physicalQuantity, 
-          auditedAt: new Date().toISOString(),
+        if (quantityToAdd !== 0) {
+            const newEntry = {
+                auditorId,
+                auditorName,
+                quantityFound: quantityToAdd,
+                auditedAt: new Date().toISOString(),
+                subLocation
+            };
+
+            // 2. Optimistic UI Update (Makes the app feel instant)
+            setAuditedItemsState(prev => {
+                const idx = prev.findIndex(i => i.id === targetId);
+                const old = prev[idx] || oldItem;
+                if (!old) return prev;
+                
+                const newTotalPhys = (old.physicalQuantity || 0) + quantityToAdd;
+                const newStatus = newTotalPhys === old.systemQuantity ? "matched" : "discrepancy";
+
+                const updatedItem = {
+                    ...old,
+                    physicalQuantity: newTotalPhys,
+                    status: newStatus,
+                    lastAudited: new Date().toISOString(),
+                    auditorEntries: [...(old.auditorEntries || []), newEntry]
+                };
+
+                if (idx >= 0) {
+                    const newArr = [...prev];
+                    newArr[idx] = updatedItem;
+                    return newArr;
+                }
+                return [...prev, updatedItem];
+            });
+
+            // 3. Database Atomic Update (Prevents race conditions)
+            await SupabaseDataService.secureRecordScan(targetId, newEntry, quantityToAdd);
+        }
+
+    } else {
+        // LEGACY / MASS UPDATE FLOW (For bulk saves without specific sublocations)
+        const currentAttributes = item.customAttributes || {};
+        let updatedAttributes = { ...currentAttributes };
+
+        const unitPrice = parseFloat(currentAttributes['unit_price'] || 0);
+        let effectivePrice = unitPrice;
+        if (!effectivePrice) {
+           const priceKey = Object.keys(currentAttributes).find(k => 
+             ['price', 'rate', 'cost', 'mrp', 'unit price'].includes(k.toLowerCase())
+           );
+           if (priceKey) {
+              const val = String(currentAttributes[priceKey]).replace(/[^0-9.-]+/g, "");
+              effectivePrice = parseFloat(val) || 0;
+              if (effectivePrice > 0) updatedAttributes['unit_price'] = effectivePrice; 
+           }
+        }
+        updatedAttributes['physical_value'] = effectivePrice * (item.physicalQuantity || 0);
+
+        const itemToUpdate: InventoryItem = {
+          ...item,
+          id: targetId, 
+          assignmentId: targetAssignmentId, 
+          customAttributes: updatedAttributes
         };
-      } else {
-        auditorEntries.push({
-          auditorId,
-          auditorName,
-          quantityFound: item.physicalQuantity,
-          auditedAt: new Date().toISOString(),
-          subLocation
-        });
-      }
-      
-      totalPhysicalQuantity = auditorEntries.reduce(
-        (sum, entry) => sum + entry.quantityFound,
-        0
-      );
-    } else {
-      totalPhysicalQuantity = item.physicalQuantity || 0;
-    }
 
-    const currentAttributes = item.customAttributes || {};
-    let updatedAttributes = { ...currentAttributes };
-
-    const unitPrice = parseFloat(currentAttributes['unit_price'] || 0);
-    
-    let effectivePrice = unitPrice;
-    if (!effectivePrice) {
-       const priceKey = Object.keys(currentAttributes).find(k => 
-         ['price', 'rate', 'cost', 'mrp', 'unit price'].includes(k.toLowerCase())
-       );
-       if (priceKey) {
-          const val = String(currentAttributes[priceKey]).replace(/[^0-9.-]+/g, "");
-          effectivePrice = parseFloat(val) || 0;
-          if (effectivePrice > 0) {
-             updatedAttributes['unit_price'] = effectivePrice; 
-          }
-       }
-    }
-
-    updatedAttributes['physical_value'] = effectivePrice * totalPhysicalQuantity;
-
-    const itemToUpdate: InventoryItem = {
-      ...item,
-      id: targetId, 
-      assignmentId: targetAssignmentId, 
-      physicalQuantity: totalPhysicalQuantity,
-      status:
-        totalPhysicalQuantity !== undefined &&
-        item.systemQuantity === totalPhysicalQuantity
-          ? "matched"
-          : totalPhysicalQuantity !== undefined
-          ? "discrepancy"
-          : "pending",
-      lastAudited: new Date().toISOString(),
-      auditorEntries,
-      customAttributes: updatedAttributes
-    };
-
-    await SupabaseDataService.setAuditedItems([itemToUpdate]);
-    
-    if (!targetId) {
+        await SupabaseDataService.setAuditedItems([itemToUpdate]);
         await loadData();
-    } else {
-        setAuditedItemsState(prev => {
-          const idx = prev.findIndex(i => i.id === itemToUpdate.id);
-          if (idx >= 0) {
-            const newArr = [...prev];
-            newArr[idx] = itemToUpdate;
-            return newArr;
-          }
-          return [...prev, itemToUpdate];
-        });
     }
   };
 
@@ -611,7 +596,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       (i) => (i.id === barcode || i.sku === barcode) && i.location === locationName
     );
     if (!item) throw new Error(`Item not found`);
-    // For manual scan trigger, still rely on standard flow or update to use addItemToAudit logic if needed
+    // Fallback scan behavior
     await updateAuditedItem({
       ...item,
       physicalQuantity: (item.physicalQuantity ?? 0) + 1,
@@ -644,7 +629,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     );
     if (!masterItem) throw new Error(`Item not in master list`);
     
-    // Calculate new total based on current STATE
     const existingItem = auditedItems.find(i => i.id === masterItem.id) || masterItem;
     const currentTotal = existingItem.physicalQuantity || 0;
     const newTotal = currentTotal + quantity;
@@ -657,7 +641,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         subLocation: subLocation || "General"
     };
 
-    // Optimistic UI Update
     setAuditedItemsState(prev => {
         const idx = prev.findIndex(i => i.id === masterItem.id);
         const updatedItem = {
@@ -676,14 +659,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         return [...prev, updatedItem];
     });
 
-    // DB Update using Secure Append
     if (masterItem.id) {
-        await SupabaseDataService.secureAppendAuditEntry(
-            masterItem.id,
-            newEntry,
-            newTotal,
-            "pending"
-        );
+        await SupabaseDataService.secureRecordScan(masterItem.id, newEntry, quantity);
     }
   };
 
@@ -849,21 +826,18 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
      return await SupabaseDataService.uploadFile(file, path);
   };
 
-  // --- NEW: Sub-Location Persistence ---
-  const fetchSubLocations = async (locationId: string) => {
+  const fetchSubLocations = async (locationId: string, query?: string) => {
       if (!locationId) {
           setActiveSubLocations([]);
           return;
       }
-      const subs = await SupabaseDataService.getSubLocations(locationId);
+      const subs = await SupabaseDataService.getSubLocations(locationId, query);
       setActiveSubLocations(subs);
   };
 
   const addSubLocationToDb = async (name: string, locationId: string) => {
       if (!selectedCompanyId) throw new Error("No company selected");
       
-      // FIX: Optimistic Update Only (Don't re-fetch immediately)
-      // This ensures the new item STAYS in the list so BarcodeScanner can select it.
       setActiveSubLocations(prev => {
           if (prev.includes(name)) return prev;
           const newList = [...prev, name].sort();
@@ -876,10 +850,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
               locationId,
               companyId: selectedCompanyId
           });
-          // Do NOT call fetchSubLocations(locationId) here.
-          // Trust the optimistic update.
       } catch (e) {
-          // Revert on error
           console.error(e);
           setActiveSubLocations(prev => prev.filter(s => s !== name));
           throw e;
