@@ -3,7 +3,7 @@ import { useInventory } from "@/context/InventoryContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Barcode, Scan, Check, MapPin, Keyboard, Camera, X, Loader2, Plus, AlertCircle, PackagePlus } from "lucide-react";
+import { Barcode, Scan, Check, MapPin, Keyboard, Camera, X, Loader2, Plus, AlertCircle, PackagePlus, ChevronsUpDown } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Html5Qrcode, Html5QrcodeSupportedFormats, Html5QrcodeScannerState } from "html5-qrcode";
 import { useUser } from "@/context/UserContext"; 
@@ -20,6 +20,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { cn } from "@/lib/utils";
 
 interface BarcodeScannerProps {
     onResult?: (code: string) => void;
@@ -36,6 +50,10 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
     // Sub-Location State
     const [newSubLocation, setNewSubLocation] = useState("");
     const [selectedSubLocation, setSelectedSubLocation] = useState<string>("");
+    
+    // Search State
+    const [subLocationSearchOpen, setSubLocationSearchOpen] = useState(false);
+    const [subLocationSearchQuery, setSubLocationSearchQuery] = useState("");
 
     // New State for "Item Not Found" Workflow
     const [isNotFoundOpen, setIsNotFoundOpen] = useState(false);
@@ -51,7 +69,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
     const { 
         itemMaster, 
         auditedItems, 
-        updateAuditedItem, 
+        addItemToAudit, // 🔥 FIX: Using safe atomic delta function instead of updateAuditedItem
         locations, 
         assignments,
         activeSubLocations, 
@@ -71,17 +89,19 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
     const isProcessingRef = useRef(false); 
     const scannerElementId = "barcode-scanner-element";
 
-    // Ref for the hidden input that captures hardware scanner data
     const hardwareInputRef = useRef<HTMLInputElement>(null);
-
     const isPickerMode = !!onResult;
 
+    // Debounced Search Effect
     useEffect(() => {
-        if (selectedLocation) {
-            fetchSubLocations(selectedLocation).catch(console.error);
-            setSelectedSubLocation("");
-        }
-    }, [selectedLocation]);
+        if (!selectedLocation) return;
+        
+        const timer = setTimeout(() => {
+            fetchSubLocations(selectedLocation, subLocationSearchQuery);
+        }, 300); 
+
+        return () => clearTimeout(timer);
+    }, [subLocationSearchQuery, selectedLocation]);
 
     const handleAddSubLocation = async () => {
         const trimmedName = newSubLocation.trim();
@@ -93,8 +113,6 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
 
         try {
             await addSubLocationToDb(trimmedName, selectedLocation);
-            
-            // Set the selection to the cleaned name
             setSelectedSubLocation(trimmedName);
             setNewSubLocation("");
             toast.success(`Sub-location saved: ${trimmedName}`);
@@ -110,7 +128,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
             return true;
         }
 
-        if (typeof updateAuditedItem !== 'function') return false;
+        if (typeof addItemToAudit !== 'function') return false;
 
         try {
             if (!locationId) {
@@ -134,9 +152,6 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                 try {
                     const globalItem = await fetchGlobalItem(barcode);
                     if (globalItem) {
-                        // Found in Global Master! Import it as a "Surplus" item automatically
-                        // This sets System Qty = 0 and Physical Qty = 1 (initially)
-                        
                         const newItemPayload = {
                             sku: globalItem.sku,
                             name: globalItem.name || "Unnamed Item",
@@ -144,11 +159,10 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                             physicalQuantity: 1 
                         };
                         
-                        // Add to current audit assignment
                         await addSurplusItem(newItemPayload);
                         
                         toast.success("Item Found in Master", { 
-                            description: `${newItemPayload.name} added to audit (Sys Qty: 0).`,
+                            description: `${newItemPayload.name} added to audit.`,
                             className: "border-blue-500 bg-blue-50"
                         });
                         
@@ -159,7 +173,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                 }
             }
 
-            // If still not found (not in closing stock AND not in global master)
+            // If still not found
             if (!masterItem) {
                 const itemInOtherLocation = itemMaster.find(item => item.sku === barcode);
                 if (itemInOtherLocation) {
@@ -174,44 +188,30 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                 return false;
             }
 
-            // ... (Normal Scan Logic for Existing Items) ...
-            const existingAuditedItem = auditedItems.find(item => item.sku === masterItem.sku && item.location === locationName);
-            const targetItem = existingAuditedItem || masterItem;
+            // 🔥 TRUE ATOMIC SCAN LOGIC
+            // Instead of doing math here, we blindly send exactly "+1" to the DB via the Context.
+            const targetItem = auditedItems.find(item => item.sku === masterItem.sku && item.location === locationName) || masterItem;
 
-            const existingAuditorEntries = targetItem.auditorEntries || [];
-            const currentEntry = existingAuditorEntries.find(e => e.auditorId === currentUser?.id && e.subLocation === selectedSubLocation);
-            const currentQuantity = currentEntry?.quantityFound || 0;
-            const newQuantity = currentQuantity + 1;
-
-            const itemToUpdate = {
-                ...targetItem,
-                physicalQuantity: newQuantity, 
-                status: 'pending' as const,
-                lastAudited: new Date().toISOString(),
-                notes: targetItem.notes || masterItem.notes,
-            };
-
-            await updateAuditedItem(
-                itemToUpdate,
+            await addItemToAudit(
+                targetItem,
+                1, // Always add exactly 1 per scan
                 currentUser?.id,
-                currentUser?.email || currentUser?.name || 'Unknown Auditor',
+                currentUser?.name || currentUser?.email || 'Unknown Auditor',
                 selectedSubLocation
             );
 
-            const otherEntriesSum = existingAuditorEntries
-                .filter(e => !(e.auditorId === currentUser?.id && e.subLocation === selectedSubLocation))
-                .reduce((sum, e) => sum + e.quantityFound, 0);
-            
-            const totalPhysicalQuantity = otherEntriesSum + newQuantity;
-            const isMatch = totalPhysicalQuantity === masterItem.systemQuantity;
+            // Calculate UI state (Optimistic for Toast display)
+            const previousTotal = targetItem.physicalQuantity || 0;
+            const optimisticTotal = previousTotal + 1;
+            const isMatch = optimisticTotal === masterItem.systemQuantity;
 
             toast(isMatch ? "Matched!" : "Item Scanned", {
                 description: (
                     <div className="flex flex-col gap-1">
                         <span className="font-semibold">{masterItem.name}</span>
                         <div className="flex flex-col text-xs">
-                           <span>Count in {selectedSubLocation}: {newQuantity}</span>
-                           <span>Total All Locs: {totalPhysicalQuantity} / {masterItem.systemQuantity}</span>
+                           <span>Added +1 to {selectedSubLocation}</span>
+                           <span>Total All Locs: {optimisticTotal} / {masterItem.systemQuantity}</span>
                         </div>
                     </div>
                 ),
@@ -229,7 +229,6 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
     const handleAddSurplus = async () => {
         if (!newItem.sku || !newItem.name) return;
         try {
-            // FIX: Ensure quantity is a valid number before submission
             const submissionItem = {
                 ...newItem,
                 physicalQuantity: Number(newItem.physicalQuantity) || 0
@@ -295,17 +294,13 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
         setIsAddDialogOpen(true);
     };
 
-    // Hardware Scanner Logic using a focused hidden input
     useEffect(() => {
         let focusInterval: any;
-        
-        // FIX: Stop aggressive focusing if a dialog is open or user is typing manually
         if (isHardwareScannerMode && !isAddDialogOpen && !isNotFoundOpen) {
-            // Keep focusing the hidden input so it captures OTG scanner data
             focusInterval = setInterval(() => {
-                // Check if user is focused on another valid input (like manual barcode entry or sublocation input)
                 const activeElement = document.activeElement;
-                const isUserTyping = activeElement?.tagName === 'INPUT' && activeElement !== hardwareInputRef.current;
+                const isSearchingSubLoc = activeElement?.getAttribute("cmdk-input") !== null;
+                const isUserTyping = (activeElement?.tagName === 'INPUT' && activeElement !== hardwareInputRef.current) || isSearchingSubLoc;
 
                 if (hardwareInputRef.current && activeElement !== hardwareInputRef.current && !isUserTyping) {
                     hardwareInputRef.current.focus();
@@ -315,13 +310,12 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
         return () => {
             if (focusInterval) clearInterval(focusInterval);
         };
-    }, [isHardwareScannerMode, isAddDialogOpen, isNotFoundOpen]); // Added dependencies
+    }, [isHardwareScannerMode, isAddDialogOpen, isNotFoundOpen]);
 
     const handleHardwareInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter') {
             e.preventDefault();
             const barcode = e.currentTarget.value.trim();
-            
             if (barcode) {
                 handleItemScan(barcode, selectedLocation).then(success => { 
                     if (success) setScannedBarcode(barcode); 
@@ -329,8 +323,6 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
             } else {
                 toast.error("Empty scan - Try scanning again");
             }
-            
-            // Clear input for next scan
             e.currentTarget.value = "";
         }
     };
@@ -347,7 +339,6 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
     const handleStartHardwareScanner = () => {
         if (!isPickerMode && !selectedLocation) { toast.error("Location required"); return; }
         if (!isPickerMode && !selectedSubLocation) { toast.error("Select Sub-Location first"); return; }
-        
         setIsHardwareScannerMode(true);
         handleStopScanning(); 
         toast.success("Hardware scanner activated");
@@ -361,73 +352,34 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
     const handleStartScanning = async () => {
         if (!isPickerMode && !selectedLocation) { toast.error("Location required"); return; }
         if (!isPickerMode && !selectedSubLocation) { toast.error("Select Sub-Location first"); return; }
-
         if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
             toast.error("Protocol Error", { description: "Camera access requires HTTPS or localhost." });
             return;
         }
-
         setIsScanning(true);
         setIsHardwareScannerMode(false);
         setIsProcessing(false);
         isProcessingRef.current = false;
-
         setTimeout(async () => {
             if (html5QrCodeRef.current) {
-                try {
-                    if (html5QrCodeRef.current.isScanning) {
-                        await html5QrCodeRef.current.stop();
-                    }
-                    html5QrCodeRef.current.clear();
-                } catch (e) { console.warn("Cleanup warning:", e); }
+                try { if (html5QrCodeRef.current.isScanning) await html5QrCodeRef.current.stop(); html5QrCodeRef.current.clear(); } catch (e) { console.warn("Cleanup warning:", e); }
             }
-
             const html5QrCode = new Html5Qrcode(scannerElementId);
             html5QrCodeRef.current = html5QrCode;
-
-            const config = {
-                fps: 10,
-                aspectRatio: 1.0, 
-                qrbox: 250, 
-                disableFlip: false, 
-                formatsToSupport: [
-                    Html5QrcodeSupportedFormats.QR_CODE,
-                    Html5QrcodeSupportedFormats.CODE_128,
-                    Html5QrcodeSupportedFormats.CODE_39,
-                    Html5QrcodeSupportedFormats.EAN_13,
-                    Html5QrcodeSupportedFormats.UPC_A,
-                ]
-            };
-
-            const startCamera = async (cameraIdOrConfig: string | { facingMode: string }) => {
-                await html5QrCode.start(cameraIdOrConfig, config, onScanSuccess, () => {});
-            };
-
+            const config = { fps: 10, aspectRatio: 1.0, qrbox: 250, disableFlip: false, formatsToSupport: [ Html5QrcodeSupportedFormats.QR_CODE, Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39, Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.UPC_A ] };
+            const startCamera = async (cameraIdOrConfig: string | { facingMode: string }) => { await html5QrCode.start(cameraIdOrConfig, config, onScanSuccess, () => {}); };
             try {
                 const devices = await Html5Qrcode.getCameras();
                 if (devices && devices.length > 0) {
                      const backCamera = devices.find(d => d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('rear') || d.label.toLowerCase().includes('environment'));
                      await startCamera(backCamera ? backCamera.id : devices[0].id);
-                } else {
-                    await startCamera({ facingMode: "environment" });
-                }
-            } catch (finalError: any) {
-                 setIsScanning(false);
-                 toast.error("Camera Failed", { description: "Could not start video stream." });
-            }
+                } else { await startCamera({ facingMode: "environment" }); }
+            } catch (finalError: any) { setIsScanning(false); toast.error("Camera Failed", { description: "Could not start video stream." }); }
         }, 300);
     };
 
     const handleStopScanning = async () => {
-        try {
-            if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
-                await html5QrCodeRef.current.stop();
-                html5QrCodeRef.current.clear();
-            }
-            setIsScanning(false);
-        } catch (err) {
-            setIsScanning(false);
-        }
+        try { if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) { await html5QrCodeRef.current.stop(); html5QrCodeRef.current.clear(); } setIsScanning(false); } catch (err) { setIsScanning(false); }
     };
 
     const handleManualSubmit = (e: React.FormEvent) => {
@@ -495,20 +447,53 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                                         </Button>
                                     </div>
                                     
-                                    <Select value={selectedSubLocation} onValueChange={setSelectedSubLocation}>
-                                        <SelectTrigger className="w-full bg-white">
-                                            <SelectValue placeholder="Select active sub-location..." />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {activeSubLocations.length === 0 ? (
-                                                <SelectItem value="default" disabled>Add a sub-location above</SelectItem>
-                                            ) : (
-                                                activeSubLocations.map((sl) => (
-                                                    <SelectItem key={sl} value={sl}>{sl}</SelectItem>
-                                                ))
-                                            )}
-                                        </SelectContent>
-                                    </Select>
+                                    <Popover open={subLocationSearchOpen} onOpenChange={setSubLocationSearchOpen}>
+                                        <PopoverTrigger asChild>
+                                            <Button
+                                                variant="outline"
+                                                role="combobox"
+                                                aria-expanded={subLocationSearchOpen}
+                                                className="w-full justify-between bg-white text-gray-700 font-normal"
+                                            >
+                                                {selectedSubLocation
+                                                    ? selectedSubLocation
+                                                    : "Select active sub-location..."}
+                                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-[300px] p-0">
+                                            <Command shouldFilter={false}>
+                                                <CommandInput 
+                                                    placeholder="Search sub-location..." 
+                                                    value={subLocationSearchQuery}
+                                                    onValueChange={setSubLocationSearchQuery}
+                                                />
+                                                <CommandList>
+                                                    <CommandEmpty>No sub-location found.</CommandEmpty>
+                                                    <CommandGroup>
+                                                        {activeSubLocations.map((sl) => (
+                                                            <CommandItem
+                                                                key={sl}
+                                                                value={sl}
+                                                                onSelect={(currentValue) => {
+                                                                    setSelectedSubLocation(currentValue);
+                                                                    setSubLocationSearchOpen(false);
+                                                                }}
+                                                            >
+                                                                <Check
+                                                                    className={cn(
+                                                                        "mr-2 h-4 w-4",
+                                                                        selectedSubLocation === sl ? "opacity-100" : "opacity-0"
+                                                                    )}
+                                                                />
+                                                                {sl}
+                                                            </CommandItem>
+                                                        ))}
+                                                    </CommandGroup>
+                                                </CommandList>
+                                            </Command>
+                                        </PopoverContent>
+                                    </Popover>
                                     {!selectedSubLocation && <p className="text-xs text-red-500 mt-1 ml-1">* Required to start scanning</p>}
                                 </div>
                             )}

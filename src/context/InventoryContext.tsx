@@ -306,7 +306,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     await loadData();
   };
 
-  // TRUE ATOMIC SCAN LOGIC
   const updateAuditedItem = async (
     item: InventoryItem,
     auditorId?: string,
@@ -345,93 +344,39 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
                 targetId = existingFork.id;
                 targetAssignmentId = selectedIdNum;
             } else {
-                // Should theoretically never happen with strict closing stock matching
                 targetId = undefined as any; 
                 targetAssignmentId = selectedIdNum;
             }
         }
     }
 
-    // IF THIS IS A SCANNER ACTION (It has an auditor and a sublocation)
-    if (auditorId && auditorName && subLocation && targetId) {
-        // 1. Calculate the exact Delta (+1, +5, etc) to send to the database
-        const oldItem = auditedItems.find(i => i.id === targetId) || itemMaster.find(i => i.id === targetId);
-        
-        // Sum up everything this specific user previously found in this specific sub-location
-        const oldEntriesSumForUserSubloc = (oldItem?.auditorEntries || [])
-            .filter(e => e.auditorId === auditorId && e.subLocation === subLocation)
-            .reduce((sum, e) => sum + (e.quantityFound || 0), 0);
+    // LEGACY / MASS UPDATE FLOW
+    const currentAttributes = item.customAttributes || {};
+    let updatedAttributes = { ...currentAttributes };
 
-        // The scanner passes the 'item.physicalQuantity' as the NEW desired total for this user/sublocation
-        const quantityToAdd = (item.physicalQuantity || 0) - oldEntriesSumForUserSubloc;
-
-        if (quantityToAdd !== 0) {
-            const newEntry = {
-                auditorId,
-                auditorName,
-                quantityFound: quantityToAdd,
-                auditedAt: new Date().toISOString(),
-                subLocation
-            };
-
-            // 2. Optimistic UI Update (Makes the app feel instant)
-            setAuditedItemsState(prev => {
-                const idx = prev.findIndex(i => i.id === targetId);
-                const old = prev[idx] || oldItem;
-                if (!old) return prev;
-                
-                const newTotalPhys = (old.physicalQuantity || 0) + quantityToAdd;
-                const newStatus = newTotalPhys === old.systemQuantity ? "matched" : "discrepancy";
-
-                const updatedItem = {
-                    ...old,
-                    physicalQuantity: newTotalPhys,
-                    status: newStatus,
-                    lastAudited: new Date().toISOString(),
-                    auditorEntries: [...(old.auditorEntries || []), newEntry]
-                };
-
-                if (idx >= 0) {
-                    const newArr = [...prev];
-                    newArr[idx] = updatedItem;
-                    return newArr;
-                }
-                return [...prev, updatedItem];
-            });
-
-            // 3. Database Atomic Update (Prevents race conditions)
-            await SupabaseDataService.secureRecordScan(targetId, newEntry, quantityToAdd);
-        }
-
-    } else {
-        // LEGACY / MASS UPDATE FLOW (For bulk saves without specific sublocations)
-        const currentAttributes = item.customAttributes || {};
-        let updatedAttributes = { ...currentAttributes };
-
-        const unitPrice = parseFloat(currentAttributes['unit_price'] || 0);
-        let effectivePrice = unitPrice;
-        if (!effectivePrice) {
-           const priceKey = Object.keys(currentAttributes).find(k => 
-             ['price', 'rate', 'cost', 'mrp', 'unit price'].includes(k.toLowerCase())
-           );
-           if (priceKey) {
-              const val = String(currentAttributes[priceKey]).replace(/[^0-9.-]+/g, "");
-              effectivePrice = parseFloat(val) || 0;
-              if (effectivePrice > 0) updatedAttributes['unit_price'] = effectivePrice; 
-           }
-        }
-        updatedAttributes['physical_value'] = effectivePrice * (item.physicalQuantity || 0);
-
-        const itemToUpdate: InventoryItem = {
-          ...item,
-          id: targetId, 
-          assignmentId: targetAssignmentId, 
-          customAttributes: updatedAttributes
-        };
-
-        await SupabaseDataService.setAuditedItems([itemToUpdate]);
-        await loadData();
+    const unitPrice = parseFloat(currentAttributes['unit_price'] || 0);
+    let effectivePrice = unitPrice;
+    if (!effectivePrice) {
+       const priceKey = Object.keys(currentAttributes).find(k => 
+         ['price', 'rate', 'cost', 'mrp', 'unit price'].includes(k.toLowerCase())
+       );
+       if (priceKey) {
+          const val = String(currentAttributes[priceKey]).replace(/[^0-9.-]+/g, "");
+          effectivePrice = parseFloat(val) || 0;
+          if (effectivePrice > 0) updatedAttributes['unit_price'] = effectivePrice; 
+       }
     }
+    updatedAttributes['physical_value'] = effectivePrice * (item.physicalQuantity || 0);
+
+    const itemToUpdate: InventoryItem = {
+      ...item,
+      id: targetId, 
+      assignmentId: targetAssignmentId, 
+      customAttributes: updatedAttributes
+    };
+
+    await SupabaseDataService.setAuditedItems([itemToUpdate]);
+    await loadData();
   };
 
   const updateItemRemark = async (itemId: string, remark: string) => {
@@ -596,11 +541,15 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       (i) => (i.id === barcode || i.sku === barcode) && i.location === locationName
     );
     if (!item) throw new Error(`Item not found`);
-    // Fallback scan behavior
+    
+    // FIX: Fallback scanItem (used outside of standard sublocation flows)
+    const newTotal = (item.physicalQuantity ?? 0) + 1;
+    const newStatus = newTotal === item.systemQuantity ? "matched" : "discrepancy";
+    
     await updateAuditedItem({
       ...item,
-      physicalQuantity: (item.physicalQuantity ?? 0) + 1,
-      status: "pending",
+      physicalQuantity: newTotal,
+      status: newStatus,
     });
   };
 
@@ -641,12 +590,15 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         subLocation: subLocation || "General"
     };
 
+    // 🔥 FIX: Correctly evaluate the instant UI status update instead of hardcoding "pending"
+    const newStatus = newTotal === masterItem.systemQuantity ? "matched" : "discrepancy";
+
     setAuditedItemsState(prev => {
         const idx = prev.findIndex(i => i.id === masterItem.id);
         const updatedItem = {
             ...existingItem,
             physicalQuantity: newTotal,
-            status: "pending" as const,
+            status: newStatus, // FIX APPLIED HERE
             lastAudited: new Date().toISOString(),
             auditorEntries: [...(existingItem.auditorEntries || []), newEntry]
         };
