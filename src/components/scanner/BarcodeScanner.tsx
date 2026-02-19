@@ -69,7 +69,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
     const { 
         itemMaster, 
         auditedItems, 
-        addItemToAudit, // 🔥 FIX: Using safe atomic delta function instead of updateAuditedItem
+        addItemToAudit, 
         locations, 
         assignments,
         activeSubLocations, 
@@ -188,24 +188,23 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                 return false;
             }
 
-            // 🔥 TRUE ATOMIC SCAN LOGIC
-            // Instead of doing math here, we blindly send exactly "+1" to the DB via the Context.
             const targetItem = auditedItems.find(item => item.sku === masterItem.sku && item.location === locationName) || masterItem;
 
+            // ✅ STEP 5 FIX: Await the database function securely
             await addItemToAudit(
                 targetItem,
                 1, // Always add exactly 1 per scan
                 currentUser?.id,
-                currentUser?.name || currentUser?.email || 'Unknown Auditor',
+                (currentUser as any)?.name || currentUser?.email || 'Unknown Auditor',
                 selectedSubLocation
             );
 
-            // Calculate UI state (Optimistic for Toast display)
+            // ✅ ONLY SHOW SUCCESS AFTER DB CONFIRMS IT WORKED
             const previousTotal = targetItem.physicalQuantity || 0;
             const optimisticTotal = previousTotal + 1;
             const isMatch = optimisticTotal === masterItem.systemQuantity;
 
-            toast(isMatch ? "Matched!" : "Item Scanned", {
+            toast.success("Scan recorded successfully!", {
                 description: (
                     <div className="flex flex-col gap-1">
                         <span className="font-semibold">{masterItem.name}</span>
@@ -220,8 +219,9 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
 
             return true;
         } catch (error: any) {
-            console.error("Scanning failed:", error);
-            toast.error("Scanning Error", { description: error.message });
+            // ❌ SHOW ERROR IF DB FAILS TO RECORD THE SCAN
+            console.error("Scan failed:", error);
+            toast.error(error.message || "Failed to record scan. Please try again.");
             return false;
         }
     };

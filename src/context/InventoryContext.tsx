@@ -140,7 +140,7 @@ interface InventoryContextType {
   addLocation: (location: Omit<Location, "id">) => Promise<void>;
   updateLocation: (location: Location) => Promise<void>;
   deleteLocation: (locationId: string) => Promise<void>;
-  scanItem: (barcode: string, location: string) => void;
+  scanItem: (barcode: string, location: string) => Promise<void>;
   searchItem: (query: string) => InventoryItem[];
   addItemToAudit: (
     item: InventoryItem,
@@ -148,7 +148,7 @@ interface InventoryContextType {
     auditorId?: string,
     auditorName?: string,
     subLocation?: string
-  ) => void;
+  ) => Promise<void>;
   
   addSurplusItem: (
     item: { sku: string; name: string; category: string; physicalQuantity: number }
@@ -536,21 +536,20 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     await loadData();
   };
 
+  // ✅ STEP 3 FIX: Use atomic function instead of JavaScript math
   const scanItem = async (barcode: string, locationName: string) => {
     const item = itemMaster.find(
       (i) => (i.id === barcode || i.sku === barcode) && i.location === locationName
     );
     if (!item) throw new Error(`Item not found`);
     
-    // FIX: Fallback scanItem (used outside of standard sublocation flows)
-    const newTotal = (item.physicalQuantity ?? 0) + 1;
-    const newStatus = newTotal === item.systemQuantity ? "matched" : "discrepancy";
-    
-    await updateAuditedItem({
-      ...item,
-      physicalQuantity: newTotal,
-      status: newStatus,
-    });
+    await addItemToAudit(
+      item,
+      1, // quantity = 1
+      currentUser?.id,
+      (currentUser as any)?.name || currentUser?.email || "Unknown",
+      undefined // no sublocation specified
+    );
   };
 
   const searchItem = (query: string): InventoryItem[] => {
@@ -565,6 +564,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     );
   };
 
+  // ✅ STEP 2 FIX: Database update happens FIRST
   const addItemToAudit = async (
     item: InventoryItem,
     quantity: number,
@@ -573,46 +573,59 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     subLocation?: string
   ) => {
     if (quantity < 0) return;
+    
     const masterItem = itemMaster.find(
       (i) => i.sku === item.sku && i.location === item.location
     );
     if (!masterItem) throw new Error(`Item not in master list`);
     
-    const existingItem = auditedItems.find(i => i.id === masterItem.id) || masterItem;
-    const currentTotal = existingItem.physicalQuantity || 0;
-    const newTotal = currentTotal + quantity;
-
     const newEntry = {
-        auditorId: auditorId || "unknown",
-        auditorName: auditorName || "Unknown",
-        quantityFound: quantity,
-        auditedAt: new Date().toISOString(),
-        subLocation: subLocation || "General"
+      auditorId: auditorId || "unknown",
+      auditorName: auditorName || "Unknown",
+      quantityFound: quantity,
+      auditedAt: new Date().toISOString(),
+      subLocation: subLocation || "General"
     };
 
-    // 🔥 FIX: Correctly evaluate the instant UI status update instead of hardcoding "pending"
-    const newStatus = newTotal === masterItem.systemQuantity ? "matched" : "discrepancy";
+    if (!masterItem.id) {
+      throw new Error("Item ID missing - cannot record scan");
+    }
 
-    setAuditedItemsState(prev => {
+    try {
+      // Step 1: Atomic database update FIRST
+      await SupabaseDataService.secureRecordScan(
+        masterItem.id, 
+        newEntry, 
+        quantity
+      );
+
+      // Step 2: Update UI ONLY after database confirms success
+      const existingItem = auditedItems.find(i => i.id === masterItem.id) || masterItem;
+      const currentTotal = existingItem.physicalQuantity || 0;
+      const newTotal = currentTotal + quantity;
+      const newStatus = newTotal === masterItem.systemQuantity ? "matched" : "discrepancy";
+
+      setAuditedItemsState(prev => {
         const idx = prev.findIndex(i => i.id === masterItem.id);
         const updatedItem = {
-            ...existingItem,
-            physicalQuantity: newTotal,
-            status: newStatus, // FIX APPLIED HERE
-            lastAudited: new Date().toISOString(),
-            auditorEntries: [...(existingItem.auditorEntries || []), newEntry]
+          ...existingItem,
+          physicalQuantity: newTotal,
+          status: newStatus,
+          lastAudited: new Date().toISOString(),
+          auditorEntries: [...(existingItem.auditorEntries || []), newEntry]
         };
 
         if (idx >= 0) {
-            const newArr = [...prev];
-            newArr[idx] = updatedItem;
-            return newArr;
+          const newArr = [...prev];
+          newArr[idx] = updatedItem;
+          return newArr;
         }
         return [...prev, updatedItem];
-    });
+      });
 
-    if (masterItem.id) {
-        await SupabaseDataService.secureRecordScan(masterItem.id, newEntry, quantity);
+    } catch (error: any) {
+      console.error("Scan recording failed:", error);
+      throw new Error(`Failed to record scan: ${error.message}`);
     }
   };
 
