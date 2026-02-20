@@ -63,7 +63,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
         sku: "",
         name: "",
         category: "",
-        physicalQuantity: 1 as number | string // Allow string for empty input state
+        physicalQuantity: 1 as number | string 
     });
 
     const { 
@@ -144,10 +144,8 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
             const locationObj = locations.find(loc => loc.id === locationId);
             const locationName = locationObj?.name || '';
             
-            // 1. Try to find item in the current Assignment (Closing Stock)
             let masterItem = itemMaster.find(item => (item.sku === barcode) && item.location === locationName);
             
-            // 2. If not found in Closing Stock, check Global Item Master
             if (!masterItem) {
                 try {
                     const globalItem = await fetchGlobalItem(barcode);
@@ -173,7 +171,6 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                 }
             }
 
-            // If still not found
             if (!masterItem) {
                 const itemInOtherLocation = itemMaster.find(item => item.sku === barcode);
                 if (itemInOtherLocation) {
@@ -190,8 +187,8 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
 
             const targetItem = auditedItems.find(item => item.sku === masterItem.sku && item.location === locationName) || masterItem;
 
-            // ✅ STEP 5 FIX: Await the database function securely
-            await addItemToAudit(
+            // 🔥 FIX: Await the accurate real-time total from the Context directly
+            const accurateNewTotal = await addItemToAudit(
                 targetItem,
                 1, // Always add exactly 1 per scan
                 currentUser?.id,
@@ -199,10 +196,8 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                 selectedSubLocation
             );
 
-            // ✅ ONLY SHOW SUCCESS AFTER DB CONFIRMS IT WORKED
-            const previousTotal = targetItem.physicalQuantity || 0;
-            const optimisticTotal = previousTotal + 1;
-            const isMatch = optimisticTotal === masterItem.systemQuantity;
+            // Use the accurate total for the UI feedback
+            const isMatch = accurateNewTotal === masterItem.systemQuantity;
 
             toast.success("Scan recorded successfully!", {
                 description: (
@@ -210,7 +205,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                         <span className="font-semibold">{masterItem.name}</span>
                         <div className="flex flex-col text-xs">
                            <span>Added +1 to {selectedSubLocation}</span>
-                           <span>Total All Locs: {optimisticTotal} / {masterItem.systemQuantity}</span>
+                           <span>Total All Locs: {accurateNewTotal} / {masterItem.systemQuantity}</span>
                         </div>
                     </div>
                 ),
@@ -219,7 +214,6 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
 
             return true;
         } catch (error: any) {
-            // ❌ SHOW ERROR IF DB FAILS TO RECORD THE SCAN
             console.error("Scan failed:", error);
             toast.error(error.message || "Failed to record scan. Please try again.");
             return false;

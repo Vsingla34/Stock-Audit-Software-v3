@@ -142,13 +142,15 @@ interface InventoryContextType {
   deleteLocation: (locationId: string) => Promise<void>;
   scanItem: (barcode: string, location: string) => Promise<void>;
   searchItem: (query: string) => InventoryItem[];
+  
+  // 🔥 FIX: Now returns a Promise<number> so the Scanner knows the exact new total
   addItemToAudit: (
     item: InventoryItem,
     quantity: number,
     auditorId?: string,
     auditorName?: string,
     subLocation?: string
-  ) => Promise<void>;
+  ) => Promise<number>;
   
   addSurplusItem: (
     item: { sku: string; name: string; category: string; physicalQuantity: number }
@@ -536,7 +538,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     await loadData();
   };
 
-  // ✅ STEP 3 FIX: Use atomic function instead of JavaScript math
   const scanItem = async (barcode: string, locationName: string) => {
     const item = itemMaster.find(
       (i) => (i.id === barcode || i.sku === barcode) && i.location === locationName
@@ -545,10 +546,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     
     await addItemToAudit(
       item,
-      1, // quantity = 1
+      1,
       currentUser?.id,
       (currentUser as any)?.name || currentUser?.email || "Unknown",
-      undefined // no sublocation specified
+      undefined 
     );
   };
 
@@ -564,20 +565,21 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     );
   };
 
-  // ✅ STEP 2 FIX: Database update happens FIRST
+  // 🔥 CRITICAL FIX: The UI now safely updates using React's latest real-time state
   const addItemToAudit = async (
     item: InventoryItem,
     quantity: number,
     auditorId?: string,
     auditorName?: string,
     subLocation?: string
-  ) => {
-    if (quantity < 0) return;
+  ): Promise<number> => {
+    if (quantity < 0) return item.physicalQuantity || 0;
     
     const masterItem = itemMaster.find(
       (i) => i.sku === item.sku && i.location === item.location
     );
     if (!masterItem) throw new Error(`Item not in master list`);
+    if (!masterItem.id) throw new Error("Item ID missing - cannot record scan");
     
     const newEntry = {
       auditorId: auditorId || "unknown",
@@ -587,40 +589,43 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       subLocation: subLocation || "General"
     };
 
-    if (!masterItem.id) {
-      throw new Error("Item ID missing - cannot record scan");
-    }
-
     try {
-      // Step 1: Atomic database update FIRST
+      // Step 1: Database Atomic Update First
       await SupabaseDataService.secureRecordScan(
         masterItem.id, 
         newEntry, 
         quantity
       );
 
-      // Step 2: Update UI ONLY after database confirms success
-      const existingItem = auditedItems.find(i => i.id === masterItem.id) || masterItem;
-      const currentTotal = existingItem.physicalQuantity || 0;
-      const newTotal = currentTotal + quantity;
-      const newStatus = newTotal === masterItem.systemQuantity ? "matched" : "discrepancy";
+      // Step 2: Ensure the UI updates dynamically by wrapping it in a Promise
+      return new Promise<number>((resolve) => {
+          setAuditedItemsState(prev => {
+            const idx = prev.findIndex(i => i.id === masterItem.id);
+            // Grab the *most recent* state from React's internal queue
+            const latestItemData = idx >= 0 ? prev[idx] : masterItem;
+            
+            // Calculate the exact new total
+            const newTotal = (latestItemData.physicalQuantity || 0) + quantity;
+            const newStatus = newTotal === latestItemData.systemQuantity ? "matched" : "discrepancy";
 
-      setAuditedItemsState(prev => {
-        const idx = prev.findIndex(i => i.id === masterItem.id);
-        const updatedItem = {
-          ...existingItem,
-          physicalQuantity: newTotal,
-          status: newStatus,
-          lastAudited: new Date().toISOString(),
-          auditorEntries: [...(existingItem.auditorEntries || []), newEntry]
-        };
+            const updatedItem = {
+              ...latestItemData,
+              physicalQuantity: newTotal,
+              status: newStatus,
+              lastAudited: new Date().toISOString(),
+              auditorEntries: [...(latestItemData.auditorEntries || []), newEntry]
+            };
 
-        if (idx >= 0) {
-          const newArr = [...prev];
-          newArr[idx] = updatedItem;
-          return newArr;
-        }
-        return [...prev, updatedItem];
+            // Pass the accurate new total back to the scanner so it displays correctly
+            setTimeout(() => resolve(newTotal), 0);
+
+            if (idx >= 0) {
+              const newArr = [...prev];
+              newArr[idx] = updatedItem;
+              return newArr;
+            }
+            return [...prev, updatedItem];
+          });
       });
 
     } catch (error: any) {
