@@ -72,8 +72,8 @@ const Reports = () => {
     finalizeAudit,
     sendFinalizationOtp,
     submitAudit,
-    fetchSubLocations, // Added to fetch the master list
-    activeSubLocations // Access the master list
+    fetchSubLocations, 
+    activeSubLocations 
   } = useInventory();
 
   const { currentUser } = useUser();
@@ -103,7 +103,6 @@ const Reports = () => {
   const selectedLocation = currentAssignment?.locationId || "";
   const locationName = locations.find(l => l.id === selectedLocation)?.name || "";
 
-  // NEW: Fetch sub-locations when location loads
   useEffect(() => {
     if (selectedLocation) {
         fetchSubLocations(selectedLocation);
@@ -327,6 +326,27 @@ const Reports = () => {
     });
   }, [items, locationName, auditStartDate]);
 
+  // 🔥 NEW: Creates a smart map that groups names by ID and prioritizes emails
+  const auditorMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    baseTableData.forEach(item => {
+      if (!item.auditorEntries) return;
+      item.auditorEntries.forEach((entry: any) => {
+        if (!entry.auditorId) return;
+        
+        const currentMappedName = map[entry.auditorId];
+        const newName = entry.auditorName || "Unknown";
+        
+        if (!currentMappedName) {
+           map[entry.auditorId] = newName;
+        } else if (newName.includes('@') && !currentMappedName.includes('@')) {
+           map[entry.auditorId] = newName;
+        }
+      });
+    });
+    return map;
+  }, [baseTableData]);
+
   const parsePrice = useCallback((val: any): number => {
     if (!val) return 0;
     if (typeof val === 'number') return val;
@@ -532,9 +552,16 @@ const Reports = () => {
 
   const downloadReconciliationReport = useCallback(() => {
     const allAuditors = new Set<string>();
+    
+    // 🔥 Fix: Use the mapped name based on ID
     baseTableData.forEach((item) => {
-      item.auditorEntries.forEach((entry: any) => { allAuditors.add(entry.auditorName); });
+      item.auditorEntries.forEach((entry: any) => { 
+          const mappedName = auditorMap[entry.auditorId] || entry.auditorName;
+          allAuditors.add(mappedName); 
+      });
     });
+    const auditorList = Array.from(allAuditors).sort();
+
     const reportData = baseTableData.map((item) => {
       const { unitPrice, sysValue, phyValue, valueVariance } = getItemValues(item);
       const baseData: any = {
@@ -550,13 +577,16 @@ const Reports = () => {
          baseData["Unit Price"] = unitPrice;
          baseData["System Value"] = sysValue;
       }
-      Array.from(allAuditors).forEach((auditorName) => {
-        const totalQty = (item.auditorEntries || [])
-          .filter((e: any) => e.auditorName === auditorName)
-          .reduce((sum: number, e: any) => sum + (e.quantityFound || 0), 0);
-          
-        baseData[auditorName] = totalQty;
+      
+      // Initialize auditor columns to 0
+      auditorList.forEach(name => { baseData[name] = 0; });
+      
+      // 🔥 Fix: Sum quantities dynamically into the merged columns
+      (item.auditorEntries || []).forEach((entry: any) => {
+          const mappedName = auditorMap[entry.auditorId] || entry.auditorName;
+          baseData[mappedName] += (entry.quantityFound || 0);
       });
+
       baseData.Total = item.physicalQuantity;
       if (hasPricing) {
          baseData["Physical Value"] = phyValue;
@@ -571,7 +601,7 @@ const Reports = () => {
     });
     const locationInfo = locationName ? `_${locationName}` : "";
     generateCSV(reportData, `inventory_reconciliation_report${locationInfo}.csv`);
-  }, [baseTableData, locationName, generateCSV, hasPricing, getItemValues, getSubLocationSummary]);
+  }, [baseTableData, locationName, generateCSV, hasPricing, getItemValues, getSubLocationSummary, auditorMap]);
 
   const downloadDayWiseReport = useCallback(() => {
     if (baseTableData.length === 0) {
@@ -584,9 +614,9 @@ const Reports = () => {
 
     baseTableData.forEach((item) => {
        item.auditorEntries.forEach((entry: any) => {
-           if (entry.auditedAt && entry.auditorName) {
+           if (entry.auditedAt && entry.auditorId) {
                const dateKey = new Date(entry.auditedAt).toLocaleDateString();
-               const auditor = entry.auditorName;
+               const auditor = auditorMap[entry.auditorId] || entry.auditorName; // 🔥 Fix: mapped name
                allAuditors.add(auditor);
                if (!dataMap[dateKey]) dataMap[dateKey] = {};
                dataMap[dateKey][auditor] = (dataMap[dateKey][auditor] || 0) + (entry.quantityFound || 0);
@@ -611,9 +641,8 @@ const Reports = () => {
 
     const locationInfo = locationName ? `_${locationName}` : "";
     generateCSV(reportData, `day_wise_auditor_report${locationInfo}.csv`);
-  }, [baseTableData, locationName, generateCSV]);
+  }, [baseTableData, locationName, generateCSV, auditorMap]);
 
-  // Updated to include BOTH Summary and Detail Logic if user wants csv for both
   const downloadSubLocationReport = useCallback(() => {
      if (baseTableData.length === 0) {
        toast.error("No data to generate report.");
@@ -644,7 +673,8 @@ const Reports = () => {
                      subLocMap[subLoc] = { qty: 0, auditors: new Set() };
                  }
                  subLocMap[subLoc].qty += entry.quantityFound;
-                 subLocMap[subLoc].auditors.add(entry.auditorName);
+                 const auditorName = auditorMap[entry.auditorId] || entry.auditorName; // 🔥 Fix: mapped name
+                 subLocMap[subLoc].auditors.add(auditorName);
              });
 
              Object.entries(subLocMap).forEach(([subLoc, data]) => {
@@ -665,7 +695,7 @@ const Reports = () => {
 
      const locationInfo = locationName ? `_${locationName}` : "";
      generateCSV(reportData, `sub_location_report${locationInfo}.csv`);
-  }, [baseTableData, locationName, generateCSV]);
+  }, [baseTableData, locationName, generateCSV, auditorMap]);
 
   const downloadDiscrepancyReport = useCallback(() => {
     const discrepancies = baseTableData.filter((item) => item.variance !== 0);
@@ -715,7 +745,12 @@ const Reports = () => {
 
   const downloadCombinedExcelReport = useCallback(() => {
     const allAuditors = new Set<string>();
-    baseTableData.forEach((item) => { item.auditorEntries.forEach((entry: any) => { allAuditors.add(entry.auditorName); }); });
+    baseTableData.forEach((item) => { 
+        item.auditorEntries.forEach((entry: any) => { 
+            const mappedName = auditorMap[entry.auditorId] || entry.auditorName; // 🔥 Fix: mapped name
+            allAuditors.add(mappedName); 
+        }); 
+    });
     const auditorList = Array.from(allAuditors).sort();
 
     // 1. Reconciliation Sheet
@@ -733,13 +768,13 @@ const Reports = () => {
         row["Unit Price"] = unitPrice;
         row["System Value"] = sysValue;
       }
-      auditorList.forEach((auditorName) => {
-        const totalQty = (item.auditorEntries || [])
-            .filter((e: any) => e.auditorName === auditorName)
-            .reduce((sum: number, e: any) => sum + (e.quantityFound || 0), 0);
-            
-        row[auditorName] = totalQty;
+      
+      auditorList.forEach(name => { row[name] = 0; });
+      (item.auditorEntries || []).forEach((entry: any) => {
+          const mappedName = auditorMap[entry.auditorId] || entry.auditorName;
+          row[mappedName] += (entry.quantityFound || 0);
       });
+      
       row["Physical Qty"] = item.physicalQuantity;
       if (hasPricing) {
         row["Physical Value"] = phyValue;
@@ -811,12 +846,12 @@ const Reports = () => {
     const dayWiseAuditors = new Set<string>();
     baseTableData.forEach((item) => {
        item.auditorEntries.forEach((entry: any) => {
-           if (entry.auditedAt && entry.auditorName) {
+           if (entry.auditedAt && entry.auditorId) {
                const dateKey = new Date(entry.auditedAt).toLocaleDateString();
-               const auditor = entry.auditorName;
+               const auditor = auditorMap[entry.auditorId] || entry.auditorName; // 🔥 Fix: mapped name
                dayWiseAuditors.add(auditor);
                if (!dayDataMap[dateKey]) dayDataMap[dateKey] = {};
-               dataMap[dateKey][auditor] = (dataMap[dateKey][auditor] || 0) + (entry.quantityFound || 0);
+               dayDataMap[dateKey][auditor] = (dayDataMap[dateKey][auditor] || 0) + (entry.quantityFound || 0);
            }
        });
     });
@@ -859,7 +894,8 @@ const Reports = () => {
                      subLocMap[subLoc] = { qty: 0, auditors: new Set() };
                  }
                  subLocMap[subLoc].qty += entry.quantityFound;
-                 subLocMap[subLoc].auditors.add(entry.auditorName);
+                 const auditorName = auditorMap[entry.auditorId] || entry.auditorName; // 🔥 Fix: mapped name
+                 subLocMap[subLoc].auditors.add(auditorName);
                  
                  subLocScannedMap[subLoc] = (subLocScannedMap[subLoc] || 0) + entry.quantityFound;
              });
@@ -880,8 +916,7 @@ const Reports = () => {
          }
     });
 
-    // 4. Sub-Location Summary (NEW: Merging Scanned + Master List)
-    // Combine known scanned locations with the master list 'activeSubLocations' to ensure 0 counts appear
+    // 4. Sub-Location Summary
     const allKnownSubLocs = new Set([...Object.keys(subLocScannedMap), ...activeSubLocations]);
     
     const subLocSummaryData = Array.from(allKnownSubLocs).map(subLoc => {
@@ -921,7 +956,7 @@ const Reports = () => {
     const locationInfo = locationName ? `_${locationName}` : "";
     XLSX.writeFile(wb, `complete_audit_data${locationInfo}.xlsx`);
     toast.success("Combined Excel report downloaded");
-  }, [baseTableData, summary, locationName, companyName, questionnaireAnswers, questions, locations, formatQuestionnaireAnswer, hasPricing, getItemValues, getSubLocationSummary, activeSubLocations]);
+  }, [baseTableData, summary, locationName, companyName, questionnaireAnswers, questions, locations, formatQuestionnaireAnswer, hasPricing, getItemValues, getSubLocationSummary, activeSubLocations, auditorMap]);
 
   const generatePDFReport = useCallback(() => {
     const doc = new jsPDF();

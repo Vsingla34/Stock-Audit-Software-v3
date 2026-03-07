@@ -3,10 +3,12 @@ import React, {
   useContext,
   useState,
   useEffect,
+  useRef
 } from "react";
 import SupabaseDataService from "@/services/SupabaseDataService";
 import { useCompany } from "@/context/CompanyContext";
 import { useUser } from "@/context/UserContext";
+import { supabase } from "@/integrations/supabase/client";
 
 export interface AuditorEntry {
   auditorId: string;
@@ -207,6 +209,22 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const { selectedCompanyId, selectedAssignmentId } = useCompany();
 
+  // 🔥 FIX 2: Debounce the dashboard stats refresh
+  const statsRefreshTimer = useRef<NodeJS.Timeout | null>(null);
+
+  const refreshStatsDebounced = () => {
+    if (statsRefreshTimer.current) clearTimeout(statsRefreshTimer.current);
+    statsRefreshTimer.current = setTimeout(async () => {
+      if (selectedCompanyId && selectedAssignmentId) {
+        const stats = await SupabaseDataService.getInventoryStats(
+          selectedCompanyId,
+          parseInt(String(selectedAssignmentId))
+        );
+        if (stats) setDashboardStats(stats);
+      }
+    }, 2000); // Only fetches a max of once every 2 seconds
+  };
+
   const loadData = async () => {
     if (!selectedCompanyId) return;
     
@@ -273,6 +291,50 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     loadData();
   }, [selectedCompanyId, selectedAssignmentId]);
 
+  // 🔥 FIX 3: Supabase Realtime Subscription (Syncs multiple auditors)
+  useEffect(() => {
+    if (!selectedCompanyId || !selectedAssignmentId) return;
+
+    const channel = supabase
+      .channel(`inventory_items:assignment_${selectedAssignmentId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'inventory_items', filter: `assignment_id=eq.${selectedAssignmentId}` },
+        async (payload) => {
+          // When anyone else scans an item, fetch the fresh data automatically
+          const freshItem = await SupabaseDataService.getSingleItem(payload.new.id);
+          
+          setAuditedItemsState(prev => {
+            const idx = prev.findIndex(i => i.id === freshItem.id);
+            if (idx >= 0) {
+              const newArr = [...prev];
+              newArr[idx] = freshItem;
+              return newArr;
+            }
+            return [...prev, freshItem];
+          });
+          
+          // Update item master so the search bar stays perfectly in sync
+          setItemMasterState(prev => {
+            const idx = prev.findIndex(i => i.id === freshItem.id);
+            if (idx >= 0) {
+              const newArr = [...prev];
+              newArr[idx] = freshItem;
+              return newArr;
+            }
+            return prev;
+          });
+          
+          refreshStatsDebounced();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [selectedCompanyId, selectedAssignmentId]);
+
   const setItemMaster = async (
     items: Omit<InventoryItem, "id">[],
     companyId: string | null
@@ -329,82 +391,27 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     auditorName?: string,
     subLocation?: string
   ) => {
-    let statusToCheck: AuditStatus | undefined;
-    if (selectedAssignmentId) {
-      const assignment = assignments.find(a => a.id === selectedAssignmentId);
-      statusToCheck = assignment?.status;
-    } else {
-      const loc = locations.find(l => l.name === item.location);
-      statusToCheck = loc?.auditStatus;
-    }
+    if (!item.id) throw new Error("Item ID required");
 
-    if (statusToCheck === 'finalized') {
-       throw new Error("Audit is finalized. No further modifications allowed.");
-    }
-    if (statusToCheck === 'submitted') {
-      const isSuperAdmin = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
-      if (!isSuperAdmin) throw new Error(`Audit is ${statusToCheck}. Modifications are restricted to Admins.`);
-    }
+    // 🔥 FIX 4: Use secure atomic attributes update instead of full upsert
+    await SupabaseDataService.updateItemAttributes(
+      item.id,
+      item.customAttributes || {},
+      item.clientRemarks
+    );
+
+    // 🔥 FIX 2: Single item targeted fetch instead of full loadData()
+    const freshItem = await SupabaseDataService.getSingleItem(item.id);
     
-    let targetId = item.id;
-    let targetAssignmentId = item.assignmentId;
-
-    if (selectedAssignmentId) {
-        const selectedIdNum = parseInt(selectedAssignmentId);
-        if (targetAssignmentId !== selectedIdNum) {
-            const existingFork = auditedItems.find(i => 
-                i.sku === item.sku && 
-                i.location === item.location && 
-                i.assignmentId === selectedIdNum
-            );
-            if (existingFork) {
-                targetId = existingFork.id;
-                targetAssignmentId = selectedIdNum;
-            } else {
-                targetId = undefined as any; 
-                targetAssignmentId = selectedIdNum;
-            }
-        }
-    }
-
-    const currentAttributes = item.customAttributes || {};
-    let updatedAttributes = { ...currentAttributes };
-
-    let unitPrice = 0;
-    const priceKeywords = ['unit price', 'price', 'rate', 'cost', 'mrp', 'unit cost', 'item value', 'value', 'unit_price'];
-    const uglyValueKeywords = ['system value', 'system_value', 'physical value', 'physical_value', 'sys value', 'phy value', 'val var'];
-
-    Object.keys(updatedAttributes).forEach(key => {
-        const lowerK = key.trim().toLowerCase();
-        
-        if (priceKeywords.includes(lowerK)) {
-            if (unitPrice === 0) {
-                const valStr = String(updatedAttributes[key]).replace(/[^0-9.-]+/g, "");
-                unitPrice = parseFloat(valStr) || 0;
-            }
-            delete updatedAttributes[key]; 
-        }
-
-        if (uglyValueKeywords.includes(lowerK)) {
-            delete updatedAttributes[key]; 
-        }
+    setAuditedItemsState(prev => {
+      const idx = prev.findIndex(i => i.id === freshItem.id);
+      if (idx >= 0) {
+        const newArr = [...prev];
+        newArr[idx] = freshItem;
+        return newArr;
+      }
+      return [...prev, freshItem];
     });
-
-    if (unitPrice > 0) {
-        updatedAttributes['Unit Price'] = unitPrice; 
-        updatedAttributes['System Value'] = Number((unitPrice * (item.systemQuantity || 0)).toFixed(4));
-        updatedAttributes['Physical Value'] = Number((unitPrice * (item.physicalQuantity || 0)).toFixed(4));
-    }
-
-    const itemToUpdate: InventoryItem = {
-      ...item,
-      id: targetId, 
-      assignmentId: targetAssignmentId, 
-      customAttributes: updatedAttributes
-    };
-
-    await SupabaseDataService.setAuditedItems([itemToUpdate]);
-    await loadData();
   };
 
   const updateItemRemark = async (itemId: string, remark: string) => {
@@ -574,7 +581,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
       item,
       1, 
       currentUser?.id,
-      currentUser?.email || "Unknown Auditor", // 🔥 FORCED EMAIL HERE
+      currentUser?.email || "Unknown Auditor", 
       undefined 
     );
   };
@@ -595,7 +602,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     item: InventoryItem,
     quantity: number,
     auditorId?: string,
-    auditorName?: string, // Ignored now
+    auditorName?: string, 
     subLocation?: string
   ): Promise<number> => {
     if (quantity < 0) return item.physicalQuantity || 0;
@@ -608,72 +615,38 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     
     const newEntry = {
       auditorId: currentUser?.id || auditorId || "unknown",
-      auditorName: currentUser?.email || "Unknown Auditor", // 🔥 FORCED EMAIL HERE
+      auditorName: currentUser?.email || "Unknown Auditor", 
       quantityFound: quantity,
       auditedAt: new Date().toISOString(),
       subLocation: subLocation || "General"
     };
 
-    try {
-      await SupabaseDataService.secureRecordScan(
-        masterItem.id, 
-        newEntry, 
-        quantity
-      );
+   try {
+      // 1. Send the scan to the database queue securely
+      await SupabaseDataService.secureRecordScan(masterItem.id, newEntry, quantity);
 
-      if (selectedCompanyId && selectedAssignmentId) {
-          SupabaseDataService.getInventoryStats(selectedCompanyId, parseInt(String(selectedAssignmentId))).then(stats => {
-              if (stats) setDashboardStats(stats);
-          });
-      }
+      // 2. 🔥 FIX 1 & 2: Pull the real server state instantly instead of guessing
+      const freshItem = await SupabaseDataService.getSingleItem(masterItem.id);
 
-      return new Promise<number>((resolve) => {
-          setAuditedItemsState(prev => {
-            const idx = prev.findIndex(i => i.id === masterItem.id);
-            const latestItemData = idx >= 0 ? prev[idx] : masterItem;
-            
-            const currentTotal = latestItemData.physicalQuantity || 0;
-            const newTotal = Number((currentTotal + quantity).toFixed(4));
-            
-            const newStatus = newTotal === latestItemData.systemQuantity ? "matched" : "discrepancy";
-
-            const updatedAttributes = { ...(latestItemData.customAttributes || {}) };
-            let unitPrice = updatedAttributes['Unit Price'] || updatedAttributes['unit_price'];
-
-            if (typeof unitPrice === 'number' && unitPrice > 0) {
-                updatedAttributes['Unit Price'] = unitPrice; 
-                updatedAttributes['Physical Value'] = Number((newTotal * unitPrice).toFixed(4));
-                
-                delete updatedAttributes['physical_value'];
-                delete updatedAttributes['system_value'];
-                delete updatedAttributes['unit_price'];
-                delete updatedAttributes['value'];
-            }
-
-            const updatedItem = {
-              ...latestItemData,
-              physicalQuantity: newTotal,
-              status: newStatus,
-              lastAudited: new Date().toISOString(),
-              auditorEntries: [...(latestItemData.auditorEntries || []), newEntry],
-              customAttributes: updatedAttributes
-            };
-
-            setTimeout(() => resolve(newTotal), 0);
-
-            if (idx >= 0) {
-              const newArr = [...prev];
-              newArr[idx] = updatedItem;
-              return newArr;
-            }
-            return [...prev, updatedItem];
-          });
+      // 3. Update the UI
+      setAuditedItemsState(prev => {
+        const idx = prev.findIndex(i => i.id === freshItem.id);
+        if (idx >= 0) {
+          const newArr = [...prev];
+          newArr[idx] = freshItem;
+          return newArr;
+        }
+        return [...prev, freshItem];
       });
 
+      // 4. Update Dashboard Stats smoothly
+      refreshStatsDebounced();
+
+      return freshItem.physicalQuantity || 0;
     } catch (error: any) {
       console.error("Scan recording failed:", error);
       throw new Error(`Failed to record scan: ${error.message}`);
-    }
+    } 
   };
 
   const addSurplusItem = async (item: { sku: string; name: string; category: string; physicalQuantity: number }) => {
@@ -683,7 +656,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     const loc = locations.find(l => l.id === assignment.locationId);
     if (!loc) throw new Error("Location not found.");
     
-    const userName = currentUser?.email || "Unknown Auditor"; // 🔥 FORCED EMAIL HERE
+    const userName = currentUser?.email || "Unknown Auditor"; 
     
     await SupabaseDataService.addSurplusItem({
         item,
@@ -741,7 +714,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         throw new Error("Audit is finalized. Cannot edit questionnaire.");
     }
 
-    const answeredBy = currentUser?.email || "Unknown"; // 🔥 FORCED EMAIL HERE
+    const answeredBy = currentUser?.email || "Unknown"; 
     const location = locations.find(loc => loc.id === answer.locationId);
     const companyId = location?.companyId;
 
@@ -836,7 +809,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     <InventoryContext.Provider
       value={{
         itemMaster,
-        closingStock: [],
+        closingStock: itemMaster.filter(i => i.status === 'pending'), // 🔥 FIX 5: Dynamic mapping instead of hardcoded []
         auditedItems,
         assignments, 
         locations,
