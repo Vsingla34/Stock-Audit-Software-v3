@@ -143,7 +143,6 @@ interface InventoryContextType {
   scanItem: (barcode: string, location: string) => Promise<void>;
   searchItem: (query: string) => InventoryItem[];
   
-  // 🔥 FIX: Now returns a Promise<number> so the Scanner knows the exact new total
   addItemToAudit: (
     item: InventoryItem,
     quantity: number,
@@ -193,6 +192,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
   const [selectedLocationFilter, setSelectedLocationFilter] = useState<string>("all");
   const [activeSubLocations, setActiveSubLocations] = useState<string[]>([]);
   
+  const [dashboardStats, setDashboardStats] = useState({
+    totalItems: 0,
+    auditedItems: 0,
+    pendingItems: 0,
+    matched: 0,
+    discrepancies: 0
+  });
+
   const { currentUser } = useUser();   
   const [questionnaireAnswers, setQuestionnaireAnswers] = useState<
     QuestionnaireAnswer[]
@@ -220,6 +227,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
     try {
       const assignmentIdParam = selectedAssignmentId ? parseInt(String(selectedAssignmentId), 10) : null;
+      
+      if (assignmentIdParam) {
+          const stats = await SupabaseDataService.getInventoryStats(selectedCompanyId, assignmentIdParam);
+          if (stats) setDashboardStats(stats);
+      } else {
+          setDashboardStats({ totalItems: 0, auditedItems: 0, pendingItems: 0, matched: 0, discrepancies: 0 });
+      }
+
       const dbItems = await SupabaseDataService.getItemMaster(selectedCompanyId, assignmentIdParam);
       setItemMasterState(dbItems);
 
@@ -293,7 +308,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
           name: metadataSource?.name || stockItem.name || "Unnamed Item",
           category: metadataSource?.category || stockItem.category || "",
           location: stockItem.location as string,
-          systemQuantity: stockItem.systemQuantity as number,
+          systemQuantity: Number(stockItem.systemQuantity) || 0,
           physicalQuantity: 0,
           status: "pending",
           auditorEntries: [],
@@ -352,23 +367,34 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         }
     }
 
-    // LEGACY / MASS UPDATE FLOW
     const currentAttributes = item.customAttributes || {};
     let updatedAttributes = { ...currentAttributes };
 
-    const unitPrice = parseFloat(currentAttributes['unit_price'] || 0);
-    let effectivePrice = unitPrice;
-    if (!effectivePrice) {
-       const priceKey = Object.keys(currentAttributes).find(k => 
-         ['price', 'rate', 'cost', 'mrp', 'unit price'].includes(k.toLowerCase())
-       );
-       if (priceKey) {
-          const val = String(currentAttributes[priceKey]).replace(/[^0-9.-]+/g, "");
-          effectivePrice = parseFloat(val) || 0;
-          if (effectivePrice > 0) updatedAttributes['unit_price'] = effectivePrice; 
-       }
+    let unitPrice = 0;
+    const priceKeywords = ['unit price', 'price', 'rate', 'cost', 'mrp', 'unit cost', 'item value', 'value', 'unit_price'];
+    const uglyValueKeywords = ['system value', 'system_value', 'physical value', 'physical_value', 'sys value', 'phy value', 'val var'];
+
+    Object.keys(updatedAttributes).forEach(key => {
+        const lowerK = key.trim().toLowerCase();
+        
+        if (priceKeywords.includes(lowerK)) {
+            if (unitPrice === 0) {
+                const valStr = String(updatedAttributes[key]).replace(/[^0-9.-]+/g, "");
+                unitPrice = parseFloat(valStr) || 0;
+            }
+            delete updatedAttributes[key]; 
+        }
+
+        if (uglyValueKeywords.includes(lowerK)) {
+            delete updatedAttributes[key]; 
+        }
+    });
+
+    if (unitPrice > 0) {
+        updatedAttributes['Unit Price'] = unitPrice; 
+        updatedAttributes['System Value'] = Number((unitPrice * (item.systemQuantity || 0)).toFixed(4));
+        updatedAttributes['Physical Value'] = Number((unitPrice * (item.physicalQuantity || 0)).toFixed(4));
     }
-    updatedAttributes['physical_value'] = effectivePrice * (item.physicalQuantity || 0);
 
     const itemToUpdate: InventoryItem = {
       ...item,
@@ -500,7 +526,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
           system_quantity: item.systemQuantity,
           physical_quantity: audited?.physicalQuantity || 0,
           status: audited?.status || 'pending',
-          variance: (audited?.physicalQuantity || 0) - item.systemQuantity,
+          variance: Number(((audited?.physicalQuantity || 0) - item.systemQuantity).toFixed(4)),
           remarks: item.clientRemarks,
           auditor_entries: audited?.auditorEntries
         };
@@ -546,9 +572,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     
     await addItemToAudit(
       item,
-      1,
+      1, 
       currentUser?.id,
-      (currentUser as any)?.name || currentUser?.email || "Unknown",
+      currentUser?.email || "Unknown Auditor", // 🔥 FORCED EMAIL HERE
       undefined 
     );
   };
@@ -565,12 +591,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     );
   };
 
-  // 🔥 CRITICAL FIX: The UI now safely updates using React's latest real-time state
   const addItemToAudit = async (
     item: InventoryItem,
     quantity: number,
     auditorId?: string,
-    auditorName?: string,
+    auditorName?: string, // Ignored now
     subLocation?: string
   ): Promise<number> => {
     if (quantity < 0) return item.physicalQuantity || 0;
@@ -582,41 +607,58 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     if (!masterItem.id) throw new Error("Item ID missing - cannot record scan");
     
     const newEntry = {
-      auditorId: auditorId || "unknown",
-      auditorName: auditorName || "Unknown",
+      auditorId: currentUser?.id || auditorId || "unknown",
+      auditorName: currentUser?.email || "Unknown Auditor", // 🔥 FORCED EMAIL HERE
       quantityFound: quantity,
       auditedAt: new Date().toISOString(),
       subLocation: subLocation || "General"
     };
 
     try {
-      // Step 1: Database Atomic Update First
       await SupabaseDataService.secureRecordScan(
         masterItem.id, 
         newEntry, 
         quantity
       );
 
-      // Step 2: Ensure the UI updates dynamically by wrapping it in a Promise
+      if (selectedCompanyId && selectedAssignmentId) {
+          SupabaseDataService.getInventoryStats(selectedCompanyId, parseInt(String(selectedAssignmentId))).then(stats => {
+              if (stats) setDashboardStats(stats);
+          });
+      }
+
       return new Promise<number>((resolve) => {
           setAuditedItemsState(prev => {
             const idx = prev.findIndex(i => i.id === masterItem.id);
-            // Grab the *most recent* state from React's internal queue
             const latestItemData = idx >= 0 ? prev[idx] : masterItem;
             
-            // Calculate the exact new total
-            const newTotal = (latestItemData.physicalQuantity || 0) + quantity;
+            const currentTotal = latestItemData.physicalQuantity || 0;
+            const newTotal = Number((currentTotal + quantity).toFixed(4));
+            
             const newStatus = newTotal === latestItemData.systemQuantity ? "matched" : "discrepancy";
+
+            const updatedAttributes = { ...(latestItemData.customAttributes || {}) };
+            let unitPrice = updatedAttributes['Unit Price'] || updatedAttributes['unit_price'];
+
+            if (typeof unitPrice === 'number' && unitPrice > 0) {
+                updatedAttributes['Unit Price'] = unitPrice; 
+                updatedAttributes['Physical Value'] = Number((newTotal * unitPrice).toFixed(4));
+                
+                delete updatedAttributes['physical_value'];
+                delete updatedAttributes['system_value'];
+                delete updatedAttributes['unit_price'];
+                delete updatedAttributes['value'];
+            }
 
             const updatedItem = {
               ...latestItemData,
               physicalQuantity: newTotal,
               status: newStatus,
               lastAudited: new Date().toISOString(),
-              auditorEntries: [...(latestItemData.auditorEntries || []), newEntry]
+              auditorEntries: [...(latestItemData.auditorEntries || []), newEntry],
+              customAttributes: updatedAttributes
             };
 
-            // Pass the accurate new total back to the scanner so it displays correctly
             setTimeout(() => resolve(newTotal), 0);
 
             if (idx >= 0) {
@@ -640,7 +682,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     if (!assignment) throw new Error("Assignment not found.");
     const loc = locations.find(l => l.id === assignment.locationId);
     if (!loc) throw new Error("Location not found.");
-    const userName = (currentUser as any)?.name || currentUser?.email || "Unknown Auditor";
+    
+    const userName = currentUser?.email || "Unknown Auditor"; // 🔥 FORCED EMAIL HERE
+    
     await SupabaseDataService.addSurplusItem({
         item,
         companyId: selectedCompanyId,
@@ -658,50 +702,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const getInventorySummary = () => {
-    const totalItems = itemMaster.filter((item) => item.location !== "").length;
-    const activeAuditedItems = auditedItems.filter(
-      (i) => i.status && i.status !== "pending"
-    );
-    const auditedItemKeys = new Set(
-      activeAuditedItems.map((i) => `${i.sku}-${i.location}`)
-    );
-    const auditedItemsCount = auditedItemKeys.size;
-    let matched = 0;
-    let discrepancies = 0;
-    itemMaster.forEach((masterItem) => {
-      if (masterItem.location === "") return;
-      const audited = activeAuditedItems.find(
-        (a) => a.sku === masterItem.sku && a.location === masterItem.location
-      );
-      if (audited) {
-        if (audited.status === "matched") matched++;
-        else if (audited.status === "discrepancy") discrepancies++;
-      }
-    });
-    return { totalItems, auditedItems: auditedItemsCount, pendingItems: totalItems - auditedItemsCount, matched, discrepancies };
+      return dashboardStats;
   };
 
   const getLocationSummary = (locationName: string) => {
-    const locationItems = itemMaster.filter(
-      (item) => item.location === locationName
-    );
-    const locationAuditedItems = auditedItems.filter(
-      (item) => item.location === locationName && item.status && item.status !== "pending"
-    );
-    const totalItems = locationItems.length;
-    const auditedItemsCount = locationAuditedItems.length;
-    let matched = 0;
-    let discrepancies = 0;
-    locationItems.forEach((masterItem) => {
-      const audited = locationAuditedItems.find(
-        (a) => a.sku === masterItem.sku && a.location === masterItem.location
-      );
-      if (audited) {
-        if (audited.status === "matched") matched++;
-        else if (audited.status === "discrepancy") discrepancies++;
-      }
-    });
-    return { totalItems, auditedItems: auditedItemsCount, pendingItems: totalItems - auditedItemsCount, matched, discrepancies };
+      return dashboardStats;
   };
 
   const addQuestion = async (question: Omit<Question, "id">) => {
@@ -736,7 +741,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
         throw new Error("Audit is finalized. Cannot edit questionnaire.");
     }
 
-    const answeredBy = (currentUser as any)?.name || currentUser?.email;
+    const answeredBy = currentUser?.email || "Unknown"; // 🔥 FORCED EMAIL HERE
     const location = locations.find(loc => loc.id === answer.locationId);
     const companyId = location?.companyId;
 

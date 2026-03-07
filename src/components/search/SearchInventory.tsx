@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useInventory, InventoryItem } from "@/context/InventoryContext";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Search, Plus, Minus, MapPin, AlertCircle, PackagePlus, ScanBarcode, ArrowLeft } from "lucide-react";
+import { Search, Plus, Minus, MapPin, AlertCircle, PackagePlus, ScanBarcode, ArrowLeft, Check, ChevronsUpDown } from "lucide-react";
 import { toast } from "sonner";
 import { useUser } from "@/context/UserContext";
 import { useCompany } from "@/context/CompanyContext";
@@ -19,15 +19,37 @@ import {
 import { Label } from "@/components/ui/label";
 import { BarcodeScanner } from "@/components/scanner/BarcodeScanner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { cn } from "@/lib/utils";
 
 export const SearchInventory = () => {
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<InventoryItem[]>([]);
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   
+  // Decimal & Unit State
+  const [isDecimalMode, setIsDecimalMode] = useState(false);
+  const [decimalQuantities, setDecimalQuantities] = useState<Record<string, string>>({});
+  const [selectedUnits, setSelectedUnits] = useState<Record<string, string>>({});
+
   // Sub-Location State
   const [newSubLocation, setNewSubLocation] = useState("");
   const [selectedSubLocation, setSelectedSubLocation] = useState<string>("");
+  const [subLocationSearchOpen, setSubLocationSearchOpen] = useState(false);
+  const [subLocationSearchQuery, setSubLocationSearchQuery] = useState("");
 
   // New State for Add Dialog
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -36,10 +58,11 @@ export const SearchInventory = () => {
     sku: "",
     name: "",
     category: "",
-    physicalQuantity: 1
+    physicalQuantity: 1 as number | string
   });
 
   const { 
+    itemMaster,
     searchItem, 
     addItemToAudit, 
     addSurplusItem, 
@@ -60,46 +83,42 @@ export const SearchInventory = () => {
   // Fetch sub-locations when location is identified
   useEffect(() => {
     if (activeLocationId) {
-        fetchSubLocations(activeLocationId).catch(console.error);
-        setSelectedSubLocation("");
+        fetchSubLocations(activeLocationId, subLocationSearchQuery).catch(console.error);
     }
-  }, [activeLocationId]); 
-
-  const performSearch = useCallback((query: string) => {
-    if (!query || query.length < 2) {
-      setSearchResults([]);
-      return;
-    }
-
-    const results = searchItem(query);
-    let filteredResults = results;
-    
-    if (activeLocationName) {
-        filteredResults = results.filter(item => item.location === activeLocationName);
-    }
-    
-    setSearchResults(filteredResults);
-    
-    const newQuantities: Record<string, number> = {};
-    filteredResults.forEach(item => {
-      const key = `${item.id}-${item.location}`;
-      newQuantities[key] = quantities[key] || 0;
-    });
-    setQuantities(newQuantities);
-
-  }, [searchItem, activeLocationName, quantities]);
+  }, [activeLocationId, subLocationSearchQuery, fetchSubLocations]); 
 
   useEffect(() => {
-    const delayDebounceFn = setTimeout(() => {
-      performSearch(searchQuery);
-    }, 300); 
+    const timer = setTimeout(() => {
+      setDebouncedQuery(searchQuery);
+    }, 300);
 
-    return () => clearTimeout(delayDebounceFn);
-  }, [searchQuery, performSearch]);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const searchResults = useMemo(() => {
+    if (!debouncedQuery || debouncedQuery.length < 2) {
+      return [];
+    }
+
+    const lowerCaseQuery = debouncedQuery.toLowerCase();
+    
+    let results = itemMaster.filter(item => 
+        item.id?.toLowerCase().includes(lowerCaseQuery) ||
+        item.sku?.toLowerCase().includes(lowerCaseQuery) ||
+        item.name?.toLowerCase().includes(lowerCaseQuery) ||
+        item.category?.toLowerCase().includes(lowerCaseQuery)
+    );
+
+    if (activeLocationName) {
+        results = results.filter(item => item.location === activeLocationName);
+    }
+
+    return results;
+  }, [debouncedQuery, itemMaster, activeLocationName]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    performSearch(searchQuery);
+    setDebouncedQuery(searchQuery);
   };
 
   const getItemKey = (item: InventoryItem) => `${item.id}-${item.location}`;
@@ -114,7 +133,7 @@ export const SearchInventory = () => {
 
   const decrementQuantity = (item: InventoryItem) => {
     const itemKey = getItemKey(item);
-    if (quantities[itemKey] > 0) {
+    if ((quantities[itemKey] || 0) > 0) {
       setQuantities(prev => ({
         ...prev,
         [itemKey]: prev[itemKey] - 1
@@ -145,20 +164,47 @@ export const SearchInventory = () => {
         return;
     }
     const itemKey = getItemKey(item);
-    const quantity = quantities[itemKey] || 0;
+    
+    let quantityToAdd = 0;
+    let unitText = "";
+
+    if (isDecimalMode) {
+        quantityToAdd = parseFloat(decimalQuantities[itemKey]) || 0;
+        
+        // Grab the unit directly from the item's metadata or from user selection
+        const itemUploadedUnit = item.customAttributes?.['Unit'];
+        const finalUnit = selectedUnits[itemKey] !== undefined ? selectedUnits[itemKey] : (itemUploadedUnit || "none");
+        
+        if (finalUnit !== "none") unitText = ` ${finalUnit}`;
+    } else {
+        quantityToAdd = quantities[itemKey] || 0;
+    }
+
+    if (quantityToAdd <= 0) {
+        toast.error("Invalid Quantity", { description: "Quantity must be greater than 0." });
+        return;
+    }
     
     try {
       await addItemToAudit(
         item, 
-        quantity,
+        quantityToAdd,
         currentUser?.id,
         currentUser?.email || currentUser?.name || 'Unknown Auditor',
         selectedSubLocation
       );
       
       toast.success("Item added to audit", {
-        description: `Added ${quantity} of ${item.name} to ${selectedSubLocation}`
+        description: `Added ${quantityToAdd}${unitText} of ${item.name} to ${selectedSubLocation}`
       });
+
+      // Clear the specific input field after a successful add
+      if (isDecimalMode) {
+          setDecimalQuantities(prev => ({ ...prev, [itemKey]: "" }));
+      } else {
+          setQuantities(prev => ({ ...prev, [itemKey]: 0 }));
+      }
+
     } catch (error: any) {
       toast.error("Failed to add item", {
         description: error.message || "An error occurred"
@@ -169,7 +215,11 @@ export const SearchInventory = () => {
   const handleAddSurplus = async () => {
     if (!newItem.sku || !newItem.name) return;
     try {
-      await addSurplusItem(newItem);
+      const submissionItem = {
+          ...newItem,
+          physicalQuantity: Number(newItem.physicalQuantity) || 0
+      };
+      await addSurplusItem(submissionItem);
       toast.success("Surplus item added successfully");
       setIsAddOpen(false);
       setSearchQuery(newItem.sku); 
@@ -181,7 +231,7 @@ export const SearchInventory = () => {
     }
   };
 
-  const hasNoResults = searchQuery.length >= 2 && searchResults.length === 0;
+  const hasNoResults = debouncedQuery.length >= 2 && searchResults.length === 0;
 
   return (
     <Card className="w-full shadow-sm border-gray-200">
@@ -228,37 +278,83 @@ export const SearchInventory = () => {
                         </Button>
                     </div>
                     
-                    <Select value={selectedSubLocation} onValueChange={setSelectedSubLocation}>
-                        <SelectTrigger className="w-full bg-white">
-                            <SelectValue placeholder="Select active sub-location..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {activeSubLocations.length === 0 ? (
-                                <SelectItem value="default" disabled>Add a sub-location above</SelectItem>
-                            ) : (
-                                activeSubLocations.map((sl) => (
-                                    <SelectItem key={sl} value={sl}>{sl}</SelectItem>
-                                ))
-                            )}
-                        </SelectContent>
-                    </Select>
+                    <Popover open={subLocationSearchOpen} onOpenChange={setSubLocationSearchOpen}>
+                        <PopoverTrigger asChild>
+                            <Button
+                                variant="outline"
+                                role="combobox"
+                                aria-expanded={subLocationSearchOpen}
+                                className="w-full justify-between bg-white text-gray-700 font-normal"
+                            >
+                                {selectedSubLocation
+                                    ? selectedSubLocation
+                                    : "Select active sub-location..."}
+                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[300px] p-0" align="start">
+                            <Command shouldFilter={false}>
+                                <CommandInput 
+                                    placeholder="Search sub-location..." 
+                                    value={subLocationSearchQuery}
+                                    onValueChange={setSubLocationSearchQuery}
+                                />
+                                <CommandList>
+                                    <CommandEmpty>No sub-location found.</CommandEmpty>
+                                    <CommandGroup>
+                                        {activeSubLocations.map((sl) => (
+                                            <CommandItem
+                                                key={sl}
+                                                value={sl}
+                                                onSelect={(currentValue) => {
+                                                    setSelectedSubLocation(currentValue);
+                                                    setSubLocationSearchOpen(false);
+                                                }}
+                                            >
+                                                <Check
+                                                    className={cn(
+                                                        "mr-2 h-4 w-4",
+                                                        selectedSubLocation === sl ? "opacity-100" : "opacity-0"
+                                                    )}
+                                                />
+                                                {sl}
+                                            </CommandItem>
+                                        ))}
+                                    </CommandGroup>
+                                </CommandList>
+                            </Command>
+                        </PopoverContent>
+                    </Popover>
                     {!selectedSubLocation && <p className="text-xs text-red-500 mt-1 ml-1">* Required to add items</p>}
                 </div>
             </div>
         )}
+
+        <div className="flex items-center gap-2 mb-4 p-3 bg-white rounded-lg border border-gray-200 shadow-sm">
+            <input 
+                type="checkbox" 
+                id="decimal-mode-search" 
+                checked={isDecimalMode} 
+                onChange={(e) => setIsDecimalMode(e.target.checked)}
+                className="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-600 cursor-pointer"
+            />
+            <Label htmlFor="decimal-mode-search" className="text-sm font-medium text-gray-700 cursor-pointer select-none">
+                Enable decimal quantity & measuring units
+            </Label>
+        </div>
 
         <form onSubmit={handleSearch} className="mb-6 relative">
           <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
           <Input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Start typing to search (Name, SKU, or ID)..."
+            placeholder="Start typing to search (Name, SKU, or Category)..."
             className="w-full pl-9 focus:ring-indigo-600 focus:border-indigo-600"
           />
         </form>
 
         {searchResults.length > 0 ? (
-          <div className="border border-gray-200 rounded-md">
+          <div className="border border-gray-200 rounded-md overflow-hidden">
             <div className="grid grid-cols-[1fr_auto] gap-4 p-4 font-medium border-b border-gray-200 bg-gray-50 text-gray-900">
               <div>Item Details</div>
               <div className="text-right">Quantity</div>
@@ -269,67 +365,95 @@ export const SearchInventory = () => {
               const auditorEntries = item.auditorEntries || [];
               const currentUserEntry = auditorEntries.find(e => e.auditorId === currentUser?.id);
               
-              const calculatedTotal = auditorEntries.reduce((sum, entry) => sum + (entry.quantityFound || 0), 0);
+              const calculatedTotal = Number(auditorEntries.reduce((sum, entry) => sum + (entry.quantityFound || 0), 0).toFixed(4));
+
+              // Extract only this specific item's uploaded unit
+              const itemUploadedUnit = item.customAttributes?.['Unit'];
+              const currentSelectedUnit = selectedUnits[itemKey] !== undefined ? selectedUnits[itemKey] : (itemUploadedUnit || "none");
 
               return (
-                <div key={itemKey} className="grid grid-cols-[1fr_auto] gap-4 p-4 border-b border-gray-100 last:border-0">
+                <div key={itemKey} className="grid grid-cols-[1fr_auto] gap-4 p-4 border-b border-gray-100 last:border-0 items-start hover:bg-gray-50/50 transition-colors">
                   <div>
                     <h3 className="font-medium text-gray-900">{item.name}</h3>
                     <div className="text-sm text-gray-500">SKU: {item.sku}</div>
-                    <div className="text-sm text-gray-500">Location: {item.location}</div>
-                    <div className="text-sm text-gray-900">System Quantity: {item.systemQuantity}</div>
+                    <div className="text-sm text-gray-500">Category: {item.category || '-'}</div>
+                    <div className="text-sm text-gray-900 mt-1">System Quantity: {item.systemQuantity} {itemUploadedUnit}</div>
                     
                     {auditorEntries.length > 0 && (
-                      <div className="mt-2 text-xs bg-gray-50 p-2 rounded border border-gray-200">
-                        <strong className="text-gray-900">Auditor Breakdown:</strong>
+                      <div className="mt-2 text-xs bg-white p-2 rounded border border-gray-200 shadow-sm">
+                        <strong className="text-gray-900 block mb-1">Auditor Breakdown:</strong>
                         {auditorEntries.map((entry, idx) => (
                           <div key={idx} className={entry.auditorId === currentUser?.id ? "text-indigo-600 font-medium" : "text-gray-600"}>
                             • {entry.auditorName} {entry.subLocation ? `(${entry.subLocation})` : ''}: {entry.quantityFound}
                             {entry.auditorId === currentUser?.id && " (You)"}
                           </div>
                         ))}
-                        <div className="mt-1 font-medium text-gray-900">
-                          Total Physical: {calculatedTotal}
+                        <div className="mt-2 pt-1 border-t border-gray-100 font-medium text-gray-900">
+                          Total Physical: <span className="text-indigo-600">{calculatedTotal}</span>
                         </div>
                       </div>
                     )}
-                    
-                    {currentUserEntry && (
-                      <div className="mt-1 text-xs text-indigo-600">
-                        Your current count: {currentUserEntry.quantityFound}
-                      </div>
-                    )}
                   </div>
-                  <div className="flex flex-col items-end">
-                    <div className="flex items-center space-x-2 mb-2">
-                      <Button 
-                        variant="outline" 
-                        size="icon" 
-                        className="h-8 w-8 hover:bg-indigo-50 hover:text-indigo-600 border-gray-200"
-                        onClick={() => decrementQuantity(item)}
-                      >
-                        <Minus className="h-4 w-4" />
-                      </Button>
-                      <span className="w-8 text-center font-medium text-gray-900">
-                        {quantities[itemKey] || 0}
-                      </span>
-                      <Button 
-                        variant="outline" 
-                        size="icon" 
-                        className="h-8 w-8 hover:bg-indigo-50 hover:text-indigo-600 border-gray-200"
-                        onClick={() => incrementQuantity(item)}
-                      >
-                        <Plus className="h-4 w-4" />
-                      </Button>
-                    </div>
+                  <div className="flex flex-col items-end gap-2">
+                    
+                    {isDecimalMode ? (
+                        <div className="flex items-center gap-2 mb-2">
+                            <Input 
+                                type="number" 
+                                step="any" 
+                                placeholder="Qty" 
+                                value={decimalQuantities[itemKey] || ""} 
+                                onChange={(e) => setDecimalQuantities(prev => ({ ...prev, [itemKey]: e.target.value }))}
+                                className="w-24 h-9 font-medium"
+                            />
+                            <Select 
+                                value={currentSelectedUnit} 
+                                onValueChange={(val) => setSelectedUnits(prev => ({ ...prev, [itemKey]: val }))}
+                            >
+                                <SelectTrigger className="w-[100px] h-9 bg-white">
+                                    <SelectValue placeholder="Unit" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="none">No Unit</SelectItem>
+                                    {/* Only show the unit that was uploaded for this specific item */}
+                                    {itemUploadedUnit && (
+                                        <SelectItem value={itemUploadedUnit}>{itemUploadedUnit}</SelectItem>
+                                    )}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    ) : (
+                        <div className="flex items-center space-x-2 mb-2 bg-white rounded-md border border-gray-200 p-1">
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-7 w-7 hover:bg-gray-100 text-gray-600"
+                            onClick={() => decrementQuantity(item)}
+                          >
+                            <Minus className="h-4 w-4" />
+                          </Button>
+                          <span className="w-8 text-center font-medium text-gray-900">
+                            {quantities[itemKey] || 0}
+                          </span>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-7 w-7 hover:bg-gray-100 text-gray-600"
+                            onClick={() => incrementQuantity(item)}
+                          >
+                            <Plus className="h-4 w-4" />
+                          </Button>
+                        </div>
+                    )}
+
                     <Button 
-                      variant="secondary"
+                      variant="default"
                       size="sm"
-                      className="bg-white hover:bg-indigo-50 border border-gray-200 text-gray-700 hover:text-indigo-700 shadow-sm"
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm w-full"
                       onClick={() => handleAddToAudit(item)}
-                      disabled={!(quantities[itemKey] > 0) || !selectedSubLocation}
+                      disabled={isDecimalMode ? !(parseFloat(decimalQuantities[itemKey]) > 0) || !selectedSubLocation : !(quantities[itemKey] > 0) || !selectedSubLocation}
                     >
-                      Add to Audit
+                      <Check className="h-4 w-4 mr-1" /> Add to Audit
                     </Button>
                   </div>
                 </div>
@@ -371,8 +495,8 @@ export const SearchInventory = () => {
                     <div className="py-2">
                         <BarcodeScanner 
                           onResult={(code) => {
-                             setNewItem(prev => ({ ...prev, sku: code }));
-                             setIsScanningNewItem(false);
+                              setNewItem(prev => ({ ...prev, sku: code }));
+                              setIsScanningNewItem(false);
                           }} 
                         />
                         <Button 
@@ -428,9 +552,16 @@ export const SearchInventory = () => {
                         <Input 
                           id="qty" 
                           type="number"
-                          min="1"
+                          step="any"
+                          min="0.01"
                           value={newItem.physicalQuantity} 
-                          onChange={(e) => setNewItem({...newItem, physicalQuantity: parseInt(e.target.value) || 0})}
+                          onChange={(e) => {
+                              const val = e.target.value;
+                              setNewItem({
+                                  ...newItem,
+                                  physicalQuantity: val === "" ? "" : parseFloat(val)
+                              });
+                          }}
                         />
                       </div>
                       

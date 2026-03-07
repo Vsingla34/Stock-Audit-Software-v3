@@ -25,7 +25,8 @@ export const InventoryOverview = () => {
     locations, 
     assignments, 
     submitAudit,
-    itemMaster
+    itemMaster,
+    auditedItems // 🔥 FIX: Pulled in the live scanning state
   } = useInventory();
   
   const { selectedAssignmentId } = useCompany();
@@ -46,27 +47,32 @@ export const InventoryOverview = () => {
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
   const isClient = isClientUser();
 
-  // 2. Calculate Stats
+  // 2. Calculate Stats (Now 100% Instant & Reactive)
   const stats = useMemo(() => {
     // Filter items relevant to the current assignment
     const relevantItems = selectedAssignmentId 
       ? itemMaster.filter(item => item.assignmentId === selectedAssignmentId)
       : [];
 
-    const totalStock = relevantItems.reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
+    // 🔥 FIX: Merge the live scanned items into the master list so math updates instantly without refresh
+    const latestItems = relevantItems.map(masterItem => {
+        const liveAuditedItem = auditedItems.find(a => a.id === masterItem.id);
+        return liveAuditedItem || masterItem;
+    });
+
+    const totalStock = latestItems.reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
     
-    const auditedItems = relevantItems.filter(item => item.status && item.status !== 'pending');
+    const activeAuditedItems = latestItems.filter(item => item.status && item.status !== 'pending');
     
     // Total Physical Quantity Found (Stock Found)
-    const auditedStock = auditedItems.reduce((sum, item) => sum + (item.physicalQuantity || 0), 0);
+    const auditedStock = activeAuditedItems.reduce((sum, item) => sum + (item.physicalQuantity || 0), 0);
     
-    const matchedItems = relevantItems.filter(item => item.status === 'matched');
+    const matchedItems = latestItems.filter(item => item.status === 'matched');
     const matchedStock = matchedItems.reduce((sum, item) => sum + (item.physicalQuantity || 0), 0);
     
-    const discrepancyItems = relevantItems.filter(item => item.status === 'discrepancy');
+    const discrepancyItems = latestItems.filter(item => item.status === 'discrepancy');
     
-    // FIX: Calculate Discrepancy as Net Variance (Physical - System)
-    // Negative values (shortages) reduce the total; positive (surpluses) increase it.
+    // Calculate Discrepancy as Net Variance (Physical - System)
     const discrepancyStock = discrepancyItems.reduce((sum, item) => {
         const sys = item.systemQuantity || 0;
         const phy = item.physicalQuantity || 0;
@@ -84,10 +90,10 @@ export const InventoryOverview = () => {
       discrepancyStock,
       progressPercentage,
       pendingStock: totalStock - auditedStock,
-      totalSkus: relevantItems.length,
-      auditedSkus: auditedItems.length
+      totalSkus: latestItems.length,
+      auditedSkus: activeAuditedItems.length
     };
-  }, [itemMaster, selectedAssignmentId]);
+  }, [itemMaster, auditedItems, selectedAssignmentId]); // 🔥 FIX: Added auditedItems to dependencies
 
   const handleSubmitReport = async () => {
     if (!selectedAssignmentId) return;

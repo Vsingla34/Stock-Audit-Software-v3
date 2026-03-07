@@ -295,12 +295,50 @@ class SupabaseDataService {
                               'status', 'lastAudited', 'notes', 'clientRemarks', 'uploadBatchKey', 'assignmentId',
                               'id', 'companyId', 'auditorEntries', 'item_name', 'itemname'];
       
-      const cleanedCustomAttributes = { ...parsedCustomAttributes };
+      const cleanedCustomAttributes: any = { ...parsedCustomAttributes };
       reservedFields.forEach(field => {
         delete cleanedCustomAttributes[field];
         delete cleanedCustomAttributes[field.toLowerCase()];
         delete cleanedCustomAttributes[field.toUpperCase()];
       });
+
+      let unitPrice = 0;
+      let measuringUnit = "";
+      
+      const priceKeywords = ['unit price', 'price', 'rate', 'cost', 'mrp', 'unit cost', 'item value', 'value', 'unit_price'];
+      const uglyValueKeywords = ['system value', 'system_value', 'physical value', 'physical_value', 'sys value', 'phy value', 'val var'];
+      const uomKeywords = ['measuring unit', 'unit', 'uom', 'measure unit'];
+
+      Object.keys(cleanedCustomAttributes).forEach(key => {
+          const lowerK = key.trim().toLowerCase();
+          
+          if (priceKeywords.includes(lowerK)) {
+              if (unitPrice === 0) {
+                  const valStr = String(cleanedCustomAttributes[key]).replace(/[^0-9.-]+/g, "");
+                  unitPrice = parseFloat(valStr) || 0;
+              }
+              delete cleanedCustomAttributes[key]; 
+          }
+
+          if (uglyValueKeywords.includes(lowerK)) {
+              delete cleanedCustomAttributes[key]; 
+          }
+          
+          if (uomKeywords.includes(lowerK)) {
+              if (!measuringUnit) {
+                  measuringUnit = String(cleanedCustomAttributes[key]).trim();
+              }
+              delete cleanedCustomAttributes[key];
+          }
+      });
+
+      if (unitPrice > 0) {
+          cleanedCustomAttributes['unit_price'] = unitPrice; 
+      }
+      
+      if (measuringUnit) {
+          cleanedCustomAttributes['Unit'] = measuringUnit;
+      }
 
       return {
         id: item.id,
@@ -309,8 +347,8 @@ class SupabaseDataService {
         category: itemCategory,
         location: item.location,
         companyId: item.company_id,
-        systemQuantity: item.system_quantity,
-        physicalQuantity: item.physical_quantity,
+        systemQuantity: parseFloat(item.system_quantity) || 0,
+        physicalQuantity: parseFloat(item.physical_quantity) || 0,
         status: item.status as any,
         lastAudited: item.last_audited,
         notes: item.notes,
@@ -446,8 +484,8 @@ class SupabaseDataService {
           location: item.location,
           company_id: companyId,
           assignment_id: null, 
-          system_quantity: item.systemQuantity || 0,
-          physical_quantity: item.physical_quantity || 0,
+          system_quantity: parseFloat(item.systemQuantity as any) || 0,
+          physical_quantity: parseFloat(item.physical_quantity as any) || 0,
           status: item.status || 'pending',
           client_remarks: item.clientRemarks,
           auditor_entries: item.auditorEntries || [],
@@ -479,7 +517,7 @@ class SupabaseDataService {
            location: item.location,
            company_id: companyId,
            assignment_id: assignmentIdInt, 
-           system_quantity: item.systemQuantity,
+           system_quantity: parseFloat(item.systemQuantity as any) || 0,
            physical_quantity: 0, 
            status: 'pending',
            upload_batch_key: item.uploadBatchKey,
@@ -817,6 +855,20 @@ class SupabaseDataService {
       console.error("Database Atomic Update Failed:", error);
       throw new Error("Failed to record scan securely. Please try again.");
     }
+  }
+
+  // 🔥 NEW: Fetch Server-Side Inventory Stats Instantly
+  public async getInventoryStats(companyId: string, assignmentId: number): Promise<any> {
+    const { data, error } = await supabase.rpc('get_inventory_stats', {
+      p_company_id: companyId,
+      p_assignment_id: assignmentId
+    });
+
+    if (error) {
+      console.error("Error fetching inventory stats:", error);
+      return null;
+    }
+    return data;
   }
 }
 

@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Building, Boxes, CheckCircle2, AlertCircle } from "lucide-react";
+import { Building, Boxes, CheckCircle2, AlertCircle, User } from "lucide-react";
 import { useUser } from "@/context/UserContext"; 
 
 interface LocationAuditSummaryProps {
@@ -23,7 +23,7 @@ export const LocationAuditSummary = ({
   hideDropdown = false,
   className 
 }: LocationAuditSummaryProps) => {
-  const { locations, itemMaster } = useInventory(); 
+  const { locations, itemMaster, auditedItems } = useInventory(); 
   const { currentUser } = useUser(); 
   const [internalLocationId, setInternalLocationId] = useState<string>("");
   const { accessibleLocations } = useUserAccess();
@@ -32,30 +32,50 @@ export const LocationAuditSummary = ({
   const selectedLocation = externalLocationId !== undefined ? externalLocationId : internalLocationId;
   const selectedLocationObj = locations.find(loc => loc.id === selectedLocation);
   
-  // Calculate Stats based on Total Stock Quantity (System Qty) instead of unique SKUs
   const stats = useMemo(() => {
     if (!selectedLocationObj) return null;
 
     const locationName = selectedLocationObj.name;
-    // Filter items belonging to the selected location
     const locationItems = itemMaster.filter(i => i.location === locationName);
 
-    // 1. Calculate Total Volume (Sum of all System Quantities)
-    const totalStock = locationItems.reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
+    // Merge live scanned data with the master data
+    const latestItems = locationItems.map(masterItem => {
+        const liveAuditedItem = auditedItems.find(a => a.id === masterItem.id);
+        return liveAuditedItem || masterItem;
+    });
+
+    // Also include any newly added surplus items that belong to this location
+    auditedItems.forEach(liveItem => {
+        if (liveItem.location === locationName && !latestItems.find(i => i.id === liveItem.id)) {
+            latestItems.push(liveItem);
+        }
+    });
+
+    // 1. Total System Volume
+    const totalStock = latestItems.reduce((sum, item) => sum + (Number(item.systemQuantity) || 0), 0);
     
-    // 2. Calculate Audited Volume (Sum of System Quantities for items NOT pending)
-    const auditedStock = locationItems
-        .filter(i => i.status && i.status !== 'pending')
-        .reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
+    // 2. Total Physical Volume
+    const activeAuditedItems = latestItems.filter(i => i.status && i.status !== 'pending');
+    const auditedStock = activeAuditedItems.reduce((sum, item) => sum + (Number(item.physicalQuantity) || 0), 0);
     
-    // 3. Calculate Matched Volume (Sum of System Quantities for items matching exactly)
-    const matchedStock = locationItems
-        .filter(i => i.status === 'matched')
-        .reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
+    // 3. Matched Physical Volume
+    const matchedItems = latestItems.filter(i => i.status === 'matched');
+    const matchedStock = matchedItems.reduce((sum, item) => sum + (Number(item.physicalQuantity) || 0), 0);
+
+    // 4. 🔥 NEW: Calculate My Personal Scanned Volume
+    const myScannedStock = latestItems.reduce((total, item) => {
+        if (!currentUser?.id || !item.auditorEntries) return total;
+        
+        // Find all entries made by this specific user
+        const myEntries = item.auditorEntries.filter(e => e.auditorId === currentUser.id);
+        
+        // Sum up the quantities from those specific entries
+        const mySum = myEntries.reduce((sum, entry) => sum + (Number(entry.quantityFound) || 0), 0);
+        return total + mySum;
+    }, 0);
 
     const pendingStock = Math.max(0, totalStock - auditedStock);
     
-    // Percentages based on quantity/volume
     const matchPercentage = totalStock > 0 ? Math.round((matchedStock / totalStock) * 100) : 0;
     const progressPercentage = totalStock > 0 ? Math.round((auditedStock / totalStock) * 100) : 0;
 
@@ -63,11 +83,11 @@ export const LocationAuditSummary = ({
         totalStock,
         auditedStock,
         pendingStock,
-        matchedStock,
         matchPercentage,
-        progressPercentage
+        progressPercentage,
+        myScannedStock // Exported for the UI
     };
-  }, [selectedLocationObj, itemMaster]);
+  }, [selectedLocationObj, itemMaster, auditedItems, currentUser]); // Instant reactivity
 
   return (
     <Card className={`shadow-sm border-gray-200 ${className}`}>
@@ -147,6 +167,15 @@ export const LocationAuditSummary = ({
                     <div className="text-xs font-semibold text-violet-700 uppercase tracking-wide mb-1">Match Rate (Qty)</div>
                     <div className="text-xl font-bold text-gray-900">{stats.matchPercentage}%</div>
                   </div>
+
+                  {/* 🔥 NEW: My Scans Box (Spans 2 columns to look balanced) */}
+                  <div className="col-span-2 rounded-xl bg-cyan-50 p-3 border border-cyan-200 flex flex-col justify-between shadow-sm">
+                    <div className="flex items-center gap-1.5 mb-1">
+                        <User className="h-4 w-4 text-cyan-700" />
+                        <span className="text-xs font-bold text-cyan-800 uppercase tracking-wide">My Personal Scans</span>
+                    </div>
+                    <div className="text-2xl font-black text-cyan-900">{stats.myScannedStock.toLocaleString()}</div>
+                  </div>
                 </div>
 
                 {/* Progress Bar (Quantity Based) */}
@@ -158,7 +187,7 @@ export const LocationAuditSummary = ({
                   <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-100 border border-gray-100">
                     <div
                       className="h-full bg-indigo-600 rounded-full transition-all duration-700 ease-out shadow-[0_0_10px_rgba(79,70,229,0.3)]"
-                      style={{ width: `${stats.progressPercentage}%` }}
+                      style={{ width: `${Math.min(stats.progressPercentage, 100)}%` }}
                     />
                   </div>
                 </div>
