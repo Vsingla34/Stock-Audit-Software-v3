@@ -32,24 +32,29 @@ export const LocationAuditSummary = ({
   const selectedLocation = externalLocationId !== undefined ? externalLocationId : internalLocationId;
   const selectedLocationObj = locations.find(loc => loc.id === selectedLocation);
   
-  const stats = useMemo(() => {
+ const stats = useMemo(() => {
     if (!selectedLocationObj) return null;
 
     const locationName = selectedLocationObj.name;
-    const locationItems = itemMaster.filter(i => i.location === locationName);
+    
+    // 🔥 PERFORMANCE FIX: O(N) Hash Map merge
+    const itemMap = new Map();
 
-    // Merge live scanned data with the master data
-    const latestItems = locationItems.map(masterItem => {
-        const liveAuditedItem = auditedItems.find(a => a.id === masterItem.id);
-        return liveAuditedItem || masterItem;
-    });
-
-    // Also include any newly added surplus items that belong to this location
-    auditedItems.forEach(liveItem => {
-        if (liveItem.location === locationName && !latestItems.find(i => i.id === liveItem.id)) {
-            latestItems.push(liveItem);
+    // 1. Put all master items for this location into the map
+    itemMaster.forEach(item => {
+        if (item.location === locationName) {
+            itemMap.set(item.id, item);
         }
     });
+
+    // 2. Instantly overwrite them with live data, and inject new surplus items
+    auditedItems.forEach(liveItem => {
+        if (liveItem.location === locationName) {
+            itemMap.set(liveItem.id, liveItem);
+        }
+    });
+
+    const latestItems = Array.from(itemMap.values());
 
     // 1. Total System Volume
     const totalStock = latestItems.reduce((sum, item) => sum + (Number(item.systemQuantity) || 0), 0);
@@ -62,15 +67,12 @@ export const LocationAuditSummary = ({
     const matchedItems = latestItems.filter(i => i.status === 'matched');
     const matchedStock = matchedItems.reduce((sum, item) => sum + (Number(item.physicalQuantity) || 0), 0);
 
-    // 4. 🔥 NEW: Calculate My Personal Scanned Volume
+    // 4. Calculate My Personal Scanned Volume
     const myScannedStock = latestItems.reduce((total, item) => {
         if (!currentUser?.id || !item.auditorEntries) return total;
         
-        // Find all entries made by this specific user
-        const myEntries = item.auditorEntries.filter(e => e.auditorId === currentUser.id);
-        
-        // Sum up the quantities from those specific entries
-        const mySum = myEntries.reduce((sum, entry) => sum + (Number(entry.quantityFound) || 0), 0);
+        const myEntries = item.auditorEntries.filter((e: any) => e.auditorId === currentUser.id);
+        const mySum = myEntries.reduce((sum: number, entry: any) => sum + (Number(entry.quantityFound) || 0), 0);
         return total + mySum;
     }, 0);
 
@@ -85,9 +87,9 @@ export const LocationAuditSummary = ({
         pendingStock,
         matchPercentage,
         progressPercentage,
-        myScannedStock // Exported for the UI
+        myScannedStock
     };
-  }, [selectedLocationObj, itemMaster, auditedItems, currentUser]); // Instant reactivity
+  }, [selectedLocationObj, itemMaster, auditedItems, currentUser]);
 
   return (
     <Card className={`shadow-sm border-gray-200 ${className}`}>

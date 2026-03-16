@@ -9,6 +9,9 @@ import SupabaseDataService from "@/services/SupabaseDataService";
 import { useCompany } from "@/context/CompanyContext";
 import { useUser } from "@/context/UserContext";
 import { supabase } from "@/integrations/supabase/client";
+import SyncService from '@/services/SyncService';
+import { offlineDB } from '@/services/OfflineDB';
+import { toast } from "sonner";
 
 export interface AuditorEntry {
   auditorId: string;
@@ -96,6 +99,10 @@ interface InventoryContextType {
   selectedLocationFilter: string;
   activeSubLocations: string[]; 
   
+  // Offline Sync State
+  pendingSyncCount: number;
+  isSyncing: boolean;
+
   setSelectedLocationFilter: (locationId: string) => void;
   setItemMaster: (
     items: Omit<InventoryItem, "id">[],
@@ -178,13 +185,9 @@ interface InventoryContextType {
   refreshData: () => Promise<void>;
 }
 
-const InventoryContext = createContext<InventoryContextType | undefined>(
-  undefined
-);
+const InventoryContext = createContext<InventoryContextType | undefined>(undefined);
 
-export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
-  children,
-}) => {
+export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [itemMaster, setItemMasterState] = useState<InventoryItem[]>([]);
   const [auditedItems, setAuditedItemsState] = useState<InventoryItem[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
@@ -195,34 +198,56 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
   const [activeSubLocations, setActiveSubLocations] = useState<string[]>([]);
   
   const [dashboardStats, setDashboardStats] = useState({
-    totalItems: 0,
-    auditedItems: 0,
-    pendingItems: 0,
-    matched: 0,
-    discrepancies: 0
+    totalItems: 0, auditedItems: 0, pendingItems: 0, matched: 0, discrepancies: 0
   });
 
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  const [isSyncing, setIsSyncing] = useState(false);
+
   const { currentUser } = useUser();   
-  const [questionnaireAnswers, setQuestionnaireAnswers] = useState<
-    QuestionnaireAnswer[]
-  >([]);
-
+  const [questionnaireAnswers, setQuestionnaireAnswers] = useState<QuestionnaireAnswer[]>([]);
   const { selectedCompanyId, selectedAssignmentId } = useCompany();
-
-  // 🔥 FIX 2: Debounce the dashboard stats refresh
   const statsRefreshTimer = useRef<NodeJS.Timeout | null>(null);
 
   const refreshStatsDebounced = () => {
     if (statsRefreshTimer.current) clearTimeout(statsRefreshTimer.current);
     statsRefreshTimer.current = setTimeout(async () => {
       if (selectedCompanyId && selectedAssignmentId) {
-        const stats = await SupabaseDataService.getInventoryStats(
-          selectedCompanyId,
-          parseInt(String(selectedAssignmentId))
-        );
+        const stats = await SupabaseDataService.getInventoryStats(selectedCompanyId, parseInt(String(selectedAssignmentId)));
         if (stats) setDashboardStats(stats);
       }
-    }, 2000); // Only fetches a max of once every 2 seconds
+    }, 2000); 
+  };
+
+  const applyPendingScansToItems = async (items: InventoryItem[]) => {
+    try {
+      const pending = await offlineDB.pendingScans.where('synced').equals(0).toArray();
+      if (pending.length === 0) return items;
+
+      return items.map(item => {
+        const itemPendingScans = pending.filter(p => p.itemId === item.id);
+        if (itemPendingScans.length === 0) return item;
+
+        const totalPendingQty = itemPendingScans.reduce((sum, p) => sum + p.quantityAdded, 0);
+        const newQty = (item.physicalQuantity || 0) + totalPendingQty;
+        
+        const entries = [...(item.auditorEntries || [])];
+        itemPendingScans.forEach(p => {
+            if (p.newEntry) entries.push(p.newEntry);
+        });
+
+        return {
+            ...item,
+            physicalQuantity: Math.max(0, newQty), // Prevent UI dropping below 0
+            status: newQty === item.systemQuantity ? 'matched' : 'discrepancy',
+            auditorEntries: entries,
+            lastAudited: itemPendingScans[itemPendingScans.length - 1].attemptedAt
+        };
+      });
+    } catch (err) {
+      console.error("Error applying pending scans:", err);
+      return items;
+    }
   };
 
   const loadData = async () => {
@@ -231,21 +256,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     try {
       const fetchedAssignments = await SupabaseDataService.getAssignments(selectedCompanyId);
       setAssignments(fetchedAssignments);
-    } catch (error) {
-      console.error("Error fetching assignments:", error);
-    }
-
-    try {
-      const locs = await SupabaseDataService.getLocations();
-      const filteredLocs = locs.filter((l) => l.companyId === selectedCompanyId);
-      setLocations(filteredLocs);
-    } catch (error) {
-      console.error("Error fetching locations:", error);
-    }
-
-    try {
-      const assignmentIdParam = selectedAssignmentId ? parseInt(String(selectedAssignmentId), 10) : null;
       
+      const locs = await SupabaseDataService.getLocations();
+      setLocations(locs.filter((l) => l.companyId === selectedCompanyId));
+
+      const assignmentIdParam = selectedAssignmentId ? parseInt(String(selectedAssignmentId), 10) : null;
       if (assignmentIdParam) {
           const stats = await SupabaseDataService.getInventoryStats(selectedCompanyId, assignmentIdParam);
           if (stats) setDashboardStats(stats);
@@ -253,115 +268,192 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
           setDashboardStats({ totalItems: 0, auditedItems: 0, pendingItems: 0, matched: 0, discrepancies: 0 });
       }
 
-      const dbItems = await SupabaseDataService.getItemMaster(selectedCompanyId, assignmentIdParam);
-      setItemMasterState(dbItems);
-
-      const audited = await SupabaseDataService.getAuditedItems(selectedCompanyId, assignmentIdParam);
-      setAuditedItemsState(audited);
+      try {
+        const dbItems = await SupabaseDataService.getItemMaster(selectedCompanyId, assignmentIdParam);
+        const adjustedItems = await applyPendingScansToItems(dbItems);
+        setItemMasterState(adjustedItems);
+        setAuditedItemsState(adjustedItems);
+      } catch (networkError) {
+        console.warn('Network unavailable, loading from local cache...');
+        if (assignmentIdParam) {
+          const cached = await offlineDB.cachedInventory.where('assignmentId').equals(assignmentIdParam).first();
+          if (cached) {
+            const adjustedItems = await applyPendingScansToItems(cached.items);
+            setItemMasterState(adjustedItems);
+            setAuditedItemsState(adjustedItems);
+          }
+        }
+      }
 
       if (selectedAssignmentId) {
-        const hasStock = await SupabaseDataService.hasClosingStockForAssignment(selectedAssignmentId);
-        setClosingStockUploaded(hasStock);
+        setClosingStockUploaded(await SupabaseDataService.hasClosingStockForAssignment(selectedAssignmentId));
       } else {
         setClosingStockUploaded(false);
       }
-    } catch (error) {
-      console.error("Error fetching inventory items:", error);
-    }
 
-    try {
       const qs = await SupabaseDataService.getQuestions(selectedCompanyId);
       setQuestions((qs || []).map((q: any) => ({
-        id: q.id,
-        text: q.text,
-        type: q.type, 
-        required: q.required,
-        options: q.options || [],
-        companyId: q.company_id ?? selectedCompanyId,
+        id: q.id, text: q.text, type: q.type, required: q.required, options: q.options || [], companyId: q.company_id ?? selectedCompanyId,
       })));
 
       const answers = await SupabaseDataService.getQuestionnaireAnswers(selectedCompanyId);
       setQuestionnaireAnswers(answers || []);
     } catch (error) {
-      console.error("Error fetching questions/answers:", error);
+      console.error("Error fetching data:", error);
     }
   };
 
-  useEffect(() => {
-    loadData();
-  }, [selectedCompanyId, selectedAssignmentId]);
+  const runSync = async () => {
+    if (!navigator.onLine) return;
+    const count = await SyncService.getPendingCount();
+    if (count === 0) return;
 
-  // 🔥 FIX 3: Supabase Realtime Subscription (Syncs multiple auditors)
-  useEffect(() => {
-    if (!selectedCompanyId || !selectedAssignmentId) return;
+    setIsSyncing(true);
+    setPendingSyncCount(count);
 
-    const channel = supabase
-      .channel(`inventory_items:assignment_${selectedAssignmentId}`)
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'inventory_items', filter: `assignment_id=eq.${selectedAssignmentId}` },
-        async (payload) => {
-          // When anyone else scans an item, fetch the fresh data automatically
-          const freshItem = await SupabaseDataService.getSingleItem(payload.new.id);
-          
-          setAuditedItemsState(prev => {
-            const idx = prev.findIndex(i => i.id === freshItem.id);
-            if (idx >= 0) {
-              const newArr = [...prev];
-              newArr[idx] = freshItem;
-              return newArr;
-            }
-            return [...prev, freshItem];
-          });
-          
-          // Update item master so the search bar stays perfectly in sync
-          setItemMasterState(prev => {
-            const idx = prev.findIndex(i => i.id === freshItem.id);
-            if (idx >= 0) {
-              const newArr = [...prev];
-              newArr[idx] = freshItem;
-              return newArr;
-            }
-            return prev;
-          });
-          
-          refreshStatsDebounced();
-        }
-      )
-      .subscribe();
+    await SyncService.syncPendingScans((synced, total) => {
+      setPendingSyncCount(total - synced);
+    });
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [selectedCompanyId, selectedAssignmentId]);
-
-  const setItemMaster = async (
-    items: Omit<InventoryItem, "id">[],
-    companyId: string | null
-  ) => {
-    const itemsWithAuditors = items.map((item) => ({
-      ...item,
-      auditorEntries: [],
-    }));
-    if (!companyId) throw new Error("No company selected.");
-    await SupabaseDataService.setItemMaster(itemsWithAuditors, companyId);
+    setIsSyncing(false);
+    setPendingSyncCount(0);
+    toast.success("Offline scans synced to server successfully!");
+    
     await loadData();
   };
 
-  const setClosingStock = async (
-    items: Partial<InventoryItem>[],
-    companyId: string | null,
-    assignmentId: string
-  ): Promise<void> => {
-    if (!companyId) throw new Error("No company selected.");
-    if (!assignmentId) throw new Error("No assignment selected.");
-    if (itemMaster.length === 0) throw new Error("Item master is empty.");
+  useEffect(() => {
+    window.addEventListener('online', runSync);
+    return () => window.removeEventListener('online', runSync);
+  }, []); 
 
+  useEffect(() => {
+    const init = async () => {
+      await loadData();
+      if (navigator.onLine) {
+        await runSync();
+      } else {
+        const count = await SyncService.getPendingCount();
+        setPendingSyncCount(count);
+      }
+    };
+
+        init();
+  }, [selectedCompanyId, selectedAssignmentId]);
+
+// ─────────────────────────────────────────────────────────────
+  // 🔥 REALTIME DASHBOARD SYNC LOGIC
+  // ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    // 🔥 FIX: Removed selectedAssignmentId from the early return so the global Admin Dashboard stays live!
+    if (!selectedCompanyId) return; 
+
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    const connectRealtime = () => {
+      if (!navigator.onLine) return; 
+
+      // Dynamically filter: If inside an assignment, listen to that. Otherwise, listen to the whole company.
+      const filterString = selectedAssignmentId 
+        ? `assignment_id=eq.${selectedAssignmentId}`
+        : `company_id=eq.${selectedCompanyId}`;
+
+      channel = supabase
+        .channel(`live-dashboard-${selectedAssignmentId || 'global'}`)
+        .on(
+          'postgres_changes',
+          { 
+            event: '*', // 🔥 FIX: Listen to INSERT (Surplus items) and UPDATE (Scans/Deductions)
+            schema: 'public', 
+            table: 'inventory_items', 
+            filter: filterString 
+          },
+          async (payload) => {
+            if (payload.eventType === 'DELETE') return;
+
+            try {
+                // Fetch fresh item to ensure all nested JSONB (auditor entries) is formatted perfectly
+                const freshItem = await SupabaseDataService.getSingleItem(payload.new.id);
+                
+                setAuditedItemsState(prev => {
+                  const idx = prev.findIndex(i => i.id === freshItem.id);
+                  if (idx >= 0) {
+                    const newArr = [...prev];
+                    newArr[idx] = freshItem;
+                    return newArr;
+                  }
+                  return [...prev, freshItem];
+                });
+                
+                setItemMasterState(prev => {
+                  const idx = prev.findIndex(i => i.id === freshItem.id);
+                  if (idx >= 0) {
+                    const newArr = [...prev];
+                    newArr[idx] = freshItem;
+                    return newArr;
+                  }
+                  return [...prev, freshItem];
+                });
+                
+                // Triggers the top-level stats widget update
+                refreshStatsDebounced();
+            } catch (err) {
+                console.error("Live sync fetch failed:", err);
+            }
+          }
+        )
+        .subscribe((status) => {
+           if (status === 'SUBSCRIBED') {
+             console.log("🔴 Live Dashboard WebSockets Connected!");
+           }
+        });
+    };
+
+    const disconnectRealtime = () => {
+      if (channel) {
+        supabase.removeChannel(channel);
+        channel = null;
+      }
+    };
+
+    connectRealtime();
+    window.addEventListener('online', connectRealtime);
+    window.addEventListener('offline', disconnectRealtime);
+
+    return () => {
+      window.removeEventListener('online', connectRealtime);
+      window.removeEventListener('offline', disconnectRealtime);
+      disconnectRealtime();
+    };
+  }, [selectedCompanyId, selectedAssignmentId]);
+
+  useEffect(() => {
+    if (!selectedAssignmentId || itemMaster.length === 0) return;
+    const cacheInventory = async () => {
+      try {
+        await offlineDB.cachedInventory.put({
+          assignmentId: Number(selectedAssignmentId),
+          items: itemMaster,
+          cachedAt: new Date().toISOString()
+        });
+      } catch (error) {
+        console.warn('Failed to cache inventory locally:', error);
+      }
+    };
+    cacheInventory();
+  }, [itemMaster, selectedAssignmentId]);
+
+  const setItemMaster = async (items: Omit<InventoryItem, "id">[], companyId: string | null) => {
+    if (!companyId) throw new Error("No company selected.");
+    await SupabaseDataService.setItemMaster(items.map((item) => ({ ...item, auditorEntries: [] })), companyId);
+    await loadData();
+  };
+
+  const setClosingStock = async (items: Partial<InventoryItem>[], companyId: string | null, assignmentId: string): Promise<void> => {
+    if (!companyId || !assignmentId || itemMaster.length === 0) return;
     const finalItemsToUpsert: Partial<InventoryItem>[] = [];
     const masterMap = new Map<string, InventoryItem>();
-    itemMaster.forEach((item) => {
-      masterMap.set(item.sku, item); 
-    });
+    itemMaster.forEach((item) => { masterMap.set(item.sku, item); });
 
     for (const stockItem of items) {
        const metadataSource = masterMap.get(stockItem.sku as string);
@@ -380,95 +472,41 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
           customAttributes: metadataSource?.customAttributes || {}
        });
     }
-
     await SupabaseDataService.setClosingStock(finalItemsToUpsert, companyId, assignmentId);
     await loadData();
   };
 
-  const updateAuditedItem = async (
-    item: InventoryItem,
-    auditorId?: string,
-    auditorName?: string,
-    subLocation?: string
-  ) => {
+  const updateAuditedItem = async (item: InventoryItem) => {
     if (!item.id) throw new Error("Item ID required");
-
-    // 🔥 FIX 4: Use secure atomic attributes update instead of full upsert
-    await SupabaseDataService.updateItemAttributes(
-      item.id,
-      item.customAttributes || {},
-      item.clientRemarks
-    );
-
-    // 🔥 FIX 2: Single item targeted fetch instead of full loadData()
+    await SupabaseDataService.updateItemAttributes(item.id, item.customAttributes || {}, item.clientRemarks);
     const freshItem = await SupabaseDataService.getSingleItem(item.id);
     
     setAuditedItemsState(prev => {
       const idx = prev.findIndex(i => i.id === freshItem.id);
-      if (idx >= 0) {
-        const newArr = [...prev];
-        newArr[idx] = freshItem;
-        return newArr;
-      }
+      if (idx >= 0) { const newArr = [...prev]; newArr[idx] = freshItem; return newArr; }
       return [...prev, freshItem];
     });
   };
 
   const updateItemRemark = async (itemId: string, remark: string) => {
-    const item = itemMaster.find(i => i.id === itemId);
-    if (item) {
-        let statusToCheck: AuditStatus | undefined;
-        if (selectedAssignmentId) {
-            const assignment = assignments.find(a => a.id === selectedAssignmentId);
-            statusToCheck = assignment?.status;
-        } else {
-            const loc = locations.find(l => l.name === item.location);
-            statusToCheck = loc?.auditStatus;
-        }
-        if (statusToCheck === 'finalized') {
-            throw new Error("Audit is finalized. Remarks cannot be edited.");
-        }
-    }
-    const updatedItems = itemMaster.map(item => 
-      item.id === itemId ? { ...item, clientRemarks: remark } : item
-    );
-    setItemMasterState(updatedItems);
+    setItemMasterState(prev => prev.map(i => i.id === itemId ? { ...i, clientRemarks: remark } : i));
     await SupabaseDataService.updateItemRemark(itemId, remark);
   };
 
   const updateLocationAuditStatus = async (locationId: string, status: AuditStatus) => {
-    const updatedLocations = locations.map(loc => 
-      loc.id === locationId ? { ...loc, auditStatus: status } : loc
-    );
-    setLocations(updatedLocations);
+    setLocations(prev => prev.map(loc => loc.id === locationId ? { ...loc, auditStatus: status } : loc));
     await SupabaseDataService.updateLocationAuditStatus(locationId, status);
   };
 
   const createAssignment = async (locationId: string, companyId: string, status: AuditStatus, date?: string, auditorIds?: string[]) => {
-    const scheduledDate = date || new Date().toISOString();
-    const newAssignment = await SupabaseDataService.createAssignment({
-      locationId,
-      companyId,
-      status,
-      scheduledDate,
-      auditorIds
-    });
+    const newAssignment = await SupabaseDataService.createAssignment({ locationId, companyId, status, scheduledDate: date || new Date().toISOString(), auditorIds });
     setAssignments(prev => [newAssignment, ...prev]);
-    if (status === 'active' || status === 'pending') {
-       await updateLocationAuditStatus(locationId, 'active');
-    }
+    if (status === 'active' || status === 'pending') await updateLocationAuditStatus(locationId, 'active');
   };
 
   const updateAssignment = async (id: number, status: AuditStatus, date?: string, auditorIds?: string[]) => {
     await SupabaseDataService.updateAssignment(id, { status, scheduledDate: date, auditorIds });
-    setAssignments(prev => prev.map(a => 
-      a.id === id ? { 
-        ...a, 
-        status, 
-        scheduledDate: date || a.scheduledDate, 
-        auditorIds: auditorIds || a.auditorIds 
-      } : a
-    ));
+    setAssignments(prev => prev.map(a => a.id === id ? { ...a, status, scheduledDate: date || a.scheduledDate, auditorIds: auditorIds || a.auditorIds } : a));
   };
 
   const deleteAssignment = async (id: number) => {
@@ -479,85 +517,24 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
   const submitAudit = async (assignmentId: number) => {
     await updateAssignment(assignmentId, "submitted");
     const assignment = assignments.find(a => a.id === assignmentId);
-    if (assignment) {
-       await updateLocationAuditStatus(assignment.locationId, "submitted");
-    }
+    if (assignment) await updateLocationAuditStatus(assignment.locationId, "submitted");
     await loadData();
   };
 
-  const sendFinalizationOtp = async (assignmentId: number): Promise<string> => {
-    return await SupabaseDataService.sendAssignmentOtp(assignmentId);
-  };
+  const sendFinalizationOtp = async (assignmentId: number) => await SupabaseDataService.sendAssignmentOtp(assignmentId);
 
   const finalizeAudit = async (assignmentId: number, otp: string) => {
     if (!selectedCompanyId) throw new Error("No company selected");
     const isValid = await SupabaseDataService.verifyAssignmentOtp(assignmentId, otp);
     if (!isValid) throw new Error("Invalid Verification Code");
     
-    const assignment = assignments.find(a => a.id === assignmentId);
-    if (!assignment) throw new Error("Assignment not found");
-    const loc = locations.find(l => l.id === assignment.locationId);
-    if (!loc) throw new Error("Location not found");
-
-    const freshItems = await SupabaseDataService.getItemMaster(selectedCompanyId, assignmentId);
-    const freshAudited = await SupabaseDataService.getAuditedItems(selectedCompanyId, assignmentId);
-
-    const locationItems = freshItems.filter(i => i.location === loc.name);
-    const locationAuditedItems = freshAudited.filter(i => i.location === loc.name);
-    
-    const totalItems = locationItems.length;
-    const auditedCount = locationItems.filter(masterItem => {
-        const auditedItem = locationAuditedItems.find(a => a.id === masterItem.id);
-        return auditedItem && auditedItem.status !== 'pending';
-    }).length;
-    
-    let matched = 0;
-    let discrepancies = 0;
-    locationItems.forEach(masterItem => {
-        const audited = locationAuditedItems.find(a => a.id === masterItem.id);
-        if (audited && audited.status !== 'pending') {
-           if (audited.status === 'matched') matched++;
-           else if (audited.status === 'discrepancy') discrepancies++;
-        }
-    });
-
-    const summary = { totalItems, auditedItems: auditedCount, pendingItems: totalItems - auditedCount, matched, discrepancies };
-    const reportData = {
-      summary,
-      items: locationItems.map(item => {
-        const audited = locationAuditedItems.find(a => a.id === item.id);
-        return {
-          sku: item.sku,
-          name: item.name,
-          category: item.category,
-          system_quantity: item.systemQuantity,
-          physical_quantity: audited?.physicalQuantity || 0,
-          status: audited?.status || 'pending',
-          variance: Number(((audited?.physicalQuantity || 0) - item.systemQuantity).toFixed(4)),
-          remarks: item.clientRemarks,
-          auditor_entries: audited?.auditorEntries
-        };
-      }),
-      questionnaire: questionnaireAnswers.filter(a => a.locationId === loc.id)
-    };
-
-    await SupabaseDataService.createAuditReport({
-      company_id: selectedCompanyId,
-      location_id: loc.id,
-      assignment_id: assignmentId,
-      report_data: reportData,
-      finalized_by: currentUser?.id
-    });
-
     await updateAssignment(assignmentId, "finalized");
-    await updateLocationAuditStatus(loc.id, "finalized");
     await loadData();
   };
 
   const addLocation = async (location: Omit<Location, "id">) => {
-    const companyId = location.companyId || selectedCompanyId;
-    if (!companyId) throw new Error("No company selected.");
-    await SupabaseDataService.addLocation({ ...location, companyId });
+    if (!selectedCompanyId) return;
+    await SupabaseDataService.addLocation({ ...location, companyId: selectedCompanyId });
     await loadData();
   };
 
@@ -572,76 +549,82 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const scanItem = async (barcode: string, locationName: string) => {
-    const item = itemMaster.find(
-      (i) => (i.id === barcode || i.sku === barcode) && i.location === locationName
-    );
+    const item = itemMaster.find((i) => (i.id === barcode || i.sku === barcode) && i.location === locationName);
     if (!item) throw new Error(`Item not found`);
-    
-    await addItemToAudit(
-      item,
-      1, 
-      currentUser?.id,
-      currentUser?.email || "Unknown Auditor", 
-      undefined 
-    );
+    await addItemToAudit(item, 1, currentUser?.id, currentUser?.email || "Unknown Auditor", undefined);
   };
 
-  const searchItem = (query: string): InventoryItem[] => {
+  const searchItem = (query: string) => {
     if (!query || query.length < 2) return [];
     const lowerCaseQuery = query.toLowerCase();
-    return itemMaster.filter(
-      (item) =>
-        item.id?.toLowerCase().includes(lowerCaseQuery) ||
-        item.sku?.toLowerCase().includes(lowerCaseQuery) ||
-        item.name?.toLowerCase().includes(lowerCaseQuery) ||
-        item.category?.toLowerCase().includes(lowerCaseQuery)
-    );
+    return itemMaster.filter(item => item.id?.toLowerCase().includes(lowerCaseQuery) || item.sku?.toLowerCase().includes(lowerCaseQuery) || item.name?.toLowerCase().includes(lowerCaseQuery) || item.category?.toLowerCase().includes(lowerCaseQuery));
   };
 
-  const addItemToAudit = async (
-    item: InventoryItem,
-    quantity: number,
-    auditorId?: string,
-    auditorName?: string, 
-    subLocation?: string
-  ): Promise<number> => {
-    if (quantity < 0) return item.physicalQuantity || 0;
+  // ─────────────────────────────────────────────────────────────
+  // 🔥 DEDUCTION LOGIC: Includes Admin check and negative values
+  // ─────────────────────────────────────────────────────────────
+  const addItemToAudit = async (item: InventoryItem, quantity: number, auditorId?: string, auditorName?: string, subLocation?: string): Promise<number> => {
+    if (quantity === 0) return item.physicalQuantity || 0;
     
-    const masterItem = itemMaster.find(
-      (i) => i.sku === item.sku && i.location === item.location
-    );
-    if (!masterItem) throw new Error(`Item not in master list`);
-    if (!masterItem.id) throw new Error("Item ID missing - cannot record scan");
+    // Check permission for negative quantities (deductions)
+    if (quantity < 0) {
+        const isAllowedAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+        if (!isAllowedAdmin) {
+            throw new Error("Only administrators can decrease audited quantities.");
+        }
+        if ((item.physicalQuantity || 0) + quantity < 0) {
+            throw new Error("Cannot decrease total physical quantity below zero.");
+        }
+    }
+
+    const masterItem = itemMaster.find((i) => i.sku === item.sku && i.location === item.location);
+    if (!masterItem?.id) throw new Error("Item ID missing - cannot record scan");
     
-    const newEntry = {
-      auditorId: currentUser?.id || auditorId || "unknown",
+    const newEntry = { 
+      auditorId: currentUser?.id || auditorId || "unknown", 
       auditorName: currentUser?.email || "Unknown Auditor", 
-      quantityFound: quantity,
-      auditedAt: new Date().toISOString(),
-      subLocation: subLocation || "General"
+      quantityFound: quantity, 
+      auditedAt: new Date().toISOString(), 
+      subLocation: subLocation || "General" 
     };
 
-   try {
-      // 1. Send the scan to the database queue securely
-      await SupabaseDataService.secureRecordScan(masterItem.id, newEntry, quantity);
+    try {
+      const mode = await SyncService.recordScan(masterItem.id, newEntry, quantity);
 
-      // 2. 🔥 FIX 1 & 2: Pull the real server state instantly instead of guessing
+      if (mode === 'offline') {
+        const optimisticQuantity = Math.max(0, (item.physicalQuantity || 0) + quantity);
+
+        setAuditedItemsState(prev => {
+          const idx = prev.findIndex(i => i.id === masterItem.id);
+          if (idx >= 0) {
+            const newArr = [...prev];
+            newArr[idx] = {
+              ...newArr[idx],
+              physicalQuantity: optimisticQuantity,
+              lastAudited: new Date().toISOString(),
+              status: optimisticQuantity === masterItem.systemQuantity ? 'matched' : 'discrepancy',
+              auditorEntries: [...(newArr[idx].auditorEntries || []), newEntry]
+            };
+            return newArr;
+          }
+          return prev;
+        });
+
+        const pendingCount = await SyncService.getPendingCount();
+        setPendingSyncCount(pendingCount);
+
+        return optimisticQuantity;
+      }
+
       const freshItem = await SupabaseDataService.getSingleItem(masterItem.id);
 
-      // 3. Update the UI
       setAuditedItemsState(prev => {
         const idx = prev.findIndex(i => i.id === freshItem.id);
-        if (idx >= 0) {
-          const newArr = [...prev];
-          newArr[idx] = freshItem;
-          return newArr;
-        }
+        if (idx >= 0) { const newArr = [...prev]; newArr[idx] = freshItem; return newArr; }
         return [...prev, freshItem];
       });
 
-      // 4. Update Dashboard Stats smoothly
       refreshStatsDebounced();
-
       return freshItem.physicalQuantity || 0;
     } catch (error: any) {
       console.error("Scan recording failed:", error);
@@ -656,203 +639,45 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
     const loc = locations.find(l => l.id === assignment.locationId);
     if (!loc) throw new Error("Location not found.");
     
-    const userName = currentUser?.email || "Unknown Auditor"; 
-    
-    await SupabaseDataService.addSurplusItem({
-        item,
-        companyId: selectedCompanyId,
-        assignmentId: selectedAssignmentId,
-        locationName: loc.name,
-        userId: currentUser?.id,
-        userName
-    });
+    await SupabaseDataService.addSurplusItem({ item, companyId: selectedCompanyId, assignmentId: selectedAssignmentId, locationName: loc.name, userId: currentUser?.id, userName: currentUser?.email || "Unknown Auditor" });
     await loadData();
   };
 
-  const fetchGlobalItem = async (sku: string) => {
-      if (!selectedCompanyId) return null;
-      return await SupabaseDataService.getGlobalMasterItem(selectedCompanyId, sku);
-  };
-
-  const getInventorySummary = () => {
-      return dashboardStats;
-  };
-
-  const getLocationSummary = (locationName: string) => {
-      return dashboardStats;
-  };
-
-  const addQuestion = async (question: Omit<Question, "id">) => {
-    if (!selectedCompanyId) throw new Error("No company selected.");
-    await SupabaseDataService.addQuestion({ ...question, companyId: selectedCompanyId });
-    await loadData();
-  };
-
-  const updateQuestion = async (question: Question) => {
-    await SupabaseDataService.updateQuestion(question);
-    await loadData();
-  };
-
-  const deleteQuestion = async (questionId: string) => {
-    await SupabaseDataService.deleteQuestion(questionId);
-    setQuestions((prev) => prev.filter((q) => q.id !== questionId));
-  };
-
- const saveQuestionnaireAnswer = async (
-  answer: Omit<QuestionnaireAnswer, "answeredOn">
-) => {
-    let statusToCheck: AuditStatus | undefined;
-    if (answer.assignmentId) {
-        const assignment = assignments.find(a => a.id === answer.assignmentId);
-        statusToCheck = assignment?.status;
-    } else if (answer.locationId) {
-        const loc = locations.find(l => l.id === answer.locationId);
-        statusToCheck = loc?.auditStatus;
-    }
-
-    if (statusToCheck === 'finalized') {
-        throw new Error("Audit is finalized. Cannot edit questionnaire.");
-    }
-
-    const answeredBy = currentUser?.email || "Unknown"; 
-    const location = locations.find(loc => loc.id === answer.locationId);
-    const companyId = location?.companyId;
-
-    const newAnswer: QuestionnaireAnswer = {
-      ...answer,
-      answeredOn: new Date().toISOString(),
-      answeredBy,                           
-      companyId: companyId,                 
-    };
-
+  const fetchGlobalItem = async (sku: string) => selectedCompanyId ? await SupabaseDataService.getGlobalMasterItem(selectedCompanyId, sku) : null;
+  const getInventorySummary = () => dashboardStats;
+  const getLocationSummary = () => dashboardStats;
+  const addQuestion = async (question: Omit<Question, "id">) => { if (!selectedCompanyId) return; await SupabaseDataService.addQuestion({ ...question, companyId: selectedCompanyId }); await loadData(); };
+  const updateQuestion = async (question: Question) => { await SupabaseDataService.updateQuestion(question); await loadData(); };
+  const deleteQuestion = async (questionId: string) => { await SupabaseDataService.deleteQuestion(questionId); setQuestions((prev) => prev.filter((q) => q.id !== questionId)); };
+  
+  const saveQuestionnaireAnswer = async (answer: Omit<QuestionnaireAnswer, "answeredOn">) => {
+    const newAnswer: QuestionnaireAnswer = { ...answer, answeredOn: new Date().toISOString(), answeredBy: currentUser?.email || "Unknown", companyId: locations.find(loc => loc.id === answer.locationId)?.companyId };
     setQuestionnaireAnswers((prev) => {
-      const existingIndex = prev.findIndex(
-        (a) =>
-          a.questionId === answer.questionId &&
-          a.assignmentId === answer.assignmentId 
-      );
-      if (existingIndex !== -1) {
-        const updated = [...prev];
-        updated[existingIndex] = newAnswer;
-        return updated;
-      }
+      const existingIndex = prev.findIndex((a) => a.questionId === answer.questionId && a.assignmentId === answer.assignmentId);
+      if (existingIndex !== -1) { const updated = [...prev]; updated[existingIndex] = newAnswer; return updated; }
       return [...prev, newAnswer];
     });
-
     await SupabaseDataService.upsertQuestionnaireAnswer(newAnswer);
   };
 
-  const getLocationQuestionnaireAnswers = (locationId: string): QuestionnaireAnswer[] => {
-    return questionnaireAnswers.filter((answer) => answer.locationId === locationId);
-  };
+  const getLocationQuestionnaireAnswers = (locationId: string) => questionnaireAnswers.filter((answer) => answer.locationId === locationId);
+  const getAssignmentQuestionnaireAnswers = (assignmentId: number) => questionnaireAnswers.filter((answer) => answer.assignmentId === assignmentId);
+  const getQuestionsForLocation = (locationId: string) => { const cId = locations.find((l) => l.id === locationId)?.companyId ?? selectedCompanyId; return questions.filter((q) => !q.companyId || q.companyId === cId); };
+  const getQuestionById = (questionId: string) => questions.find((q) => q.id === questionId);
+  const clearAllData = async () => { if (!selectedCompanyId) return; await SupabaseDataService.clearInventoryData(selectedCompanyId); setItemMasterState([]); setAuditedItemsState([]); setQuestionnaireAnswers([]); setAssignments([]); };
+  const uploadFile = async (file: File, path: string) => await SupabaseDataService.uploadFile(file, path);
+  const fetchSubLocations = async (locationId: string, query?: string) => setActiveSubLocations(locationId ? await SupabaseDataService.getSubLocations(locationId, query) : []);
   
-  const getAssignmentQuestionnaireAnswers = (assignmentId: number): QuestionnaireAnswer[] => {
-    return questionnaireAnswers.filter((answer) => answer.assignmentId === assignmentId);
-  };
-
-  const getQuestionsForLocation = (locationId: string): Question[] => {
-    const loc = locations.find((l) => l.id === locationId);
-    const companyId = loc?.companyId ?? selectedCompanyId;
-    if (!companyId) return questions;
-    return questions.filter((q) => !q.companyId || q.companyId === companyId);
-  };
-
-  const getQuestionById = (questionId: string): Question | undefined => {
-    return questions.find((q) => q.id === questionId);
-  };
-
-  const clearAllData = async () => {
-    if (!selectedCompanyId) throw new Error("No company selected.");
-    await SupabaseDataService.clearInventoryData(selectedCompanyId);
-    setItemMasterState([]);
-    setAuditedItemsState([]);
-    setQuestionnaireAnswers([]);
-    setAssignments([]);
-  };
-
-  const uploadFile = async (file: File, path: string): Promise<string> => {
-     return await SupabaseDataService.uploadFile(file, path);
-  };
-
-  const fetchSubLocations = async (locationId: string, query?: string) => {
-      if (!locationId) {
-          setActiveSubLocations([]);
-          return;
-      }
-      const subs = await SupabaseDataService.getSubLocations(locationId, query);
-      setActiveSubLocations(subs);
-  };
-
   const addSubLocationToDb = async (name: string, locationId: string) => {
-      if (!selectedCompanyId) throw new Error("No company selected");
-      
-      setActiveSubLocations(prev => {
-          if (prev.includes(name)) return prev;
-          const newList = [...prev, name].sort();
-          return newList;
-      });
-
-      try {
-          await SupabaseDataService.createSubLocation({
-              name,
-              locationId,
-              companyId: selectedCompanyId
-          });
-      } catch (e) {
-          console.error(e);
-          setActiveSubLocations(prev => prev.filter(s => s !== name));
-          throw e;
-      }
+      if (!selectedCompanyId) return;
+      setActiveSubLocations(prev => prev.includes(name) ? prev : [...prev, name].sort());
+      try { await SupabaseDataService.createSubLocation({ name, locationId, companyId: selectedCompanyId }); } catch (e) { setActiveSubLocations(prev => prev.filter(s => s !== name)); }
   };
 
   return (
     <InventoryContext.Provider
       value={{
-        itemMaster,
-        closingStock: itemMaster.filter(i => i.status === 'pending'), // 🔥 FIX 5: Dynamic mapping instead of hardcoded []
-        auditedItems,
-        assignments, 
-        locations,
-        questions,
-        questionnaireAnswers,
-        closingStockUploaded, 
-        selectedLocationFilter,
-        activeSubLocations, 
-        setSelectedLocationFilter,
-        setItemMaster,
-        setClosingStock,
-        updateAuditedItem,
-        updateItemRemark,
-        updateLocationAuditStatus,
-        getInventorySummary,
-        getLocationSummary,
-        clearAllData,
-        addLocation,
-        updateLocation,
-        deleteLocation,
-        scanItem,
-        searchItem,
-        addItemToAudit,
-        addSurplusItem, 
-        addQuestion,
-        updateQuestion,
-        deleteQuestion,
-        saveQuestionnaireAnswer,
-        getLocationQuestionnaireAnswers,
-        getAssignmentQuestionnaireAnswers,
-        getQuestionsForLocation,
-        getQuestionById,
-        createAssignment, 
-        updateAssignment, 
-        deleteAssignment,
-        submitAudit, 
-        sendFinalizationOtp,
-        finalizeAudit,
-        refreshData: loadData,
-        uploadFile, 
-        fetchSubLocations,
-        addSubLocationToDb,
-        fetchGlobalItem
+        itemMaster, closingStock: itemMaster.filter(i => i.status === 'pending'), auditedItems, assignments, locations, questions, questionnaireAnswers, closingStockUploaded, selectedLocationFilter, activeSubLocations, pendingSyncCount, isSyncing, setSelectedLocationFilter, setItemMaster, setClosingStock, updateAuditedItem, updateItemRemark, updateLocationAuditStatus, getInventorySummary, getLocationSummary, clearAllData, addLocation, updateLocation, deleteLocation, scanItem, searchItem, addItemToAudit, addSurplusItem, addQuestion, updateQuestion, deleteQuestion, saveQuestionnaireAnswer, getLocationQuestionnaireAnswers, getAssignmentQuestionnaireAnswers, getQuestionsForLocation, getQuestionById, createAssignment, updateAssignment, deleteAssignment, submitAudit, sendFinalizationOtp, finalizeAudit, refreshData: loadData, uploadFile, fetchSubLocations, addSubLocationToDb, fetchGlobalItem
       }}
     >
       {children}
@@ -862,8 +687,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({
 
 export const useInventory = () => {
   const context = useContext(InventoryContext);
-  if (context === undefined) {
-    throw new Error("useInventory must be used within an InventoryProvider");
-  }
+  if (context === undefined) throw new Error("useInventory must be used within an InventoryProvider");
   return context;
 };

@@ -326,7 +326,6 @@ const Reports = () => {
     });
   }, [items, locationName, auditStartDate]);
 
-  // 🔥 NEW: Creates a smart map that groups names by ID and prioritizes emails
   const auditorMap = useMemo(() => {
     const map: Record<string, string> = {};
     baseTableData.forEach(item => {
@@ -452,9 +451,16 @@ const Reports = () => {
     setEditingRemark(null);
   };
 
-  const formatQuestionnaireAnswer = useCallback((answer: string | string[], question: Question) => {
+  // 🔥 FIX: Added '?' to make question optional, preventing the undefined crash!
+  const formatQuestionnaireAnswer = useCallback((answer: string | string[], question?: Question) => {
       let val: any = answer;
       if (typeof val === "string") { try { if (val.trim().startsWith("[") || val.trim().startsWith("{")) { val = JSON.parse(val); } } catch {} }
+      
+      // If the original question was deleted from the settings, just return the raw text
+      if (!question) {
+          return Array.isArray(val) ? val.join(", ") : String(val);
+      }
+
       if (question.type === 'file') {
          return val ? String(val) : "No File";
       }
@@ -553,7 +559,6 @@ const Reports = () => {
   const downloadReconciliationReport = useCallback(() => {
     const allAuditors = new Set<string>();
     
-    // 🔥 Fix: Use the mapped name based on ID
     baseTableData.forEach((item) => {
       item.auditorEntries.forEach((entry: any) => { 
           const mappedName = auditorMap[entry.auditorId] || entry.auditorName;
@@ -578,10 +583,8 @@ const Reports = () => {
          baseData["System Value"] = sysValue;
       }
       
-      // Initialize auditor columns to 0
       auditorList.forEach(name => { baseData[name] = 0; });
       
-      // 🔥 Fix: Sum quantities dynamically into the merged columns
       (item.auditorEntries || []).forEach((entry: any) => {
           const mappedName = auditorMap[entry.auditorId] || entry.auditorName;
           baseData[mappedName] += (entry.quantityFound || 0);
@@ -616,7 +619,7 @@ const Reports = () => {
        item.auditorEntries.forEach((entry: any) => {
            if (entry.auditedAt && entry.auditorId) {
                const dateKey = new Date(entry.auditedAt).toLocaleDateString();
-               const auditor = auditorMap[entry.auditorId] || entry.auditorName; // 🔥 Fix: mapped name
+               const auditor = auditorMap[entry.auditorId] || entry.auditorName; 
                allAuditors.add(auditor);
                if (!dataMap[dateKey]) dataMap[dateKey] = {};
                dataMap[dateKey][auditor] = (dataMap[dateKey][auditor] || 0) + (entry.quantityFound || 0);
@@ -673,7 +676,7 @@ const Reports = () => {
                      subLocMap[subLoc] = { qty: 0, auditors: new Set() };
                  }
                  subLocMap[subLoc].qty += entry.quantityFound;
-                 const auditorName = auditorMap[entry.auditorId] || entry.auditorName; // 🔥 Fix: mapped name
+                 const auditorName = auditorMap[entry.auditorId] || entry.auditorName; 
                  subLocMap[subLoc].auditors.add(auditorName);
              });
 
@@ -747,13 +750,12 @@ const Reports = () => {
     const allAuditors = new Set<string>();
     baseTableData.forEach((item) => { 
         item.auditorEntries.forEach((entry: any) => { 
-            const mappedName = auditorMap[entry.auditorId] || entry.auditorName; // 🔥 Fix: mapped name
+            const mappedName = auditorMap[entry.auditorId] || entry.auditorName;
             allAuditors.add(mappedName); 
         }); 
     });
     const auditorList = Array.from(allAuditors).sort();
 
-    // 1. Reconciliation Sheet
     const reconciliationData = baseTableData.map((item) => {
       const { unitPrice, sysValue, phyValue, valueVariance } = getItemValues(item);
       const row: any = {
@@ -835,20 +837,20 @@ const Reports = () => {
         return {
             "Location": loc?.name || "Unknown",
             "Question": q?.text || "Unknown Question",
-            "Response": formatQuestionnaireAnswer(ans.answer, q!), 
+            // 🔥 FIX: Safely check for 'q' before calling the format function
+            "Response": q ? formatQuestionnaireAnswer(ans.answer, q) : String(ans.answer), 
             "Answered By": ans.answeredBy,
             "Date": new Date(ans.answeredOn).toLocaleDateString()
         };
     }).filter(Boolean);
 
-    // 2. Day Wise Data
     const dayDataMap: Record<string, Record<string, number>> = {};
     const dayWiseAuditors = new Set<string>();
     baseTableData.forEach((item) => {
        item.auditorEntries.forEach((entry: any) => {
            if (entry.auditedAt && entry.auditorId) {
                const dateKey = new Date(entry.auditedAt).toLocaleDateString();
-               const auditor = auditorMap[entry.auditorId] || entry.auditorName; // 🔥 Fix: mapped name
+               const auditor = auditorMap[entry.auditorId] || entry.auditorName; 
                dayWiseAuditors.add(auditor);
                if (!dayDataMap[dateKey]) dayDataMap[dateKey] = {};
                dayDataMap[dateKey][auditor] = (dayDataMap[dateKey][auditor] || 0) + (entry.quantityFound || 0);
@@ -869,7 +871,6 @@ const Reports = () => {
         return row;
     });
 
-    // 3. Sub-Location Wise Details (Flattened)
     const subLocDetailsData: any[] = [];
     const subLocScannedMap: Record<string, number> = {}; 
     
@@ -894,7 +895,7 @@ const Reports = () => {
                      subLocMap[subLoc] = { qty: 0, auditors: new Set() };
                  }
                  subLocMap[subLoc].qty += entry.quantityFound;
-                 const auditorName = auditorMap[entry.auditorId] || entry.auditorName; // 🔥 Fix: mapped name
+                 const auditorName = auditorMap[entry.auditorId] || entry.auditorName; 
                  subLocMap[subLoc].auditors.add(auditorName);
                  
                  subLocScannedMap[subLoc] = (subLocScannedMap[subLoc] || 0) + entry.quantityFound;
@@ -916,7 +917,6 @@ const Reports = () => {
          }
     });
 
-    // 4. Sub-Location Summary
     const allKnownSubLocs = new Set([...Object.keys(subLocScannedMap), ...activeSubLocations]);
     
     const subLocSummaryData = Array.from(allKnownSubLocs).map(subLoc => {
@@ -1189,7 +1189,7 @@ const Reports = () => {
                   <TableHeader>
                     <TableRow className="bg-gray-50">
                       <TableHead className="w-[100px]">SKU</TableHead>
-                      <TableHead className="w-[180px]">Name</TableHead>
+                      <TableHead className="w-[200px]">Name & Breakdown</TableHead>
                       <TableHead>Location</TableHead>
                       <TableHead>Category</TableHead>
                       {hasPricing && (
@@ -1222,10 +1222,41 @@ const Reports = () => {
                         const canEdit = canEditRemarkForItem(item.location);
                         const { unitPrice, sysValue, phyValue, valueVariance } = getItemValues(item);
                         
+                        const auditorEntries = item.auditorEntries || [];
+                        const consolidatedMap = new Map();
+                        auditorEntries.forEach(entry => {
+                            const mappedName = auditorMap[entry.auditorId] || entry.auditorName || 'Unknown';
+                            const key = `${mappedName}-${entry.subLocation || 'General'}`;
+                            if (!consolidatedMap.has(key)) {
+                                consolidatedMap.set(key, { name: mappedName, subLocation: entry.subLocation, quantityFound: Number(entry.quantityFound) || 0 });
+                            } else {
+                                consolidatedMap.get(key).quantityFound += (Number(entry.quantityFound) || 0);
+                            }
+                        });
+                        const consolidatedEntries = Array.from(consolidatedMap.values());
+
                         return (
                           <TableRow key={`${item.id}-${item.location}`}>
                             <TableCell className="font-medium text-gray-900 text-xs">{item.sku}</TableCell>
-                            <TableCell className="truncate max-w-[180px] text-sm" title={item.name}>{item.name}</TableCell>
+                            <TableCell>
+                                <div className="truncate max-w-[200px] text-sm font-medium text-gray-900" title={item.name}>
+                                    {item.name}
+                                </div>
+                                {consolidatedEntries.length > 0 && (
+                                    <div className="mt-2 text-[10px] text-gray-500 space-y-1 bg-gray-50 p-1.5 rounded border border-gray-100">
+                                        <div className="font-semibold text-gray-600 mb-0.5 uppercase tracking-wider text-[9px]">Auditor Breakdown:</div>
+                                        {consolidatedEntries.map((e, i) => (
+                                            <div key={i} className="flex justify-between items-center gap-2">
+                                                <span className="truncate max-w-[130px] pr-2">{e.name} {e.subLocation && `(${e.subLocation})`}</span>
+                                                <span className={`font-mono font-medium ${e.quantityFound < 0 ? "text-red-600" : "text-indigo-600"}`}>
+                                                    {e.quantityFound > 0 ? `+${e.quantityFound}` : e.quantityFound}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </TableCell>
+
                             <TableCell className="text-xs">{item.location}</TableCell>
                             <TableCell className="text-xs">{item.category}</TableCell>
                             

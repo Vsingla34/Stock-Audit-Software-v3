@@ -35,6 +35,9 @@ import {
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 
+// 🔥 OFFLINE FEATURE: Import the new banner
+import { SyncStatusBanner } from "@/components/scanner/SyncStatusBanner";
+
 interface BarcodeScannerProps {
     onResult?: (code: string) => void;
     className?: string;
@@ -398,7 +401,10 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                 }
             `}</style>
 
-            <div className={isPickerMode ? "" : "order-1 lg:order-1"}>
+            <div className={isPickerMode ? "" : "order-1 lg:order-1 flex flex-col"}>
+                {/* 🔥 OFFLINE FEATURE: Renders banner when disconnected/syncing */}
+                <SyncStatusBanner />
+
                 <Card className="shadow-sm border-gray-200">
                     {!isPickerMode && (
                     <CardHeader className="pb-3">

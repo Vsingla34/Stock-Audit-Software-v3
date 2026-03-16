@@ -37,7 +37,8 @@ import {
   Filter, 
   UploadCloud, 
   Loader2,
-  ArrowLeft 
+  ArrowLeft,
+  Download
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -90,7 +91,6 @@ const UserManagement = () => {
     fetchData();
   }, []);
 
-  // --- HELPER: Get Admin Client ---
   const getAdminClient = () => {
     const SERVICE_ROLE_KEY = import.meta.env.VITE_SERVICE_KEY;
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -105,12 +105,10 @@ const UserManagement = () => {
     });
   };
 
-  // --- UPDATED FETCH DATA ---
   const fetchData = async () => {
     try {
       setLoading(true);
       
-      // 1. Use Admin Client to Fetch Users (Bypasses RLS)
       const adminClient = getAdminClient();
       let usersData: UserProfile[] = [];
 
@@ -123,7 +121,6 @@ const UserManagement = () => {
           if (error) throw error;
           usersData = (data as any[]) || [];
       } else {
-          // Fallback to standard client (might fail if RLS is strict)
           const { data, error } = await supabase
             .from("user_profiles")
             .select("id, email, name, role, assigned_companies, created_at")
@@ -135,20 +132,17 @@ const UserManagement = () => {
       
       let filteredUsers = usersData;
 
-      // 2. Filter Logic (Frontend Security)
       if (!isSuperAdmin) {
         const myCompanyIds = currentUser?.assigned_companies || [];
         filteredUsers = filteredUsers.filter(user => {
             if (user.role === 'super_admin') return false;
             const userCompanies = user.assigned_companies || [];
-            // Show if user is assigned to at least one of my companies
             return userCompanies.some(id => myCompanyIds.includes(id));
         });
       }
 
       setUsers(filteredUsers);
 
-      // 3. Fetch Companies (Standard Client is usually fine for this, or use Admin if needed)
       const { data: companiesData, error: companiesError } = await supabase
         .from("companies")
         .select("id, name")
@@ -190,7 +184,14 @@ const UserManagement = () => {
         return;
       }
 
-      // 1. Create User in Auth System
+      // 🔥 SECURITY CHECK: Prevent manual API bypassing
+      const allowedIds = companies.map(c => c.id);
+      const validCompanies = formData.assignedCompanies.filter(id => allowedIds.includes(id));
+      
+      if (formData.assignedCompanies.length > 0 && validCompanies.length === 0) {
+          throw new Error("You do not have permission to assign to the selected companies.");
+      }
+
       const { data, error } = await adminClient.auth.admin.createUser({
         email: formData.email,
         password: formData.password,
@@ -198,14 +199,13 @@ const UserManagement = () => {
         user_metadata: {
           name: formData.name,
           role: formData.role,
-          assigned_companies: formData.assignedCompanies
+          assigned_companies: validCompanies
         }
       });
 
       if (error) throw error;
       if (!data.user) throw new Error("User created but ID missing");
 
-      // 2. FORCE INSERT into user_profiles
       const { error: profileError } = await adminClient
         .from("user_profiles")
         .upsert({
@@ -213,7 +213,7 @@ const UserManagement = () => {
             email: formData.email,
             name: formData.name,
             role: formData.role,
-            assigned_companies: formData.assignedCompanies,
+            assigned_companies: validCompanies,
             created_at: new Date().toISOString()
         });
       
@@ -226,7 +226,6 @@ const UserManagement = () => {
 
       setIsAddDialogOpen(false);
       resetForm();
-      
       await fetchData();
 
     } catch (error: any) {
@@ -238,16 +237,19 @@ const UserManagement = () => {
   const handleUpdateUser = async () => {
     if (!selectedUser) return;
     try {
-        // Use Admin Client for updates too, to be safe against RLS
         const adminClient = getAdminClient();
         if (!adminClient) throw new Error("Admin client missing");
+
+        // 🔥 SECURITY CHECK: Prevent manual API bypassing
+        const allowedIds = companies.map(c => c.id);
+        const validCompanies = formData.assignedCompanies.filter(id => allowedIds.includes(id));
 
         const { error } = await adminClient
             .from("user_profiles")
             .update({
                 name: formData.name,
                 role: formData.role,
-                assigned_companies: formData.assignedCompanies
+                assigned_companies: validCompanies
             })
             .eq("id", selectedUser.id);
         
@@ -256,7 +258,7 @@ const UserManagement = () => {
         setIsEditDialogOpen(false);
         fetchData();
     } catch (e: any) {
-        toast.error("Failed to update user");
+        toast.error("Failed to update user: " + e.message);
     }
   };
 
@@ -270,10 +272,7 @@ const UserManagement = () => {
          }
 
          const { error: authError } = await adminClient.auth.admin.deleteUser(selectedUser.id);
-         
-         if (authError && !authError.message.includes("not found")) {
-            throw authError;
-         }
+         if (authError && !authError.message.includes("not found")) throw authError;
 
          const { error: dbError } = await adminClient
             .from("user_profiles")
@@ -291,6 +290,25 @@ const UserManagement = () => {
          toast.error("Failed to delete user: " + e.message);
      }
   };
+
+  const handleDownloadTemplate = () => {
+    const headers = ["email", "password", "name", "role", "assigned_companies"];
+    const exampleRow = ["auditor1@example.com", "SecurePass123!", "John Auditor", "auditor", '"Company A, Company B"'];
+    
+    const csvContent = headers.join(",") + "\n" + exampleRow.join(",");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", "user_import_template.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    
+    toast.success("Template downloaded successfully");
+  };
   
  const handleImport = async () => {
     if (!importFile) return;
@@ -301,19 +319,51 @@ const UserManagement = () => {
     reader.onload = async (e) => {
       try {
         const csvText = e.target?.result as string;
-        
-        // 1. Parse CSV (Returns array of rows)
         const rows = processCSV(csvText);
         
         if (!rows || rows.length === 0) {
           throw new Error("CSV is empty or could not be parsed.");
         }
 
-        // 2. Prepare Company Name-to-ID Lookup Map
-        // We use the 'companies' state already loaded in your component
+        // Map containing ONLY companies the current admin is assigned to
         const companyLookup = new Map(
           companies.map(c => [c.name.toLowerCase().trim(), c.id])
         );
+
+        // 🔥 NEW: PRE-FLIGHT VALIDATION Check every row before creating any users!
+        const invalidRows: string[] = [];
+        
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i];
+          if (!row.email || !row.password) {
+            invalidRows.push(`Row ${i + 1}: Missing email or password`);
+            continue;
+          }
+          
+          const rawCompanyNames = row['assigned companies'] || row['assigned_companies'] || "";
+          const names = rawCompanyNames.split(',').map((n: string) => n.trim()).filter(Boolean);
+          
+          if (names.length === 0) {
+            invalidRows.push(`Row ${i + 1} (${row.email}): Must have at least one assigned company.`);
+          } else {
+            for (const name of names) {
+              if (!companyLookup.has(name.toLowerCase())) {
+                // Fails if company doesn't exist OR if Admin doesn't have permission for it
+                invalidRows.push(`Row ${i + 1} (${row.email}): Company "${name}" is invalid or you lack permission.`);
+              }
+            }
+          }
+        }
+
+        // Abort entirely if ANY row violates permissions
+        if (invalidRows.length > 0) {
+          toast.error("Import Aborted: Validation Failed", {
+            description: invalidRows[0] + (invalidRows.length > 1 ? ` (+${invalidRows.length - 1} more errors)` : ""),
+            duration: 5000
+          });
+          setIsImporting(false);
+          return; 
+        }
 
         const SERVICE_ROLE_KEY = import.meta.env.VITE_SERVICE_KEY;
         const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -329,30 +379,20 @@ const UserManagement = () => {
           const name = row.name?.trim() || email?.split('@')[0];
           const role = (row.role?.trim().toLowerCase() || 'auditor') as any;
           
-          // 3. Convert Company Names to IDs
           const rawCompanyNames = row['assigned companies'] || row['assigned_companies'] || "";
           const companyIds = rawCompanyNames
             .split(',')
-            .map((name: string) => {
-              const cleanedName = name.trim().toLowerCase();
-              return companyLookup.get(cleanedName);
-            })
-            .filter(Boolean) as string[]; // Remove nulls if name wasn't found
+            .map((name: string) => companyLookup.get(name.trim().toLowerCase()))
+            .filter(Boolean) as string[]; 
 
           if (email && password) {
-            // 4. Create Auth Account
             const { data: authData, error: authError } = await adminClient.auth.admin.createUser({
               email: email,
               password: password,
               email_confirm: true,
-              user_metadata: {
-                name: name,
-                role: role,
-                assigned_companies: companyIds
-              }
+              user_metadata: { name, role, assigned_companies: companyIds }
             });
 
-            // 5. Create Profile with the mapped IDs
             if (!authError && authData.user) {
               const { error: profileError } = await adminClient.from("user_profiles").upsert({
                 id: authData.user.id,
@@ -370,7 +410,7 @@ const UserManagement = () => {
           }
         }
 
-        toast.success(`Imported ${successCount} users. Note: Company names were matched to existing IDs.`);
+        toast.success(`Imported ${successCount} users successfully.`);
         setIsImportDialogOpen(false);
         setImportFile(null);
         fetchData();
@@ -394,7 +434,6 @@ const UserManagement = () => {
     <AppLayout showSidebar={false}>
       <div className="space-y-6 max-w-7xl mx-auto pt-6">
         
-        {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
              <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
@@ -407,18 +446,17 @@ const UserManagement = () => {
           </div>
           
           <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => setIsImportDialogOpen(true)}>
-                <UploadCloud className="w-4 h-4 mr-2" />
+            <Button variant="outline" onClick={() => setIsImportDialogOpen(true)} className="bg-white">
+                <UploadCloud className="w-4 h-4 mr-2 text-indigo-600" />
                 Import CSV
             </Button>
-            <Button onClick={() => { resetForm(); setIsAddDialogOpen(true); }}>
+            <Button onClick={() => { resetForm(); setIsAddDialogOpen(true); }} className="bg-indigo-600 hover:bg-indigo-700 text-white">
                 <Plus className="w-4 h-4 mr-2" />
                 Add User
             </Button>
           </div>
         </div>
 
-        {/* Filters */}
         <div className="flex items-center gap-4 bg-white p-4 rounded-lg border shadow-sm">
             <Filter className="w-4 h-4 text-gray-500" />
             <span className="text-sm font-medium">Filter by Company:</span>
@@ -435,7 +473,6 @@ const UserManagement = () => {
             </Select>
         </div>
 
-        {/* Users Table */}
         <Card className="border-none shadow-sm bg-white">
             <CardContent className="p-0">
                 <Table>
@@ -470,7 +507,7 @@ const UserManagement = () => {
                                         </div>
                                     </TableCell>
                                     <TableCell>
-                                        <Badge variant="outline" className="capitalize">
+                                        <Badge variant="outline" className="capitalize bg-indigo-50 text-indigo-700 border-indigo-100">
                                             {user.role.replace('_', ' ')}
                                         </Badge>
                                     </TableCell>
@@ -523,22 +560,22 @@ const UserManagement = () => {
 
         {/* Add User Dialog */}
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-            <DialogContent>
+            <DialogContent className="sm:max-w-[425px]">
                 <DialogHeader>
                     <DialogTitle>Add New User</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-4 py-2">
                     <div className="grid gap-2">
                         <Label>Name</Label>
-                        <Input value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                        <Input value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="e.g. John Doe" />
                     </div>
                     <div className="grid gap-2">
                         <Label>Email</Label>
-                        <Input type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
+                        <Input type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} placeholder="john@example.com" />
                     </div>
                     <div className="grid gap-2">
                         <Label>Password</Label>
-                        <Input type="password" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} />
+                        <Input type="password" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} placeholder="Minimum 6 characters" />
                     </div>
                     <div className="grid gap-2">
                         <Label>Role</Label>
@@ -576,14 +613,14 @@ const UserManagement = () => {
                     </div>
                 </div>
                 <DialogFooter>
-                    <Button onClick={handleCreateUser}>Create User</Button>
+                    <Button onClick={handleCreateUser} className="bg-indigo-600 hover:bg-indigo-700 text-white w-full sm:w-auto">Create User</Button>
                 </DialogFooter>
             </DialogContent>
         </Dialog>
 
          {/* Edit User Dialog */}
          <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-            <DialogContent>
+            <DialogContent className="sm:max-w-[425px]">
                 <DialogHeader>
                     <DialogTitle>Edit User</DialogTitle>
                 </DialogHeader>
@@ -627,41 +664,70 @@ const UserManagement = () => {
                     </div>
                 </div>
                 <DialogFooter>
-                    <Button onClick={handleUpdateUser}>Update User</Button>
+                    <Button onClick={handleUpdateUser} className="bg-indigo-600 hover:bg-indigo-700 text-white w-full sm:w-auto">Update User</Button>
                 </DialogFooter>
             </DialogContent>
         </Dialog>
         
-        {/* Import Dialog */}
+        {/* Import Dialog with Template Option */}
         <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
-            <DialogContent>
+            <DialogContent className="sm:max-w-[500px]">
                 <DialogHeader>
-                    <DialogTitle>Import Users</DialogTitle>
-                    <DialogDescription>Upload a CSV file with columns: email, password, name, role, company_ids</DialogDescription>
+                    <DialogTitle>Bulk Import Users</DialogTitle>
+                    <DialogDescription>
+                        Create multiple users at once by uploading a CSV file.
+                    </DialogDescription>
                 </DialogHeader>
-                <div className="py-4">
-                    <Input type="file" accept=".csv" onChange={(e) => setImportFile(e.target.files?.[0] || null)} />
+                
+                <div className="py-4 space-y-6">
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div className="text-sm text-gray-600">
+                            <p className="font-medium text-gray-900 mb-1">Need the exact format?</p>
+                            <p>Download the CSV template with example data.</p>
+                        </div>
+                        <Button variant="outline" size="sm" onClick={handleDownloadTemplate} className="shrink-0 bg-white">
+                            <Download className="w-4 h-4 mr-2 text-indigo-600" /> Template
+                        </Button>
+                    </div>
+
+                    <div className="grid gap-2">
+                        <Label>Upload your completed CSV</Label>
+                        <Input 
+                            type="file" 
+                            accept=".csv" 
+                            className="cursor-pointer"
+                            onChange={(e) => setImportFile(e.target.files?.[0] || null)} 
+                        />
+                    </div>
                 </div>
+
                 <DialogFooter>
-                    <Button disabled={!importFile || isImporting} onClick={handleImport}>
+                    <Button variant="outline" onClick={() => { setIsImportDialogOpen(false); setImportFile(null); }}>
+                        Cancel
+                    </Button>
+                    <Button disabled={!importFile || isImporting} onClick={handleImport} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                        {isImporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <UploadCloud className="w-4 h-4 mr-2" />}
                         {isImporting ? "Importing..." : "Start Import"}
                     </Button>
                 </DialogFooter>
             </DialogContent>
         </Dialog>
 
-        {/* Delete Confirmation Dialog */}
+         {/* Delete Confirmation Dialog */}
          <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>Delete User</DialogTitle>
+                    <div className="flex items-center gap-2 text-red-600 mb-2">
+                        <Trash className="h-5 w-5" />
+                        <DialogTitle>Delete User</DialogTitle>
+                    </div>
                     <DialogDescription>
-                        Are you sure you want to delete this user? This action cannot be undone.
+                        Are you sure you want to completely remove <strong>{selectedUser?.name}</strong> from the system? This action cannot be undone.
                     </DialogDescription>
                 </DialogHeader>
-                <DialogFooter>
+                <DialogFooter className="mt-4">
                     <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>Cancel</Button>
-                    <Button variant="destructive" onClick={handleDeleteUser}>Delete</Button>
+                    <Button variant="destructive" onClick={handleDeleteUser}>Yes, Delete User</Button>
                 </DialogFooter>
             </DialogContent>
         </Dialog>

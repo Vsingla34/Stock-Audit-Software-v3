@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useInventory } from "@/context/InventoryContext";
 import { useCompany } from "@/context/CompanyContext";
+import { useUser } from "@/context/UserContext"; // 🔥 FIX: Added missing import
 import SupabaseDataService from "@/services/SupabaseDataService";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import {
@@ -20,12 +21,21 @@ import {
   CartesianGrid
 } from "recharts";
 import { format, parseISO } from "date-fns";
-import { AlertCircle, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { AlertCircle, TrendingUp, TrendingDown, Minus, Users } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 const Analytics = () => {
   const { auditedItems, itemMaster, assignments, locations } = useInventory();
   const { selectedAssignmentId, selectedCompanyId } = useCompany();
+  const { currentUser } = useUser(); // 🔥 FIX: Pulled currentUser from context
   
   const [previousReport, setPreviousReport] = useState<any>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -50,22 +60,44 @@ const Analytics = () => {
     return auditedItems.filter(i => i.location === locationName);
   }, [auditedItems, locationName]);
 
-  // 3. Calculate Current Stats (Live)
+  // 3. Calculate Current Stats (Quantity-Based)
   const currentStats = useMemo(() => {
-    const total = currentItemsMaster.length;
-    const audited = currentAuditedItems.filter(i => i.status && i.status !== 'pending').length; 
-    const discrepancies = currentAuditedItems.filter(i => i.status === 'discrepancy').length;
-    const matched = currentAuditedItems.filter(i => i.status === 'matched').length;
-    
-    const discrepancyRate = audited > 0 ? (discrepancies / audited) * 100 : 0;
-    const matchRate = audited > 0 ? (matched / audited) * 100 : 0;
+    let expectedQty = 0;
+    let foundQty = 0;
+    let matchedQty = 0;
+    let varianceQty = 0;
+    let pendingQty = 0;
+
+    currentItemsMaster.forEach(item => {
+      const sq = Number(item.systemQuantity) || 0;
+      expectedQty += sq;
+      
+      if (!item.status || item.status === 'pending') {
+        pendingQty += sq;
+      }
+    });
+
+    currentAuditedItems.forEach(item => {
+      const pq = Number(item.physicalQuantity) || 0;
+      const sq = Number(item.systemQuantity) || 0;
+      foundQty += pq;
+
+      if (item.status === 'matched' || (item.status !== 'pending' && pq === sq)) {
+        matchedQty += pq;
+      } else if (item.status === 'discrepancy') {
+        varianceQty += Math.abs(pq - sq);
+      }
+    });
+
+    const discrepancyRate = foundQty > 0 ? (varianceQty / foundQty) * 100 : 0;
+    const matchRate = foundQty > 0 ? (matchedQty / foundQty) * 100 : 0;
 
     return {
-      total,
-      audited,
-      pending: total - audited,
-      discrepancies,
-      matched,
+      expectedQty,
+      foundQty,
+      pendingQty,
+      varianceQty,
+      matchedQty,
       discrepancyRate,
       matchRate
     };
@@ -80,15 +112,10 @@ const Analytics = () => {
       try {
         const history = await SupabaseDataService.getAuditHistory(selectedCompanyId);
         
-        // Find the LATEST finalized report for this location that is NOT the current assignment.
         const locationReports = history.filter((r: any) => {
-           // 1. Check Location Match
            const rLocName = r.locations?.name || r.report_data?.metadata?.location_name;
            const isLocationMatch = rLocName === locationName;
-           
-           // 2. Ensure it is NOT the current assignment
            const isNotCurrent = r.assignment_id !== currentAssignment.id;
-
            return isLocationMatch && isNotCurrent;
         });
 
@@ -108,131 +135,130 @@ const Analytics = () => {
     fetchPrevious();
   }, [selectedCompanyId, currentAssignment, locationName]);
 
-  // 5. Prepare Comparison Data (Robust Recalculation)
+  // 5. Prepare Comparison Data (Quantity-Based)
   const comparisonData = useMemo(() => {
     const items = previousReport?.report_data?.items || [];
     
-    let prevAudited = 0;
-    let prevDiscrepancies = 0;
-    let prevMatched = 0;
-    let prevTotal = 0;
+    let prevFoundQty = 0;
+    let prevMatchedQty = 0;
+    let prevVarianceQty = 0;
 
     if (items.length > 0) {
-      prevTotal = items.length;
       items.forEach((item: any) => {
-        // Robust check for audited status
-        // Some reports might have missing status, so we check if physical_quantity is a valid number
         const hasPhysicalQty = item.physical_quantity !== undefined && item.physical_quantity !== null && item.physical_quantity !== "";
         const isAudited = (item.status && item.status !== 'pending') || hasPhysicalQty;
         
         if (isAudited) {
-          prevAudited++;
+          const sq = Number(item.system_quantity || 0);
+          const pq = Number(item.physical_quantity || 0);
+          const variance = Math.abs(pq - sq);
           
-          // Robust Match Logic:
-          // 1. Explicit 'matched' status
-          // 2. Variance is exactly 0 (handling string '0')
-          // 3. Physical matches System explicitly
-          const sys = Number(item.system_quantity || 0);
-          const phy = Number(item.physical_quantity || 0);
-          const variance = Number(item.variance || 0);
+          prevFoundQty += pq;
 
-          if (item.status === 'matched' || variance === 0 || sys === phy) {
-            prevMatched++;
+          if (item.status === 'matched' || variance === 0 || sq === pq) {
+            prevMatchedQty += pq;
           } else {
-            prevDiscrepancies++;
+            prevVarianceQty += variance;
           }
         }
       });
     } else if (previousReport?.report_data?.summary) {
-      // Fallback
       const s = previousReport.report_data.summary;
-      prevAudited = Number(s.auditedItems || 0);
-      prevDiscrepancies = Number(s.discrepancies || 0);
-      prevMatched = Number(s.matched || 0);
-      prevTotal = Number(s.totalItems || 0);
+      prevFoundQty = Number(s.totalPhysicalQty || 0);
+      prevVarianceQty = Number(s.discrepancies || 0); // Not exact qty, but fallback
     }
 
-    const prevDiscRate = prevAudited > 0 ? (prevDiscrepancies / prevAudited) * 100 : 0;
-    const prevMatchRate = prevAudited > 0 ? (prevMatched / prevAudited) * 100 : 0;
+    const prevDiscRate = prevFoundQty > 0 ? (prevVarianceQty / prevFoundQty) * 100 : 0;
+    const prevMatchRate = prevFoundQty > 0 ? (prevMatchedQty / prevFoundQty) * 100 : 0;
 
     return {
       chart: [
         {
-          metric: "Discrepancy Rate",
+          metric: "Discrepancy Rate (Qty)",
           Previous: previousReport ? Number(prevDiscRate.toFixed(1)) : 0,
           Current: Number(currentStats.discrepancyRate.toFixed(1)),
         },
         {
-          metric: "Match Rate",
+          metric: "Match Rate (Qty)",
           Previous: previousReport ? Number(prevMatchRate.toFixed(1)) : 0,
           Current: Number(currentStats.matchRate.toFixed(1)),
         }
       ],
       prevStats: {
-        total: prevTotal,
-        audited: prevAudited,
-        discrepancies: prevDiscrepancies,
-        matched: prevMatched
+        foundQty: prevFoundQty,
       }
     };
   }, [previousReport, currentStats]);
 
-  // --- EXISTING GRAPHS LOGIC ---
+  // --- QUANTITY BASED GRAPHS LOGIC ---
+  
   const categoryData = useMemo(() => {
-    const categories: Record<string, { total: number; discrepant: number }> = {};
+    const categories: Record<string, { expectedQty: number; varianceQty: number }> = {};
     currentAuditedItems.forEach(item => {
       const cat = item.category || "Uncategorized";
-      if (!categories[cat]) categories[cat] = { total: 0, discrepant: 0 };
-      categories[cat].total += 1;
-      if (item.status === 'discrepancy') categories[cat].discrepant += 1;
+      if (!categories[cat]) categories[cat] = { expectedQty: 0, varianceQty: 0 };
+      
+      const sq = Number(item.systemQuantity) || 0;
+      const pq = Number(item.physicalQuantity) || 0;
+      
+      categories[cat].expectedQty += sq;
+      if (item.status === 'discrepancy') {
+          categories[cat].varianceQty += Math.abs(pq - sq);
+      }
     });
 
     return Object.entries(categories)
-      .map(([name, { total, discrepant }]) => ({
+      .map(([name, { expectedQty, varianceQty }]) => ({
         name,
-        rate: total > 0 ? Math.round((discrepant / total) * 100) : 0,
-        total
+        rate: expectedQty > 0 ? Math.round((varianceQty / expectedQty) * 100) : (varianceQty > 0 ? 100 : 0),
+        totalQty: expectedQty
       }))
-      .filter(i => i.total > 0)
+      .filter(i => i.totalQty > 0 || i.rate > 0)
       .sort((a, b) => b.rate - a.rate);
   }, [currentAuditedItems]);
 
   const auditTrendData = useMemo(() => {
     const trendMap: Record<string, number> = {};
     currentAuditedItems.forEach(item => {
-      if (!item.lastAudited) return;
-      try {
-        const dateKey = format(parseISO(item.lastAudited), 'yyyy-MM-dd');
-        trendMap[dateKey] = (trendMap[dateKey] || 0) + 1;
-      } catch {}
+      if (item.auditorEntries && item.auditorEntries.length > 0) {
+          item.auditorEntries.forEach(entry => {
+              if (entry.auditedAt) {
+                  try {
+                      const dateKey = format(parseISO(entry.auditedAt), 'yyyy-MM-dd');
+                      trendMap[dateKey] = (trendMap[dateKey] || 0) + (Number(entry.quantityFound) || 0);
+                  } catch {}
+              }
+          });
+      }
     });
     return Object.entries(trendMap)
       .map(([date, count]) => ({ date, count }))
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [currentAuditedItems]);
 
-  const auditorPerformanceData = useMemo(() => {
+  // Master array of all auditor quantities
+  const allAuditorPerformanceData = useMemo(() => {
     const counts: Record<string, number> = {};
     currentAuditedItems.forEach(item => {
       if (item.auditorEntries && item.auditorEntries.length > 0) {
         item.auditorEntries.forEach(entry => {
           const name = entry.auditorName || "Unknown";
-          counts[name] = (counts[name] || 0) + 1;
+          counts[name] = (counts[name] || 0) + (Number(entry.quantityFound) || 0);
         });
-      } else if (item.status !== 'pending') {
-        counts["Unknown"] = (counts["Unknown"] || 0) + 1;
       }
     });
     return Object.entries(counts)
       .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
+      .sort((a, b) => b.count - a.count);
   }, [currentAuditedItems]);
 
+  // Sliced array for the bar chart
+  const topAuditorsChartData = useMemo(() => allAuditorPerformanceData.slice(0, 10), [allAuditorPerformanceData]);
+
   const statusData = [
-    { name: "Matched", value: currentStats.matched, color: "#22c55e" },
-    { name: "Discrepancies", value: currentStats.discrepancies, color: "#ef4444" },
-    { name: "Pending", value: currentStats.pending, color: "#cbd5e1" },
+    { name: "Matched Qty", value: currentStats.matchedQty, color: "#22c55e" },
+    { name: "Variance Qty", value: currentStats.varianceQty, color: "#ef4444" },
+    { name: "Pending Expected Qty", value: currentStats.pendingQty, color: "#cbd5e1" },
   ];
 
   if (!selectedAssignmentId) {
@@ -255,7 +281,7 @@ const Analytics = () => {
     <AppLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900">Assignment Analytics</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-gray-900">Volume Analytics</h1>
           <div className="flex items-center gap-2 text-muted-foreground mt-1">
               <span>{locationName}</span>
               <span>•</span>
@@ -268,7 +294,7 @@ const Analytics = () => {
            <Card className="border-indigo-100 bg-gradient-to-br from-white to-indigo-50/50 shadow-sm">
              <CardHeader>
                <CardTitle className="flex items-center gap-2 text-indigo-900">
-                 <TrendingUp className="h-5 w-5" /> Current vs Previous Audit
+                 <TrendingUp className="h-5 w-5" /> Current vs Previous Audit (By Quantity)
                </CardTitle>
                <CardDescription>
                  Comparing performance against audit finalized on {format(new Date(previousReport.finalized_at), "MMM dd, yyyy")}
@@ -285,7 +311,7 @@ const Analytics = () => {
                     >
                       <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} />
                       <XAxis type="number" unit="%" domain={[0, 100]} />
-                      <YAxis dataKey="metric" type="category" width={120} tick={{fontWeight: 'bold'}} />
+                      <YAxis dataKey="metric" type="category" width={150} tick={{fontWeight: 'bold'}} />
                       <Tooltip 
                           cursor={{fill: 'transparent'}}
                           contentStyle={{ borderRadius: '8px' }}
@@ -324,7 +350,7 @@ const Analytics = () => {
                       <div>
                           <p className="text-xs text-gray-500 uppercase font-semibold">Volume Comparison</p>
                           <p className="text-sm font-medium">
-                             {currentStats.total} items vs {comparisonData.prevStats.total} prev
+                             {currentStats.foundQty} Qty vs {comparisonData.prevStats.foundQty} Qty prev
                           </p>
                       </div>
                    </div>
@@ -346,7 +372,7 @@ const Analytics = () => {
           
           {/* Status */}
           <Card>
-            <CardHeader><CardTitle>Audit Progress</CardTitle></CardHeader>
+            <CardHeader><CardTitle>Audit Progress (By Quantity)</CardTitle></CardHeader>
             <CardContent className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -363,7 +389,7 @@ const Analytics = () => {
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
-                  <Tooltip />
+                  <Tooltip formatter={(val: number) => [val, "Quantity"]} />
                   <Legend />
                 </PieChart>
               </ResponsiveContainer>
@@ -372,14 +398,14 @@ const Analytics = () => {
 
           {/* Activity Trend */}
           <Card>
-            <CardHeader><CardTitle>Daily Scan Velocity</CardTitle></CardHeader>
+            <CardHeader><CardTitle>Daily Scan Velocity (Quantity)</CardTitle></CardHeader>
             <CardContent className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={auditTrendData}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="date" tickFormatter={(t) => format(parseISO(t), 'MMM dd')} />
                   <YAxis />
-                  <Tooltip labelFormatter={(t) => format(parseISO(t), 'PP')} />
+                  <Tooltip labelFormatter={(t) => format(parseISO(t), 'PP')} formatter={(val: number) => [val, "Qty Scanned"]} />
                   <Line type="monotone" dataKey="count" stroke="#8b5cf6" strokeWidth={3} />
                 </LineChart>
               </ResponsiveContainer>
@@ -388,15 +414,15 @@ const Analytics = () => {
 
           {/* Auditor Leaderboard */}
           <Card>
-            <CardHeader><CardTitle>Auditor Leaderboard</CardTitle></CardHeader>
+            <CardHeader><CardTitle>Top 10 Auditors</CardTitle></CardHeader>
             <CardContent className="h-72">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={auditorPerformanceData} layout="vertical">
+                <BarChart data={topAuditorsChartData} layout="vertical">
                   <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} />
                   <XAxis type="number" />
-                  <YAxis dataKey="name" type="category" width={100} />
-                  <Tooltip />
-                  <Bar dataKey="count" fill="#0ea5e9" radius={[0, 4, 4, 0]} name="Items Scanned" />
+                  <YAxis dataKey="name" type="category" width={110} tick={{fontSize: 12}} />
+                  <Tooltip formatter={(val: number) => [val, "Qty Found"]} />
+                  <Bar dataKey="count" fill="#0ea5e9" radius={[0, 4, 4, 0]} name="Quantity Found" />
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>
@@ -404,21 +430,66 @@ const Analytics = () => {
 
           {/* Error Rate by Category */}
           <Card>
-            <CardHeader><CardTitle>High Error Categories</CardTitle></CardHeader>
+            <CardHeader><CardTitle>High Error Categories (By Qty Variance)</CardTitle></CardHeader>
             <CardContent className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={categoryData}>
                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
                    <XAxis dataKey="name" angle={-20} textAnchor="end" height={60} interval={0} fontSize={10} />
                    <YAxis unit="%" />
-                   <Tooltip formatter={(val: number) => [`${val}%`, "Error Rate"]} />
-                   <Bar dataKey="rate" fill="#f97316" radius={[4, 4, 0, 0]} name="Discrepancy %" />
+                   <Tooltip formatter={(val: number) => [`${val}%`, "Variance Rate"]} />
+                   <Bar dataKey="rate" fill="#f97316" radius={[4, 4, 0, 0]} name="Variance %" />
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>
           </Card>
 
         </div>
+
+        {/* 🔥 NEW: FULL AUDITOR BREAKDOWN TABLE */}
+        <Card className="border-gray-200 shadow-sm mt-6 mb-20">
+          <CardHeader className="bg-gray-50/50 border-b border-gray-100">
+            <CardTitle className="flex items-center gap-2 text-gray-900">
+              <Users className="h-5 w-5 text-indigo-600" />
+              Auditor Scan Summary
+            </CardTitle>
+            <CardDescription>Total physical quantity collected by every auditor during this assignment.</CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-gray-50 hover:bg-gray-50">
+                  <TableHead className="font-semibold text-gray-700">Auditor Account / Email</TableHead>
+                  <TableHead className="text-right font-semibold text-gray-700">Total Quantity Collected</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {allAuditorPerformanceData.length > 0 ? (
+                  allAuditorPerformanceData.map((auditor, index) => (
+                    <TableRow key={index} className="hover:bg-indigo-50/30 transition-colors">
+                      <TableCell className="font-medium text-gray-900">
+                        {auditor.name}
+                        {auditor.name === currentUser?.email && (
+                           <span className="ml-2 text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-bold tracking-wide uppercase">You</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-gray-700 text-base">
+                        {auditor.count.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={2} className="h-24 text-center text-gray-500">
+                      No scans have been recorded for this assignment yet.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+
       </div>
     </AppLayout>
   );
