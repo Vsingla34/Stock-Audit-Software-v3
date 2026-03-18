@@ -8,24 +8,12 @@ import {
   CheckCircle2, 
   MapPin,
   Send,
-  Boxes,
-  Search
+  Boxes
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { useState, useMemo, useEffect } from "react";
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer, 
-  Cell 
-} from "recharts";
+import { useState, useMemo } from "react";
 
 export const InventoryOverview = () => {
   const navigate = useNavigate();
@@ -43,23 +31,6 @@ export const InventoryOverview = () => {
   
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Search States for the new cards
-  const [skuSearchQuery, setSkuSearchQuery] = useState("");
-  const [categorySearchQuery, setCategorySearchQuery] = useState("");
-
-  // 🔥 PERFORMANCE: Lazy Loading States
-  const [skuVisibleCount, setSkuVisibleCount] = useState(50);
-  const [categoryVisibleCount, setCategoryVisibleCount] = useState(50);
-
-  // Reset lazy load count when searching
-  useEffect(() => {
-    setSkuVisibleCount(50);
-  }, [skuSearchQuery]);
-
-  useEffect(() => {
-    setCategoryVisibleCount(50);
-  }, [categorySearchQuery]);
-
   // 1. Get Current Assignment & Location
   const currentAssignment = assignments.find(a => a.id === selectedAssignmentId);
   
@@ -72,8 +43,7 @@ export const InventoryOverview = () => {
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
   const isClient = isClientUser();
 
-  // Extract latest items calculation to share between stats and charts
- // 🔥 PERFORMANCE FIX: O(N) Hash Map instead of O(N^2) Array.find()
+  // 🔥 PERFORMANCE FIX: O(N) Hash Map instead of O(N^2) Array.find()
   const latestItems = useMemo(() => {
     if (!selectedAssignmentId) return [];
 
@@ -95,16 +65,16 @@ export const InventoryOverview = () => {
 
   // 2. Calculate Top Stats
   const stats = useMemo(() => {
-    const totalStock = latestItems.reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
+    const totalStock = latestItems.reduce((sum, item) => sum + (Number(item.systemQuantity) || 0), 0);
     const activeAuditedItems = latestItems.filter(item => item.status && item.status !== 'pending');
-    const auditedStock = activeAuditedItems.reduce((sum, item) => sum + (item.physicalQuantity || 0), 0);
+    const auditedStock = activeAuditedItems.reduce((sum, item) => sum + (Number(item.physicalQuantity) || 0), 0);
     const matchedItems = latestItems.filter(item => item.status === 'matched');
-    const matchedStock = matchedItems.reduce((sum, item) => sum + (item.physicalQuantity || 0), 0);
+    const matchedStock = matchedItems.reduce((sum, item) => sum + (Number(item.physicalQuantity) || 0), 0);
     
     const discrepancyItems = latestItems.filter(item => item.status === 'discrepancy');
     const discrepancyStock = discrepancyItems.reduce((sum, item) => {
-        const sys = item.systemQuantity || 0;
-        const phy = item.physicalQuantity || 0;
+        const sys = Number(item.systemQuantity) || 0;
+        const phy = Number(item.physicalQuantity) || 0;
         return sum + (phy - sys);
     }, 0);
 
@@ -124,59 +94,6 @@ export const InventoryOverview = () => {
     };
   }, [latestItems]);
 
-  // 3. Dynamic Data for Scalable Charts
-  
-  // --- VARIANCE BY SKU ---
-  const allVarianceData = useMemo(() => {
-    return latestItems
-      .filter(item => item.status && item.status !== 'pending')
-      .map(item => ({
-        sku: item.sku,
-        variance: (item.physicalQuantity || 0) - (item.systemQuantity || 0)
-      }))
-      .sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance)); 
-  }, [latestItems]);
-
-  const filteredVarianceData = useMemo(() => {
-    if (!skuSearchQuery) return allVarianceData;
-    return allVarianceData.filter(v => v.sku.toLowerCase().includes(skuSearchQuery.toLowerCase()));
-  }, [allVarianceData, skuSearchQuery]);
-
-  // Slice data for performance
-  const visibleVarianceData = useMemo(() => {
-    return filteredVarianceData.slice(0, skuVisibleCount);
-  }, [filteredVarianceData, skuVisibleCount]);
-
-  // --- PROGRESS BY CATEGORY ---
-  const allCategoryProgress = useMemo(() => {
-    const categoryMap = new Map();
-    latestItems.forEach(item => {
-        const cat = item.category && item.category !== "-" ? item.category : 'Uncategorized';
-        if (!categoryMap.has(cat)) {
-            categoryMap.set(cat, { name: cat, current: 0, total: 0 });
-        }
-        const catData = categoryMap.get(cat);
-        catData.total += 1;
-        if (item.status && item.status !== 'pending') {
-            catData.current += 1;
-        }
-    });
-
-    return Array.from(categoryMap.values())
-        .sort((a, b) => b.total - a.total); 
-  }, [latestItems]);
-
-  const filteredCategoryProgress = useMemo(() => {
-    if (!categorySearchQuery) return allCategoryProgress;
-    return allCategoryProgress.filter(c => c.name.toLowerCase().includes(categorySearchQuery.toLowerCase()));
-  }, [allCategoryProgress, categorySearchQuery]);
-
-  // Slice data for performance
-  const visibleCategoryData = useMemo(() => {
-    return filteredCategoryProgress.slice(0, categoryVisibleCount);
-  }, [filteredCategoryProgress, categoryVisibleCount]);
-
-  const handleGoToReports = () => navigate("/reports");
   const handleSubmitReport = async () => {
     if (!selectedAssignmentId) return;
     if (confirm("Are you sure you want to submit this report to the client?")) {
@@ -192,25 +109,8 @@ export const InventoryOverview = () => {
     }
   };
 
-  // 🔥 PERFORMANCE: Scroll Handlers
-  const handleSkuScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const { scrollTop, clientHeight, scrollHeight } = e.currentTarget;
-    // If scrolled within 50px of the bottom, load more
-    if (scrollHeight - scrollTop <= clientHeight + 50) {
-      if (skuVisibleCount < filteredVarianceData.length) {
-        setSkuVisibleCount(prev => prev + 50);
-      }
-    }
-  };
-
-  const handleCategoryScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const { scrollTop, clientHeight, scrollHeight } = e.currentTarget;
-    // If scrolled within 50px of the bottom, load more
-    if (scrollHeight - scrollTop <= clientHeight + 50) {
-      if (categoryVisibleCount < filteredCategoryProgress.length) {
-        setCategoryVisibleCount(prev => prev + 50);
-      }
-    }
+  const handleGoToReports = () => {
+    navigate("/reports");
   };
 
   return (
@@ -316,7 +216,7 @@ export const InventoryOverview = () => {
         </div>
 
         {/* Progress Bar */}
-        <div className="mt-6">
+        <div className="mt-6 mb-4">
           <div className="flex justify-between text-sm mb-2">
             <span className="font-medium text-gray-700">Audit Progress (by Volume)</span>
           </div>
@@ -330,149 +230,6 @@ export const InventoryOverview = () => {
             <span>{stats.auditedSkus} of {stats.totalSkus} SKUs touched</span>
             <span>{stats.auditedStock.toLocaleString()} of {stats.totalStock.toLocaleString()} quantity found</span>
           </div>
-        </div>
-
-        {/* Scalable & Scrollable Data Visualization Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-[14px] mt-[20px] items-stretch">
-          
-          {/* Left Card - Variance by SKU */}
-          <Card className="shadow-none border border-gray-200 rounded-[12px] p-4 flex flex-col">
-             <div className="text-[13px] text-gray-500 mb-2">Variance by SKU</div>
-             
-             {/* Search Input */}
-             <div className="relative mb-3 shrink-0">
-               <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-gray-400" />
-               <Input
-                  placeholder="Search SKU..."
-                  className="w-full h-8 pl-8 text-[12px] rounded border-gray-200"
-                  value={skuSearchQuery}
-                  onChange={e => setSkuSearchQuery(e.target.value)}
-               />
-             </div>
-
-             {/* Scrollable Container */}
-             <div 
-                className="flex-1 max-h-[320px] overflow-y-auto pr-1" 
-                style={{ scrollbarWidth: 'thin' }}
-                onScroll={handleSkuScroll}
-              >
-                {visibleVarianceData.length > 0 ? (
-                  <div style={{ height: `${Math.max(200, visibleVarianceData.length * 36)}px`, width: '100%' }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={visibleVarianceData} layout="vertical" margin={{ top: 0, right: 10, left: -20, bottom: 0 }}>
-                         <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#eee" />
-                         <XAxis type="number" tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} />
-                         <YAxis dataKey="sku" type="category" tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} width={90} />
-                         <Tooltip 
-                           cursor={{ fill: 'rgba(0,0,0,0.05)' }} 
-                           contentStyle={{ borderRadius: '8px', fontSize: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} 
-                         />
-                         <Bar dataKey="variance" radius={[4, 4, 4, 4]} barSize={16}>
-                           {visibleVarianceData.map((entry, index) => (
-                             <Cell key={`cell-${index}`} fill={entry.variance < 0 ? '#F09595' : entry.variance > 0 ? '#97C459' : '#e5e7eb'} />
-                           ))}
-                         </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                ) : (
-                  <div className="h-full flex items-center justify-center text-[12px] text-gray-400 py-10">
-                    {skuSearchQuery ? "No SKUs match search." : "No variances recorded yet."}
-                  </div>
-                )}
-             </div>
-
-             <div className="text-[11px] text-gray-500 mt-3 pt-2 border-t border-gray-100 shrink-0">
-                Showing {visibleVarianceData.length} of {filteredVarianceData.length} active SKUs
-             </div>
-          </Card>
-
-          {/* Right Card - Progress by category */}
-          <Card className="shadow-none border border-gray-200 rounded-[12px] p-4 flex flex-col">
-             <div className="text-[13px] text-gray-500 mb-2">Progress by category</div>
-             
-             {/* Search Input */}
-             <div className="relative mb-3 shrink-0">
-               <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-gray-400" />
-               <Input
-                  placeholder="Search category..."
-                  className="w-full h-8 pl-8 text-[12px] rounded border-gray-200"
-                  value={categorySearchQuery}
-                  onChange={e => setCategorySearchQuery(e.target.value)}
-               />
-             </div>
-
-             {/* Scrollable Container */}
-             <div 
-                className="flex-1 max-h-[320px] overflow-y-auto pr-2" 
-                style={{ scrollbarWidth: 'thin' }}
-                onScroll={handleCategoryScroll}
-              >
-                <div className="flex flex-col">
-                  {visibleCategoryData.map((cat, i) => {
-                      const percentage = cat.total > 0 ? Math.round((cat.current / cat.total) * 100) : 0;
-                      
-                      let barColor = '#F09595'; // Red for At Risk (<50%)
-                      let textColor = 'text-[#F09595]';
-                      
-                      if (percentage >= 100) { 
-                        barColor = '#3266ad'; // Blue for Complete
-                        textColor = 'text-[#3266ad]'; 
-                      } else if (percentage >= 50) { 
-                        barColor = '#EF9F27'; // Amber for In Progress (50-99%)
-                        textColor = 'text-[#EF9F27]'; 
-                      }
-                      
-                      return (
-                          <div key={i} className={`flex items-center py-[10px] ${i !== visibleCategoryData.length - 1 ? 'border-b border-gray-100' : ''}`}>
-                              <div className="w-[100px] text-[13px] text-gray-700 truncate pr-2" title={cat.name}>
-                                {cat.name}
-                              </div>
-                              <div className="flex-1 mx-2 h-[6px] bg-gray-100 rounded-full overflow-hidden">
-                                  <div 
-                                    className="h-full rounded-full transition-all duration-500" 
-                                    style={{ width: `${Math.min(percentage, 100)}%`, backgroundColor: barColor }} 
-                                  />
-                              </div>
-                              <div className="w-[45px] text-right text-[12px] text-gray-500">
-                                {cat.current}/{cat.total}
-                              </div>
-                              <div className={`w-[35px] text-right text-[11px] font-medium ${textColor}`}>
-                                {percentage}%
-                              </div>
-                          </div>
-                      )
-                  })}
-                  {visibleCategoryData.length === 0 && (
-                    <div className="text-center text-[12px] text-gray-400 py-10">
-                      {categorySearchQuery ? "No categories match search." : "No categories found."}
-                    </div>
-                  )}
-                </div>
-             </div>
-
-             {/* Legend & Summary (Fixed outside scroll) */}
-             <div className="mt-auto pt-3 border-t border-gray-100 shrink-0">
-                <div className="flex items-center gap-4 mb-1.5">
-                    <div className="flex items-center gap-1.5">
-                        <div className="w-2.5 h-2.5 rounded-[2px] bg-[#3266ad]" />
-                        <span className="text-[11px] text-gray-500">Complete</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                        <div className="w-2.5 h-2.5 rounded-[2px] bg-[#EF9F27]" />
-                        <span className="text-[11px] text-gray-500">In progress</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                        <div className="w-2.5 h-2.5 rounded-[2px] bg-[#F09595]" />
-                        <span className="text-[11px] text-gray-500">At risk</span>
-                    </div>
-                </div>
-                <div className="text-[11px] text-gray-500">
-                    Showing {visibleCategoryData.length} of {filteredCategoryProgress.length} active categories
-                </div>
-             </div>
-          </Card>
-
         </div>
 
       </CardContent>
