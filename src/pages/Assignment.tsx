@@ -65,7 +65,8 @@ interface CompanyOption {
   name: string;
 }
 
-interface AuditorOption {
+// Reusable interface for both Auditors and Clients
+interface UserOption {
   id: string;
   name: string;
   email: string;
@@ -99,23 +100,28 @@ const AssignmentPage = () => {
   const [selectedLocationId, setSelectedLocationId] = useState<string>("");
   const [selectedStatus, setSelectedStatus] = useState<AuditStatus>("pending");
   const [selectedDate, setSelectedDate] = useState<string>(""); 
+  
   const [selectedAuditorIds, setSelectedAuditorIds] = useState<string[]>([]);
+  const [selectedClientIds, setSelectedClientIds] = useState<string[]>([]); // 🔥 Added client selection state
 
-  // OTP Verification State
   const [isVerificationOpen, setIsVerificationOpen] = useState(false);
   const [otpCode, setOtpCode] = useState("");
   const [verificationPendingRow, setVerificationPendingRow] = useState<AssignmentRow | null>(null);
   const [verificationStatus, setVerificationStatus] = useState<"idle" | "sending" | "verifying">("idle");
 
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
-  const [companyUuidMap, setCompanyUuidMap] = useState<Map<string, string>>(new Map());
   
-  const [auditors, setAuditors] = useState<AuditorOption[]>([]);
-  const [filteredAuditors, setFilteredAuditors] = useState<AuditorOption[]>([]);
-  const [loadingAuditors, setLoadingAuditors] = useState(false);
+  // Auditor States
+  const [auditors, setAuditors] = useState<UserOption[]>([]);
+  const [filteredAuditors, setFilteredAuditors] = useState<UserOption[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false); // Generic loading for users
+  const [auditorMap, setAuditorMap] = useState<Map<string, string>>(new Map());
+
+  // Client States
+  const [clients, setClients] = useState<UserOption[]>([]);
+  const [filteredClients, setFilteredClients] = useState<UserOption[]>([]);
 
   const [companyMap, setCompanyMap] = useState<Map<string, string>>(new Map());
-  const [auditorMap, setAuditorMap] = useState<Map<string, string>>(new Map());
 
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isAdmin = currentUser?.role === "admin";
@@ -131,17 +137,20 @@ const AssignmentPage = () => {
         }
         setCompanies(accessibleCompanies);
         setCompanyMap(new Map(companyData.map(c => [c.id, c.name])));
-        setCompanyUuidMap(new Map(companyData.map(c => [c.id, c.id])));
       }
 
-      // 2. Fetch Auditors with Assigned Companies
-      const { data: auditorData, error } = await supabase
+      // 2. Fetch ALL relevant users (Auditors and Clients)
+      const { data: userData, error } = await supabase
         .from("user_profiles")
-        .select("id, name, email, assigned_companies")
-        .eq("role", "auditor");
+        .select("id, name, email, assigned_companies, role")
+        .in("role", ["auditor", "client"]);
       
-      if (auditorData) {
+      if (userData) {
+        const auditorData = userData.filter(u => u.role === 'auditor');
+        const clientData = userData.filter(u => u.role === 'client');
+
         setAuditors(auditorData);
+        setClients(clientData);
         setAuditorMap(new Map(auditorData.map(a => [a.id, a.name])));
       }
     };
@@ -185,7 +194,7 @@ const AssignmentPage = () => {
           locationId: a.locationId,
           locationName: locName,
           status: a.status,
-          completionDate: a.endDate,
+          completionDate: a.scheduledDate, // Fix date mapping
           auditorNames: auditorNames as string[]
         };
       });
@@ -194,10 +203,10 @@ const AssignmentPage = () => {
       setLoading(false);
     };
 
-    if (companies.length > 0 && auditors.length > 0) {
+    if (companies.length > 0 && (auditors.length > 0 || clients.length > 0)) {
         loadAssignments();
     }
-  }, [selectedCompanyId, contextAssignments, contextLocations, isSuperAdmin, isAdmin, companyMap, auditorMap, companies.length, auditors.length]);
+  }, [selectedCompanyId, contextAssignments, contextLocations, isSuperAdmin, isAdmin, companyMap, auditorMap, companies.length, auditors.length, clients.length]);
 
   const openDialog = (mode: "create" | "modify", assignment?: AssignmentRow) => {
     setDialogMode(mode);
@@ -206,12 +215,13 @@ const AssignmentPage = () => {
       setTargetCompanyId(assignment.companyId);
       setSelectedLocationId(assignment.locationId);
       setSelectedStatus(assignment.status);
-      setSelectedDate(assignment.completionDate);
+      setSelectedDate(assignment.completionDate ? assignment.completionDate.split('T')[0] : "");
       
       const currentAssignment = globalAssignments.find(a => a.id === assignment.dbId);
       setSelectedAuditorIds(currentAssignment?.auditorIds || []);
+      setSelectedClientIds(currentAssignment?.clientIds || []);
       
-      fetchAuditorsForCompany(assignment.companyId);
+      fetchUsersForCompany(assignment.companyId);
 
     } else {
       setSelectedAssignmentIdState(null);
@@ -221,44 +231,56 @@ const AssignmentPage = () => {
       setSelectedStatus("pending");
       setSelectedDate(new Date().toISOString().split('T')[0]);
       setSelectedAuditorIds([]);
+      setSelectedClientIds([]);
       
       if (defaultCompany) {
-          fetchAuditorsForCompany(defaultCompany);
+          fetchUsersForCompany(defaultCompany);
       } else {
           setFilteredAuditors([]);
+          setFilteredClients([]);
       }
     }
     setIsDialogOpen(true);
   };
 
-  const fetchAuditorsForCompany = async (companyId: string) => {
-      setLoadingAuditors(true);
+  const fetchUsersForCompany = async (companyId: string) => {
+      setLoadingUsers(true);
       
       if (!companyId) {
           setFilteredAuditors([]);
-          setLoadingAuditors(false);
+          setFilteredClients([]);
+          setLoadingUsers(false);
           return;
       }
 
+      // Filter Auditors
       const relevantAuditors = auditors.filter(auditor => {
           if (!auditor.assigned_companies) return false;
           return auditor.assigned_companies.includes(companyId);
       });
       
+      // Filter Clients
+      const relevantClients = clients.filter(client => {
+          if (!client.assigned_companies) return false;
+          return client.assigned_companies.includes(companyId);
+      });
+      
       setFilteredAuditors(relevantAuditors);
-      setLoadingAuditors(false);
+      setFilteredClients(relevantClients);
+      setLoadingUsers(false);
   };
 
   const toggleAuditor = (auditorId: string) => {
-    setSelectedAuditorIds(prev => {
-        if (prev.includes(auditorId)) return prev.filter(id => id !== auditorId);
-        return [...prev, auditorId];
-    });
+    setSelectedAuditorIds(prev => prev.includes(auditorId) ? prev.filter(id => id !== auditorId) : [...prev, auditorId]);
+  };
+
+  const toggleClient = (clientId: string) => {
+    setSelectedClientIds(prev => prev.includes(clientId) ? prev.filter(id => id !== clientId) : [...prev, clientId]);
   };
 
   const handleSave = async () => {
     if (!targetCompanyId || !selectedLocationId || !selectedDate) {
-      toast.error("Please fill all fields");
+      toast.error("Please fill all required fields");
       return;
     }
     
@@ -267,19 +289,20 @@ const AssignmentPage = () => {
         companyId: targetCompanyId,
         locationId: selectedLocationId,
         status: selectedStatus,
-        startDate: new Date().toISOString(),
-        endDate: selectedDate,
-        auditorIds: selectedAuditorIds
+        scheduledDate: selectedDate,
+        auditorIds: selectedAuditorIds,
+        clientIds: selectedClientIds // 🔥 Submitting client mappings
       };
 
       if (dialogMode === "create") {
-         await SupabaseDataService.createAssignment(assignmentData);
+         await SupabaseDataService.createAssignment(assignmentData as any);
          toast.success("Assignment created");
       } else if (selectedAssignmentIdState) {
          await SupabaseDataService.updateAssignment(selectedAssignmentIdState, {
             status: selectedStatus,
             scheduledDate: selectedDate,
-            auditorIds: selectedAuditorIds
+            auditorIds: selectedAuditorIds,
+            clientIds: selectedClientIds
          });
          toast.success("Assignment updated");
       }
@@ -318,25 +341,36 @@ const AssignmentPage = () => {
 
   const handleSendOtp = async () => {
     setVerificationStatus("sending");
-    setTimeout(() => {
-        toast.success("OTP sent to your email/phone");
+    try {
+        if (verificationPendingRow) {
+            const msg = await SupabaseDataService.sendAssignmentOtp(verificationPendingRow.dbId);
+            toast.success(msg);
+        }
+    } catch (error: any) {
+        toast.error(error.message || "Failed to send OTP.");
+    } finally {
         setVerificationStatus("idle");
-    }, 1000);
+    }
   };
 
   const handleVerifyOtp = async () => {
-    if (otpCode !== "123456") {
-        toast.error("Invalid OTP");
+    if (otpCode.length < 6) {
+        toast.error("Please enter full 6-digit OTP");
         return;
     }
     setVerificationStatus("verifying");
     if (verificationPendingRow) {
         try {
-            await updateAssignment({ ...globalAssignments.find(a => a.id === verificationPendingRow.dbId)!, status: 'finalized' });
+            const isValid = await SupabaseDataService.verifyAssignmentOtp(verificationPendingRow.dbId, otpCode);
+            if (!isValid) throw new Error("Invalid verification code");
+
+            await updateAssignment(verificationPendingRow.dbId, 'finalized');
             toast.success("Assignment Finalized!");
             setIsVerificationOpen(false);
             window.location.reload();
-        } catch (e) { toast.error("Finalization failed"); }
+        } catch (e: any) { 
+            toast.error(e.message || "Finalization failed"); 
+        }
     }
     setVerificationStatus("idle");
   };
@@ -344,10 +378,8 @@ const AssignmentPage = () => {
   return (
     <AppLayout showSidebar={false}>
       <div className="space-y-6">
-        {/* RESPONSIVE HEADER */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            {/* [Fixed] Removed md:hidden so this button is always visible */}
             <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
                  <ArrowLeft className="h-5 w-5" />
             </Button>
@@ -372,7 +404,6 @@ const AssignmentPage = () => {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
-            {/* RESPONSIVE TABLE WRAPPER */}
             <div className="overflow-x-auto">
                 <Table>
                   <TableHeader className="bg-gray-50">
@@ -440,7 +471,7 @@ const AssignmentPage = () => {
         </Card>
 
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-           <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+           <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
               <DialogHeader><DialogTitle>{dialogMode === 'create' ? 'Create Assignment' : 'Edit Assignment'}</DialogTitle></DialogHeader>
               <div className="grid gap-4 py-4">
                   <div className="space-y-2">
@@ -449,7 +480,7 @@ const AssignmentPage = () => {
                         value={targetCompanyId} 
                         onValueChange={(val) => { 
                             setTargetCompanyId(val); 
-                            fetchAuditorsForCompany(val);
+                            fetchUsersForCompany(val);
                         }}
                       >
                           <SelectTrigger><SelectValue placeholder="Select Company" /></SelectTrigger>
@@ -468,27 +499,55 @@ const AssignmentPage = () => {
                           </SelectContent>
                       </Select>
                   </div>
-                  <div className="space-y-2">
-                      <Label>Auditors</Label>
-                      <div className="border rounded-md p-3 max-h-40 overflow-y-auto space-y-2">
-                          {loadingAuditors ? (
-                              <p className="text-xs text-muted-foreground">Loading auditors...</p>
-                          ) : filteredAuditors.length === 0 ? (
-                              <p className="text-xs text-muted-foreground italic">No auditors assigned to this company.</p>
-                          ) : (
-                              filteredAuditors.map(auditor => (
-                                  <div key={auditor.id} className="flex items-center gap-2">
-                                      <Checkbox 
-                                        checked={selectedAuditorIds.includes(auditor.id)} 
-                                        onCheckedChange={() => toggleAuditor(auditor.id)} 
-                                      />
-                                      <span className="text-sm">{auditor.name}</span>
-                                  </div>
-                              ))
-                          )}
+                  
+                  {/* Two column layout for Auditors and Clients */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {/* Auditors selection */}
+                      <div className="space-y-2">
+                          <Label>Auditors</Label>
+                          <div className="border rounded-md p-3 max-h-40 overflow-y-auto space-y-2 bg-gray-50/50">
+                              {loadingUsers ? (
+                                  <p className="text-xs text-muted-foreground">Loading...</p>
+                              ) : filteredAuditors.length === 0 ? (
+                                  <p className="text-xs text-muted-foreground italic">No auditors found.</p>
+                              ) : (
+                                  filteredAuditors.map(auditor => (
+                                      <div key={auditor.id} className="flex items-center gap-2">
+                                          <Checkbox 
+                                            checked={selectedAuditorIds.includes(auditor.id)} 
+                                            onCheckedChange={() => toggleAuditor(auditor.id)} 
+                                          />
+                                          <span className="text-sm truncate" title={auditor.email}>{auditor.name || auditor.email}</span>
+                                      </div>
+                                  ))
+                              )}
+                          </div>
+                      </div>
+
+                      {/* Clients selection */}
+                      <div className="space-y-2">
+                          <Label>Clients (OTP Recipients)</Label>
+                          <div className="border rounded-md p-3 max-h-40 overflow-y-auto space-y-2 bg-gray-50/50">
+                              {loadingUsers ? (
+                                  <p className="text-xs text-muted-foreground">Loading...</p>
+                              ) : filteredClients.length === 0 ? (
+                                  <p className="text-xs text-muted-foreground italic">No clients found.</p>
+                              ) : (
+                                  filteredClients.map(client => (
+                                      <div key={client.id} className="flex items-center gap-2">
+                                          <Checkbox 
+                                            checked={selectedClientIds.includes(client.id)} 
+                                            onCheckedChange={() => toggleClient(client.id)} 
+                                          />
+                                          <span className="text-sm truncate" title={client.email}>{client.name || client.email}</span>
+                                      </div>
+                                  ))
+                              )}
+                          </div>
                       </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+
+                  <div className="grid grid-cols-2 gap-4 mt-2">
                       <div className="space-y-2">
                           <Label>Status</Label>
                           <Select value={selectedStatus} onValueChange={(v: AuditStatus) => setSelectedStatus(v)}>
@@ -513,11 +572,11 @@ const AssignmentPage = () => {
 
         <Dialog open={isVerificationOpen} onOpenChange={setIsVerificationOpen}>
            <DialogContent className="sm:max-w-md">
-              <DialogHeader><DialogTitle>Finalize Audit</DialogTitle><DialogDescription>Enter the OTP sent to finalize this audit.</DialogDescription></DialogHeader>
+              <DialogHeader><DialogTitle>Finalize Audit</DialogTitle><DialogDescription>An OTP will be sent to the assigned client(s).</DialogDescription></DialogHeader>
               <div className="flex flex-col gap-4 py-4">
                   <div className="flex gap-2">
                       <InputOTP maxLength={6} value={otpCode} onChange={setOtpCode}><InputOTPGroup><InputOTPSlot index={0} /><InputOTPSlot index={1} /><InputOTPSlot index={2} /><InputOTPSlot index={3} /><InputOTPSlot index={4} /><InputOTPSlot index={5} /></InputOTPGroup></InputOTP>
-                      <Button variant="secondary" onClick={handleSendOtp} disabled={verificationStatus === 'sending'}>{verificationStatus === 'sending' ? <Loader2 className="animate-spin" /> : "Send Code"}</Button>
+                      <Button variant="secondary" onClick={handleSendOtp} disabled={verificationStatus === 'sending'}>{verificationStatus === 'sending' ? <Loader2 className="animate-spin h-4 w-4" /> : "Send Code"}</Button>
                   </div>
               </div>
               <DialogFooter><Button onClick={handleVerifyOtp} disabled={verificationStatus === 'verifying' || otpCode.length < 6}>Verify & Finalize</Button></DialogFooter>

@@ -451,19 +451,25 @@ const Reports = () => {
     setEditingRemark(null);
   };
 
-  // 🔥 FIX: Added '?' to make question optional, preventing the undefined crash!
+  // 🔥 FIX: Extract URL and Context for PDF/Excel exports
   const formatQuestionnaireAnswer = useCallback((answer: string | string[], question?: Question) => {
       let val: any = answer;
       if (typeof val === "string") { try { if (val.trim().startsWith("[") || val.trim().startsWith("{")) { val = JSON.parse(val); } } catch {} }
       
-      // If the original question was deleted from the settings, just return the raw text
       if (!question) {
           return Array.isArray(val) ? val.join(", ") : String(val);
       }
 
       if (question.type === 'file') {
+         if (typeof val === "object" && val !== null && !Array.isArray(val)) {
+             const url = val.url || "";
+             const ctx = val.context || "";
+             if (!url) return "No File";
+             return ctx ? `${url}\nNotes: ${ctx}` : url;
+         }
          return val ? String(val) : "No File";
       }
+
       if (question.type === "yes_no") { const v = Array.isArray(val) ? val[0] : val; const s = String(v ?? "").toLowerCase(); if (["yes", "true", "1"].includes(s)) return "Yes"; if (["no", "false", "0"].includes(s)) return "No"; return String(v ?? ""); }
       if ((question.type === "single_select" || question.type === "multi_select") && question.options) { const ids = Array.isArray(val) ? val : [val]; const labels = ids.map((id: string) => { const opt = question.options?.find((o) => o.id === id); return opt ? opt.text : id; }); return labels.join(", "); }
       if (Array.isArray(val)) { return val.join(", "); }
@@ -837,7 +843,6 @@ const Reports = () => {
         return {
             "Location": loc?.name || "Unknown",
             "Question": q?.text || "Unknown Question",
-            // 🔥 FIX: Safely check for 'q' before calling the format function
             "Response": q ? formatQuestionnaireAnswer(ans.answer, q) : String(ans.answer), 
             "Answered By": ans.answeredBy,
             "Date": new Date(ans.answeredOn).toLocaleDateString()

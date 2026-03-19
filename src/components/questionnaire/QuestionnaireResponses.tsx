@@ -23,11 +23,9 @@ export const QuestionnaireResponses = () => {
     selectedLocationFilter 
   } = useInventory();
   
-  // Use the filter hook if available, otherwise fallback to context filter
   const { selectedLocation } = useLocationFilter();
   const activeFilter = selectedLocation || selectedLocationFilter;
 
-  // 1. Filter answers based on selected location
   const filteredAnswers = questionnaireAnswers.filter((answer) => {
     if (!activeFilter || activeFilter === "all") return true;
     return answer.locationId === activeFilter;
@@ -41,12 +39,11 @@ export const QuestionnaireResponses = () => {
     );
   }
 
-  // 2. Helper to format answers for Display and Excel
+  // 🔥 FIX: Properly handle the new JSON File object
   const formatAnswer = (answer: string | string[], question?: Question, forExcel = false) => {
     if (!question) return String(answer);
 
     let val: any = answer;
-    // Attempt to parse JSON strings if necessary
     if (typeof val === "string") {
       try {
         if (val.trim().startsWith("[") || val.trim().startsWith("{")) {
@@ -57,25 +54,43 @@ export const QuestionnaireResponses = () => {
 
     // --- CASE: FILE UPLOAD ---
     if (question.type === "file") {
-      const url = val ? String(val) : "";
+      let url = "";
+      let context = "";
+
+      // Check if it successfully parsed into our new {url, context} object
+      if (typeof val === "object" && val !== null && !Array.isArray(val)) {
+         url = val.url || "";
+         context = val.context || "";
+      } else {
+         // Fallback for old data that was just a direct URL string
+         url = val ? String(val) : "";
+      }
+
       if (!url) return "No File";
       
-      if (forExcel) return url; // Return raw URL for Excel
+      if (forExcel) {
+         return context ? `${url} (Context: ${context})` : url; 
+      }
       
-      // Return Link Component for UI
       return (
-        <a 
-          href={url} 
-          target="_blank" 
-          rel="noopener noreferrer" 
-          className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 underline font-medium"
-        >
-          <FileIcon className="h-3 w-3" /> View File <ExternalLink className="h-3 w-3" />
-        </a>
+        <div className="flex flex-col gap-1">
+          <a 
+            href={url} 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 underline font-medium"
+          >
+            <FileIcon className="h-3 w-3" /> View File <ExternalLink className="h-3 w-3" />
+          </a>
+          {context && (
+            <span className="text-xs text-gray-600 bg-gray-50 p-1.5 rounded border border-gray-100 max-w-xs break-words">
+              {context}
+            </span>
+          )}
+        </div>
       );
     }
 
-    // --- CASE: YES/NO ---
     if (question.type === "yes_no") {
       const v = Array.isArray(val) ? val[0] : val;
       const s = String(v ?? "").toLowerCase();
@@ -84,7 +99,6 @@ export const QuestionnaireResponses = () => {
       return String(v ?? "");
     }
 
-    // --- CASE: SELECT / MULTI-SELECT ---
     if ((question.type === "single_select" || question.type === "multi_select") && question.options) {
       const ids = Array.isArray(val) ? val : [val];
       const labels = ids.map((id: string) => {
@@ -94,7 +108,6 @@ export const QuestionnaireResponses = () => {
       return labels.join(", ");
     }
 
-    // --- CASE: ARRAY (Generic) ---
     if (Array.isArray(val)) {
       return val.join(", ");
     }
@@ -102,7 +115,6 @@ export const QuestionnaireResponses = () => {
     return String(val);
   };
 
-  // 3. Handle Excel Export
   const handleExport = () => {
     try {
       const exportData = filteredAnswers.map((ans) => {
@@ -114,7 +126,7 @@ export const QuestionnaireResponses = () => {
           "Time": new Date(ans.answeredOn).toLocaleTimeString(),
           "Location": location?.name || "Unknown Location",
           "Question": question?.text || "Deleted Question",
-          "Answer": formatAnswer(ans.answer, question, true), // Pass true to get text/url
+          "Answer": formatAnswer(ans.answer, question, true), 
           "Answered By": ans.answeredBy || "Unknown User"
         };
       });
@@ -122,22 +134,14 @@ export const QuestionnaireResponses = () => {
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.json_to_sheet(exportData);
 
-      // Auto-width columns
       const wscols = [
-        { wch: 12 }, // Date
-        { wch: 10 }, // Time
-        { wch: 20 }, // Location
-        { wch: 40 }, // Question
-        { wch: 30 }, // Answer
-        { wch: 20 }, // User
+        { wch: 12 }, { wch: 10 }, { wch: 20 }, { wch: 40 }, { wch: 50 }, { wch: 20 }, 
       ];
       ws['!cols'] = wscols;
 
       XLSX.utils.book_append_sheet(wb, ws, "Questionnaire Responses");
-      
       const fileName = `Questionnaire_Responses_${new Date().toISOString().split('T')[0]}.xlsx`;
       XLSX.writeFile(wb, fileName);
-      
       toast.success("Questionnaire responses exported successfully");
     } catch (error) {
       console.error("Export failed:", error);
@@ -166,7 +170,7 @@ export const QuestionnaireResponses = () => {
               <TableRow className="bg-gray-50">
                 <TableHead>Location</TableHead>
                 <TableHead className="w-[40%]">Question</TableHead>
-                <TableHead>Answer</TableHead>
+                <TableHead>Answer & Files</TableHead>
                 <TableHead>Auditor</TableHead>
                 <TableHead className="text-right">Date</TableHead>
               </TableRow>
@@ -186,7 +190,6 @@ export const QuestionnaireResponses = () => {
                       {question?.required && <span className="text-red-500 ml-1">*</span>}
                     </TableCell>
                     <TableCell>
-                      {/* Render UI Component (Link or Text) */}
                       {formatAnswer(ans.answer, question, false)}
                     </TableCell>
                     <TableCell className="text-sm text-gray-500">

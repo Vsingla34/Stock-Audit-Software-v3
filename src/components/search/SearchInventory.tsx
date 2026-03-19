@@ -3,7 +3,7 @@ import { useInventory, InventoryItem } from "@/context/InventoryContext";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Search, Plus, Minus, MapPin, AlertCircle, PackagePlus, ScanBarcode, ArrowLeft, Check, ChevronsUpDown } from "lucide-react";
+import { Search, Plus, Minus, MapPin, AlertCircle, PackagePlus, ScanBarcode, ArrowLeft, Check, ChevronsUpDown, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import { useUser } from "@/context/UserContext";
 import { useCompany } from "@/context/CompanyContext";
@@ -41,6 +41,7 @@ export const SearchInventory = () => {
   const [debouncedQuery, setDebouncedQuery] = useState("");
   
   const [quantities, setQuantities] = useState<Record<string, number>>({});
+  const [remarks, setRemarks] = useState<Record<string, string>>({}); // 🔥 NEW: State to track remarks
   
   const [isDecimalMode, setIsDecimalMode] = useState(false);
   const [decimalQuantities, setDecimalQuantities] = useState<Record<string, string>>({});
@@ -71,13 +72,13 @@ export const SearchInventory = () => {
     locations, 
     activeSubLocations, 
     fetchSubLocations,  
-    addSubLocationToDb  
+    addSubLocationToDb,
+    updateItemRemark // 🔥 NEW: Pulled update function from context
   } = useInventory();
 
   const { currentUser } = useUser();
   const { selectedAssignmentId } = useCompany();
 
-  // 🔥 NEW: Check user role to conditionally render Deduct button
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
 
   const currentAssignment = assignments.find(a => a.id === selectedAssignmentId);
@@ -176,7 +177,22 @@ export const SearchInventory = () => {
         }
   };
 
-  // 🔥 UPDATED: Added isDeduction parameter
+  // 🔥 NEW: Handle saving the remark if the user types something and clicks away (onBlur)
+  const handleRemarkBlur = async (item: InventoryItem) => {
+    const itemKey = getItemKey(item);
+    const currentRemark = remarks[itemKey];
+    
+    // If remark was modified and differs from the database value
+    if (currentRemark !== undefined && currentRemark !== (item.clientRemarks || "")) {
+        try {
+            await updateItemRemark(item.id, currentRemark);
+            toast.success("Remark updated");
+        } catch (e) {
+            toast.error("Failed to save remark");
+        }
+    }
+  };
+
   const handleAddToAudit = async (item: InventoryItem, isDeduction: boolean = false) => {
     if (!selectedSubLocation) {
         toast.error("Sub-Location Required", { description: "Please select a Box, Row, or Rack before adding." });
@@ -203,7 +219,6 @@ export const SearchInventory = () => {
         return;
     }
     
-    // Apply negative sign if it's a deduction
     const quantityToApply = isDeduction ? -Math.abs(inputQuantity) : Math.abs(inputQuantity);
 
     try {
@@ -215,6 +230,12 @@ export const SearchInventory = () => {
         selectedSubLocation
       );
       
+      // 🔥 NEW: Also save the remark when adding/deducting, if it was modified
+      const currentRemark = remarks[itemKey] !== undefined ? remarks[itemKey] : (item.clientRemarks || "");
+      if (currentRemark !== (item.clientRemarks || "")) {
+          await updateItemRemark(item.id, currentRemark);
+      }
+
       toast.success(isDeduction ? "Quantity Deducted" : "Item added to audit", {
         description: `${isDeduction ? 'Removed' : 'Added'} ${Math.abs(quantityToApply)}${unitText} for ${item.name} at ${selectedSubLocation}`
       });
@@ -380,9 +401,9 @@ export const SearchInventory = () => {
 
           {searchResults.length > 0 ? (
             <div className="border border-gray-200 rounded-md overflow-hidden">
-              <div className="grid grid-cols-[1fr_auto] gap-4 p-4 font-medium border-b border-gray-200 bg-gray-50 text-gray-900">
+              <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 p-4 font-medium border-b border-gray-200 bg-gray-50 text-gray-900 hidden md:grid">
                 <div>Item Details</div>
-                <div className="text-right">Quantity</div>
+                <div className="text-right">Audit Controls</div>
               </div>
               {searchResults.map((item) => {
                 const itemKey = getItemKey(item);
@@ -404,13 +425,12 @@ export const SearchInventory = () => {
                     }
                 });
                 const consolidatedEntries = Array.from(consolidatedMap.values());
-                const currentUserEntry = consolidatedEntries.find(e => e.auditorId === currentUser?.id);
 
                 const itemUploadedUnit = item.customAttributes?.['Unit'];
                 const currentSelectedUnit = selectedUnits[itemKey] !== undefined ? selectedUnits[itemKey] : (itemUploadedUnit || "none");
 
                 return (
-                  <div key={itemKey} className="grid grid-cols-[1fr_auto] gap-4 p-4 border-b border-gray-100 last:border-0 items-start hover:bg-gray-50/50 transition-colors">
+                  <div key={itemKey} className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 p-4 border-b border-gray-100 last:border-0 items-start hover:bg-gray-50/50 transition-colors">
                     <div>
                       <h3 className="font-medium text-gray-900">{item.name}</h3>
                       <div className="text-sm text-gray-500">SKU: {item.sku}</div>
@@ -432,10 +452,11 @@ export const SearchInventory = () => {
                         </div>
                       )}
                     </div>
-                    <div className="flex flex-col items-end gap-2">
+                    <div className="flex flex-col items-end gap-2 w-full md:w-auto">
                       
+                      {/* Quantity Controls */}
                       {isDecimalMode ? (
-                          <div className="flex items-center gap-2 mb-2 w-full justify-end">
+                          <div className="flex items-center gap-2 mb-1 w-full justify-end">
                               <Input 
                                   type="number" 
                                   step="any" 
@@ -460,7 +481,7 @@ export const SearchInventory = () => {
                               </Select>
                           </div>
                       ) : (
-                          <div className="flex items-center space-x-2 mb-2 bg-white rounded-md border border-gray-200 p-1">
+                          <div className="flex items-center space-x-2 mb-1 bg-white rounded-md border border-gray-200 p-1 w-full md:w-auto justify-between md:justify-end">
                             <Button 
                               variant="ghost" 
                               size="icon" 
@@ -483,8 +504,20 @@ export const SearchInventory = () => {
                           </div>
                       )}
 
-                      {/* 🔥 NEW: Admin Deduct Button */}
-                      <div className="flex gap-2 w-full">
+                      {/* 🔥 NEW: Remark Input Field */}
+                      <div className="w-full relative mb-2">
+                        <MessageSquare className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" />
+                        <Input
+                          placeholder="Add a remark (optional)..."
+                          value={remarks[itemKey] !== undefined ? remarks[itemKey] : (item.clientRemarks || "")}
+                          onChange={(e) => setRemarks(prev => ({ ...prev, [itemKey]: e.target.value }))}
+                          onBlur={() => handleRemarkBlur(item)}
+                          className="h-9 w-full md:w-[208px] pl-8 text-xs"
+                        />
+                      </div>
+
+                      {/* Add / Deduct Buttons */}
+                      <div className="flex gap-2 w-full md:w-[208px]">
                         {isAdmin && (
                             <Button 
                               variant="destructive"

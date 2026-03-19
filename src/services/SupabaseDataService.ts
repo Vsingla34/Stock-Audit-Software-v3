@@ -20,14 +20,8 @@ class SupabaseDataService {
     this.currentUser = data.user;
   }
 
-  // ─────────────────────────────────────────────
-  // 🔥 PRIVATE HELPER: Single source of truth for
-  //    mapping raw DB rows → InventoryItem shape.
-  //    Used by getItemMaster AND getSingleItem.
-  // ─────────────────────────────────────────────
   private mapDbRows(rows: any[]): InventoryItem[] {
     return rows.map((item: any) => {
-      // --- Auditor entries ---
       let parsedEntries = [];
       if (Array.isArray(item.auditor_entries)) {
         parsedEntries = item.auditor_entries;
@@ -35,7 +29,6 @@ class SupabaseDataService {
         try { parsedEntries = JSON.parse(item.auditor_entries); } catch { parsedEntries = []; }
       }
 
-      // --- Custom attributes ---
       let parsedCustomAttributes: any = {};
       if (item.custom_attributes && typeof item.custom_attributes === 'object') {
         parsedCustomAttributes = item.custom_attributes;
@@ -43,7 +36,6 @@ class SupabaseDataService {
         try { parsedCustomAttributes = JSON.parse(item.custom_attributes); } catch { parsedCustomAttributes = {}; }
       }
 
-      // --- Name fallback from custom attributes ---
       let itemName = item.name;
       if (!itemName || itemName === "Unnamed Item") {
         const customName =
@@ -54,7 +46,6 @@ class SupabaseDataService {
         itemName = customName || "Unnamed Item";
       }
 
-      // --- Category fallback from custom attributes ---
       let itemCategory = item.category;
       if (!itemCategory || itemCategory === "-") {
         const customCategory =
@@ -63,7 +54,6 @@ class SupabaseDataService {
         if (customCategory) itemCategory = customCategory;
       }
 
-      // --- Clean reserved fields out of custom attributes ---
       const reservedFields = [
         'sku', 'name', 'category', 'location', 'systemQuantity', 'physicalQuantity',
         'status', 'lastAudited', 'notes', 'clientRemarks', 'uploadBatchKey', 'assignmentId',
@@ -76,7 +66,6 @@ class SupabaseDataService {
         delete cleanedCustomAttributes[field.toUpperCase()];
       });
 
-      // --- Normalise price, UOM, computed value fields ---
       let unitPrice = 0;
       let measuringUnit = "";
 
@@ -131,12 +120,6 @@ class SupabaseDataService {
     });
   }
 
-  // ─────────────────────────────────────────────
-  // 🔥 NEW: Fetch a single item by ID.
-  //    Used after secureRecordScan and
-  //    updateItemAttributes for targeted UI refresh
-  //    instead of a full loadData() reload.
-  // ─────────────────────────────────────────────
   public async getSingleItem(itemId: string): Promise<InventoryItem> {
     const { data, error } = await supabase
       .from("inventory_items")
@@ -173,17 +156,21 @@ class SupabaseDataService {
 
     return (data || []).map(item => {
       let audIds: string[] = [];
-      if (Array.isArray(item.auditor_ids)) {
-        audIds = item.auditor_ids;
-      } else if (typeof item.auditor_ids === 'string') {
-        audIds = [item.auditor_ids];
-      }
+      if (Array.isArray(item.auditor_ids)) audIds = item.auditor_ids;
+      else if (typeof item.auditor_ids === 'string') audIds = [item.auditor_ids];
+      
+      // 🔥 Fetch client_ids mapping
+      let cliIds: string[] = [];
+      if (Array.isArray(item.client_ids)) cliIds = item.client_ids;
+      else if (typeof item.client_ids === 'string') cliIds = [item.client_ids];
+
       return {
         id: item.id,
         locationId: item.location_id,
         companyId: item.company_id,
         auditorId: audIds.join(','),
         auditorIds: audIds,
+        clientIds: cliIds,
         status: item.status as AuditStatus,
         scheduledDate: item.scheduled_date || item.created_at,
       } as any;
@@ -196,6 +183,7 @@ class SupabaseDataService {
     status: AuditStatus;
     scheduledDate?: string;
     auditorIds?: string[];
+    clientIds?: string[];
   }): Promise<Assignment> {
     const { data, error } = await supabase
       .from("assignments")
@@ -205,6 +193,7 @@ class SupabaseDataService {
         status: assignment.status,
         scheduled_date: assignment.scheduledDate,
         auditor_ids: assignment.auditorIds || [],
+        client_ids: assignment.clientIds || [], // 🔥 Save Clients
       })
       .select()
       .single();
@@ -212,12 +201,15 @@ class SupabaseDataService {
     if (error) throw error;
 
     const audIds = Array.isArray(data.auditor_ids) ? data.auditor_ids : [];
+    const cliIds = Array.isArray(data.client_ids) ? data.client_ids : [];
+    
     return {
       id: data.id,
       locationId: data.location_id,
       companyId: data.company_id,
       auditorId: audIds.join(','),
       auditorIds: audIds,
+      clientIds: cliIds,
       status: data.status as AuditStatus,
       scheduledDate: data.scheduled_date || data.created_at,
     } as any;
@@ -227,11 +219,13 @@ class SupabaseDataService {
     status?: AuditStatus;
     scheduledDate?: string;
     auditorIds?: string[];
+    clientIds?: string[];
   }): Promise<void> {
     const payload: any = {};
     if (updates.status)        payload.status          = updates.status;
     if (updates.scheduledDate) payload.scheduled_date  = updates.scheduledDate;
     if (updates.auditorIds !== undefined) payload.auditor_ids = updates.auditorIds;
+    if (updates.clientIds !== undefined) payload.client_ids = updates.clientIds;
 
     const { error } = await supabase.from("assignments").update(payload).eq("id", id);
     if (error) throw error;
@@ -254,27 +248,45 @@ class SupabaseDataService {
     if (error) throw error;
   }
 
+  // 🔥 TARGETED OTP LOGIC
   public async sendAssignmentOtp(assignmentId: number): Promise<string> {
     const { data: assignment, error: assignError } = await supabase
       .from("assignments")
-      .select("company_id")
+      .select("company_id, client_ids")
       .eq("id", assignmentId)
       .single();
 
     if (assignError || !assignment) throw new Error("Assignment not found");
 
-    const { data: clients, error: clientError } = await supabase
-      .from("user_profiles")
-      .select("email")
-      .eq("role", "client")
-      .contains("assigned_companies", [assignment.company_id]);
+    let targetEmail = "";
 
-    if (clientError) throw clientError;
-    if (!clients || clients.length === 0) {
-      throw new Error("No client account found associated with this company.");
+    // 1. Prioritize explicitly assigned clients for this assignment
+    if (assignment.client_ids && assignment.client_ids.length > 0) {
+        const { data: assignedClients } = await supabase
+            .from("user_profiles")
+            .select("email")
+            .in("id", assignment.client_ids);
+        
+        if (assignedClients && assignedClients.length > 0) {
+            targetEmail = assignedClients[0].email;
+        }
     }
 
-    const targetEmail = clients[0].email;
+    // 2. Fallback to any client in the company if no specific client was assigned
+    if (!targetEmail) {
+        const { data: clients, error: clientError } = await supabase
+          .from("user_profiles")
+          .select("email")
+          .eq("role", "client")
+          .contains("assigned_companies", [assignment.company_id]);
+
+        if (clientError) throw clientError;
+        if (!clients || clients.length === 0) {
+          throw new Error("No client account found associated with this assignment or company.");
+        }
+        targetEmail = clients[0].email;
+    }
+
     this.pendingVerificationEmail = targetEmail;
 
     const { error } = await supabase.auth.signInWithOtp({
@@ -339,7 +351,6 @@ class SupabaseDataService {
       page++;
     }
 
-    // ✅ Uses shared mapDbRows helper
     return this.mapDbRows(allItems);
   }
 
@@ -347,12 +358,6 @@ class SupabaseDataService {
     return this.getItemMaster(companyId, assignmentId);
   }
 
-  // ─────────────────────────────────────────────
-  // 🔥 FIX 4: Atomic attribute update via RPC.
-  //    Only touches custom_attributes, client_remarks,
-  //    and last_audited — never overwrites
-  //    physical_quantity or auditor_entries.
-  // ─────────────────────────────────────────────
   public async updateItemAttributes(
     itemId: string,
     customAttributes: Record<string, any>,
@@ -776,8 +781,18 @@ class SupabaseDataService {
     await supabase.from("questions").insert({ text: q.text, type: q.type, required: q.required, options: q.options, company_id: q.companyId } as any);
   }
 
-  public async updateQuestion(q: any) {
-    await supabase.from("questions").update(q as any).eq("id", q.id);
+ public async updateQuestion(q: any) {
+   
+    const { error } = await supabase.from("questions").update({
+      text: q.text,
+      type: q.type,
+      required: q.required,
+      options: q.options,
+      company_id: q.companyId
+    }).eq("id", q.id);
+
+    
+    if (error) throw error;
   }
 
   public async deleteQuestion(id: string) {
@@ -817,9 +832,6 @@ class SupabaseDataService {
     if (error) throw error;
   }
 
-  // ─────────────────────────────────────────────
-  // Atomic scan via Postgres RPC (Fix 1 core)
-  // ─────────────────────────────────────────────
   public async secureRecordScan(itemId: string, newEntry: any, quantityAdded: number): Promise<void> {
     const { error } = await supabase.rpc('record_scan', {
       p_item_id:        itemId,
@@ -833,9 +845,6 @@ class SupabaseDataService {
     }
   }
 
-  // ─────────────────────────────────────────────
-  // Server-side stats via Postgres RPC
-  // ─────────────────────────────────────────────
   public async getInventoryStats(companyId: string, assignmentId: number): Promise<any> {
     const { data, error } = await supabase.rpc('get_inventory_stats', {
       p_company_id:    companyId,
