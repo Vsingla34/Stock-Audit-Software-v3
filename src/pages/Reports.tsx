@@ -5,20 +5,8 @@ import { useUser } from "@/context/UserContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { 
-  Download, 
-  FileText, 
-  FileType, 
-  FileSpreadsheet, 
-  Filter, 
-  Table as TableIcon, 
-  ArrowUpDown, 
-  MessageSquare, 
-  CheckCheck, 
-  Loader2, 
-  Send,
-  CalendarDays,
-  MapPin,
-  PieChart
+  Download, FileText, FileType, FileSpreadsheet, Filter, Table as TableIcon, 
+  ArrowUpDown, MessageSquare, CheckCheck, Loader2, Send, CalendarDays, MapPin
 } from "lucide-react";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
@@ -27,29 +15,9 @@ import * as XLSX from "xlsx";
 import { useRef, useMemo, useCallback, useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useNavigate } from "react-router-dom";
 import { Label } from "@/components/ui/label";
 import SupabaseDataService from "@/services/SupabaseDataService"; 
@@ -99,9 +67,13 @@ const Reports = () => {
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const currentAssignment = assignments.find(a => a.id === selectedAssignmentId);
+  const currentAssignment = assignments.find(a => String(a.id) === String(selectedAssignmentId));
   const selectedLocation = currentAssignment?.locationId || "";
   const locationName = locations.find(l => l.id === selectedLocation)?.name || "";
+
+  // 🔥 CHECK BLIND AUDIT STATUS
+  const isAuditor = currentUser?.role === 'auditor';
+  const hideSystemQuantity = isAuditor && currentAssignment?.showSystemQuantity === false;
 
   useEffect(() => {
     if (selectedLocation) {
@@ -161,7 +133,6 @@ const Reports = () => {
     fetchCompanyName();
   }, [selectedCompanyId]);
 
-  const isAuditor = currentUser?.role === 'auditor';
   const isClient = currentUser?.role === 'client';
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
 
@@ -451,7 +422,6 @@ const Reports = () => {
     setEditingRemark(null);
   };
 
-  // 🔥 FIX: Extract URL and Context for PDF/Excel exports
   const formatQuestionnaireAnswer = useCallback((answer: string | string[], question?: Question) => {
       let val: any = answer;
       if (typeof val === "string") { try { if (val.trim().startsWith("[") || val.trim().startsWith("{")) { val = JSON.parse(val); } } catch {} }
@@ -539,13 +509,13 @@ const Reports = () => {
         category: item.category,
         location: item.location,
         subLocation: getSubLocationSummary(item.auditorEntries),
-        systemQuantity: item.systemQuantity,
+        systemQuantity: hideSystemQuantity ? "Hidden" : item.systemQuantity,
         physicalQuantity: item.physicalQuantity,
-        variance: item.variance,
-        status: item.status,
+        variance: hideSystemQuantity ? "Hidden" : item.variance,
+        status: hideSystemQuantity ? "Audited" : item.status,
         auditDay: item.auditDay 
       };
-      if (hasPricing) {
+      if (hasPricing && !hideSystemQuantity) {
          baseObj["Unit Price"] = unitPrice;
          baseObj["System Value"] = sysValue;
          baseObj["Physical Value"] = phyValue;
@@ -560,7 +530,7 @@ const Reports = () => {
     const categoryTag = categoryFilter !== 'all' ? `_${categoryFilter}` : "";
     const sortTag = sortOrder !== 'default' ? `_${sortOrder}` : "";
     generateCSV(reportData, `filtered_inventory_report${locationTag}${statusTag}${categoryTag}${sortTag}.csv`);
-  }, [filteredTableData, locationName, statusFilter, categoryFilter, sortOrder, generateCSV, hasPricing, getItemValues, getSubLocationSummary]);
+  }, [filteredTableData, locationName, statusFilter, categoryFilter, sortOrder, generateCSV, hasPricing, getItemValues, getSubLocationSummary, hideSystemQuantity]);
 
   const downloadReconciliationReport = useCallback(() => {
     const allAuditors = new Set<string>();
@@ -582,9 +552,9 @@ const Reports = () => {
         category: item.category,
         location: item.location,
         "Sub Location": getSubLocationSummary(item.auditorEntries),
-        systemQuantity: item.systemQuantity,
+        systemQuantity: hideSystemQuantity ? "Hidden" : item.systemQuantity,
       };
-      if (hasPricing) {
+      if (hasPricing && !hideSystemQuantity) {
          baseData["Unit Price"] = unitPrice;
          baseData["System Value"] = sysValue;
       }
@@ -597,12 +567,12 @@ const Reports = () => {
       });
 
       baseData.Total = item.physicalQuantity;
-      if (hasPricing) {
+      if (hasPricing && !hideSystemQuantity) {
          baseData["Physical Value"] = phyValue;
          baseData["Value Variance"] = valueVariance;
       }
-      baseData.variance = item.variance;
-      baseData.status = item.status;
+      baseData.variance = hideSystemQuantity ? "Hidden" : item.variance;
+      baseData.status = hideSystemQuantity ? "Audited" : item.status;
       baseData.auditDay = item.auditDay; 
       baseData.remarks = item.clientRemarks || "-";
       baseData.lastAudited = item.lastAudited;
@@ -610,7 +580,7 @@ const Reports = () => {
     });
     const locationInfo = locationName ? `_${locationName}` : "";
     generateCSV(reportData, `inventory_reconciliation_report${locationInfo}.csv`);
-  }, [baseTableData, locationName, generateCSV, hasPricing, getItemValues, getSubLocationSummary, auditorMap]);
+  }, [baseTableData, locationName, generateCSV, hasPricing, getItemValues, getSubLocationSummary, auditorMap, hideSystemQuantity]);
 
   const downloadDayWiseReport = useCallback(() => {
     if (baseTableData.length === 0) {
@@ -670,10 +640,10 @@ const Reports = () => {
                  Category: item.category,
                  Location: item.location,
                  "Sub Location": "-",
-                 "System Qty": item.systemQuantity,
+                 "System Qty": hideSystemQuantity ? "Hidden" : item.systemQuantity,
                  "Physical Qty": 0,
                  "Auditors": "-",
-                 "Status": item.status
+                 "Status": hideSystemQuantity ? "Pending" : item.status
              });
          } else {
              item.auditorEntries.forEach((entry: any) => {
@@ -693,10 +663,10 @@ const Reports = () => {
                      Category: item.category,
                      Location: item.location,
                      "Sub Location": subLoc,
-                     "System Qty": item.systemQuantity,
+                     "System Qty": hideSystemQuantity ? "Hidden" : item.systemQuantity,
                      "Physical Qty": data.qty,
                      "Auditors": Array.from(data.auditors).join(", "),
-                     "Status": item.status
+                     "Status": hideSystemQuantity ? "Audited" : item.status
                  });
              });
          }
@@ -704,9 +674,15 @@ const Reports = () => {
 
      const locationInfo = locationName ? `_${locationName}` : "";
      generateCSV(reportData, `sub_location_report${locationInfo}.csv`);
-  }, [baseTableData, locationName, generateCSV, auditorMap]);
+  }, [baseTableData, locationName, generateCSV, auditorMap, hideSystemQuantity]);
 
   const downloadDiscrepancyReport = useCallback(() => {
+    // Prevent auditors from just downloading the discrepancy report to find out what they missed
+    if (hideSystemQuantity) {
+        toast.error("Discrepancy reports are disabled during Blind Audits.");
+        return;
+    }
+
     const discrepancies = baseTableData.filter((item) => item.variance !== 0);
     const reportData = discrepancies.map((item) => {
         const { unitPrice, sysValue, phyValue, valueVariance } = getItemValues(item);
@@ -733,26 +709,31 @@ const Reports = () => {
     });
     const locationInfo = locationName ? `_${locationName}` : "";
     generateCSV(reportData, `discrepancy_report${locationInfo}.csv`);
-  }, [baseTableData, locationName, generateCSV, hasPricing, getItemValues, getSubLocationSummary]);
+  }, [baseTableData, locationName, generateCSV, hasPricing, getItemValues, getSubLocationSummary, hideSystemQuantity]);
 
   const downloadSummaryReport = useCallback(() => {
     const summaryData = [{
       "Total Unique Items": summary.totalItems,
-      "Total System Qty": summary.totalSystemQty,
+      "Total System Qty": hideSystemQuantity ? "Hidden" : summary.totalSystemQty,
       "Total Physical Qty": summary.totalPhysicalQty,
       "Audited SKUs": summary.auditedItems,
-      "Matched SKUs": summary.matched,
-      "Discrepancies": summary.discrepancies,
+      "Matched SKUs": hideSystemQuantity ? "Hidden" : summary.matched,
+      "Discrepancies": hideSystemQuantity ? "Hidden" : summary.discrepancies,
       "Pending SKUs": summary.pendingItems,
-      "Audit Completion (Qty %)": summary.totalSystemQty > 0 ? Math.round((summary.totalPhysicalQty / summary.totalSystemQty) * 100) : 0,
+      "Audit Completion (Qty %)": hideSystemQuantity ? "Hidden" : (summary.totalSystemQty > 0 ? Math.round((summary.totalPhysicalQty / summary.totalSystemQty) * 100) : 0),
       "Generated Date": new Date().toISOString(),
       "Location": locationName || "All Locations",
     }];
     const locationInfo = locationName ? `_${locationName}` : "";
     generateCSV(summaryData, `audit_summary_report${locationInfo}.csv`);
-  }, [summary, locationName, generateCSV]);
+  }, [summary, locationName, generateCSV, hideSystemQuantity]);
 
   const downloadCombinedExcelReport = useCallback(() => {
+    if (hideSystemQuantity) {
+        toast.error("Detailed Excel exports are disabled during Blind Audits.");
+        return;
+    }
+
     const allAuditors = new Set<string>();
     baseTableData.forEach((item) => { 
         item.auditorEntries.forEach((entry: any) => { 
@@ -961,9 +942,15 @@ const Reports = () => {
     const locationInfo = locationName ? `_${locationName}` : "";
     XLSX.writeFile(wb, `complete_audit_data${locationInfo}.xlsx`);
     toast.success("Combined Excel report downloaded");
-  }, [baseTableData, summary, locationName, companyName, questionnaireAnswers, questions, locations, formatQuestionnaireAnswer, hasPricing, getItemValues, getSubLocationSummary, activeSubLocations, auditorMap]);
+  }, [baseTableData, summary, locationName, companyName, questionnaireAnswers, questions, locations, formatQuestionnaireAnswer, hasPricing, getItemValues, getSubLocationSummary, activeSubLocations, auditorMap, hideSystemQuantity]);
 
   const generatePDFReport = useCallback(() => {
+    // Disable detailed PDF exports for auditors on blind audits
+    if (hideSystemQuantity) {
+        toast.error("Detailed PDF exports are disabled during Blind Audits.");
+        return;
+    }
+
     const doc = new jsPDF();
     let currentY = 20;
 
@@ -1065,7 +1052,7 @@ const Reports = () => {
     const locationInfo = locationName ? `_${locationName}` : "";
     doc.save(`inventory_audit_report${locationInfo}.pdf`);
     toast.success("PDF Report downloaded");
-  }, [selectedLocation, locationName, summary, baseTableData, questionnaireAnswers, getQuestionsForLocation, formatQuestionnaireAnswer, companyName, hasPricing, getItemValues]);
+  }, [selectedLocation, locationName, summary, baseTableData, questionnaireAnswers, getQuestionsForLocation, formatQuestionnaireAnswer, companyName, hasPricing, getItemValues, hideSystemQuantity]);
 
   const handleShowMore = () => { setVisibleCount((prev) => prev + 100); };
   const handleShowAll = () => { setVisibleCount(filteredTableData.length); };
@@ -1197,7 +1184,8 @@ const Reports = () => {
                       <TableHead className="w-[200px]">Name & Breakdown</TableHead>
                       <TableHead>Location</TableHead>
                       <TableHead>Category</TableHead>
-                      {hasPricing && (
+                      
+                      {hasPricing && !hideSystemQuantity && (
                         <>
                            <TableHead className="text-right w-[100px] bg-indigo-50/50">Price</TableHead>
                            <TableHead className="text-right w-[100px] bg-indigo-50/50">Sys Val</TableHead>
@@ -1205,9 +1193,18 @@ const Reports = () => {
                            <TableHead className="text-right w-[100px] bg-indigo-50/50">Val Var</TableHead>
                         </>
                       )}
-                      <TableHead className="text-center w-[80px]">Sys</TableHead>
+                      
+                      {/* 🔥 COMPLETELY REMOVE HEADERS IF BLIND AUDIT */}
+                      {!hideSystemQuantity && (
+                          <TableHead className="text-center w-[80px]">Sys</TableHead>
+                      )}
+                      
                       <TableHead className="text-center w-[80px]">Phy</TableHead>
-                      <TableHead className="text-center w-[80px]">Var</TableHead>
+                      
+                      {!hideSystemQuantity && (
+                          <TableHead className="text-center w-[80px]">Var</TableHead>
+                      )}
+                      
                       <TableHead className="text-center w-[100px]">Status</TableHead>
                       <TableHead className="text-center w-[60px]">Day</TableHead>
                       <TableHead className="w-[180px]">Remarks</TableHead>
@@ -1265,7 +1262,7 @@ const Reports = () => {
                             <TableCell className="text-xs">{item.location}</TableCell>
                             <TableCell className="text-xs">{item.category}</TableCell>
                             
-                            {hasPricing && (
+                            {hasPricing && !hideSystemQuantity && (
                                 <>
                                   <TableCell className="text-right text-xs font-mono bg-indigo-50/30">
                                       {formatCurrency(unitPrice)}
@@ -1282,13 +1279,31 @@ const Reports = () => {
                                 </>
                             )}
 
-                            <TableCell className="text-center font-medium">{item.systemQuantity}</TableCell>
+                            {/* 🔥 COMPLETELY REMOVE CELLS IF BLIND AUDIT */}
+                            {!hideSystemQuantity && (
+                                <TableCell className="text-center font-medium">
+                                    {item.systemQuantity}
+                                </TableCell>
+                            )}
+                            
                             <TableCell className="text-center font-medium">{item.physicalQuantity}</TableCell>
-                            <TableCell className={`text-center font-bold ${item.variance !== 0 ? "text-red-600" : ""}`}>{item.variance}</TableCell>
+                            
+                            {!hideSystemQuantity && (
+                                <TableCell className={`text-center font-bold ${item.variance !== 0 ? "text-red-600" : ""}`}>
+                                    {item.variance}
+                                </TableCell>
+                            )}
+                            
                             <TableCell className="text-center">
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${item.status === "matched" ? "bg-green-100 text-green-800" : item.status === "discrepancy" ? "bg-red-100 text-red-800" : "bg-gray-100 text-gray-800"}`}>
-                                {item.status === "matched" ? "Matched" : item.status === "discrepancy" ? "Discrepancy" : "Pending"}
-                              </span>
+                              {hideSystemQuantity ? (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800">
+                                      {item.physicalQuantity > 0 || item.status !== 'pending' ? 'Audited' : 'Pending'}
+                                  </span>
+                              ) : (
+                                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${item.status === "matched" ? "bg-green-100 text-green-800" : item.status === "discrepancy" ? "bg-red-100 text-red-800" : "bg-gray-100 text-gray-800"}`}>
+                                    {item.status === "matched" ? "Matched" : item.status === "discrepancy" ? "Discrepancy" : "Pending"}
+                                  </span>
+                              )}
                             </TableCell>
                             <TableCell className="text-center text-xs font-mono text-gray-600">
                                 {item.auditDay}
@@ -1325,7 +1340,14 @@ const Reports = () => {
                         );
                       })
                     ) : (
-                      <TableRow><TableCell colSpan={hasPricing ? 14 : 10} className="text-center py-4 text-gray-500">No data available matching filters</TableCell></TableRow>
+                      <TableRow>
+                          <TableCell 
+                             colSpan={hideSystemQuantity ? 8 : (10 + (hasPricing ? 4 : 0))} 
+                             className="text-center py-4 text-gray-500"
+                          >
+                             No data available matching filters
+                          </TableCell>
+                      </TableRow>
                     )}
                   </TableBody>
                 </Table>

@@ -159,7 +159,6 @@ class SupabaseDataService {
       if (Array.isArray(item.auditor_ids)) audIds = item.auditor_ids;
       else if (typeof item.auditor_ids === 'string') audIds = [item.auditor_ids];
       
-      // 🔥 Fetch client_ids mapping
       let cliIds: string[] = [];
       if (Array.isArray(item.client_ids)) cliIds = item.client_ids;
       else if (typeof item.client_ids === 'string') cliIds = [item.client_ids];
@@ -173,6 +172,7 @@ class SupabaseDataService {
         clientIds: cliIds,
         status: item.status as AuditStatus,
         scheduledDate: item.scheduled_date || item.created_at,
+        showSystemQuantity: item.show_system_quantity ?? true, // 🔥 Extract visibility setting
       } as any;
     });
   }
@@ -184,6 +184,7 @@ class SupabaseDataService {
     scheduledDate?: string;
     auditorIds?: string[];
     clientIds?: string[];
+    showSystemQuantity?: boolean; // 🔥 Added setting
   }): Promise<Assignment> {
     const { data, error } = await supabase
       .from("assignments")
@@ -193,7 +194,8 @@ class SupabaseDataService {
         status: assignment.status,
         scheduled_date: assignment.scheduledDate,
         auditor_ids: assignment.auditorIds || [],
-        client_ids: assignment.clientIds || [], // 🔥 Save Clients
+        client_ids: assignment.clientIds || [], 
+        show_system_quantity: assignment.showSystemQuantity !== false, // 🔥 Save setting
       })
       .select()
       .single();
@@ -212,6 +214,7 @@ class SupabaseDataService {
       clientIds: cliIds,
       status: data.status as AuditStatus,
       scheduledDate: data.scheduled_date || data.created_at,
+      showSystemQuantity: data.show_system_quantity ?? true, // 🔥 Return setting
     } as any;
   }
 
@@ -220,12 +223,14 @@ class SupabaseDataService {
     scheduledDate?: string;
     auditorIds?: string[];
     clientIds?: string[];
+    showSystemQuantity?: boolean; // 🔥 Added setting
   }): Promise<void> {
     const payload: any = {};
     if (updates.status)        payload.status          = updates.status;
     if (updates.scheduledDate) payload.scheduled_date  = updates.scheduledDate;
     if (updates.auditorIds !== undefined) payload.auditor_ids = updates.auditorIds;
     if (updates.clientIds !== undefined) payload.client_ids = updates.clientIds;
+    if (updates.showSystemQuantity !== undefined) payload.show_system_quantity = updates.showSystemQuantity; // 🔥 Update setting
 
     const { error } = await supabase.from("assignments").update(payload).eq("id", id);
     if (error) throw error;
@@ -248,7 +253,6 @@ class SupabaseDataService {
     if (error) throw error;
   }
 
-  // 🔥 TARGETED OTP LOGIC
   public async sendAssignmentOtp(assignmentId: number): Promise<string> {
     const { data: assignment, error: assignError } = await supabase
       .from("assignments")
@@ -260,7 +264,6 @@ class SupabaseDataService {
 
     let targetEmail = "";
 
-    // 1. Prioritize explicitly assigned clients for this assignment
     if (assignment.client_ids && assignment.client_ids.length > 0) {
         const { data: assignedClients } = await supabase
             .from("user_profiles")
@@ -272,7 +275,6 @@ class SupabaseDataService {
         }
     }
 
-    // 2. Fallback to any client in the company if no specific client was assigned
     if (!targetEmail) {
         const { data: clients, error: clientError } = await supabase
           .from("user_profiles")
@@ -769,20 +771,32 @@ class SupabaseDataService {
   }
 
   public async getQuestions(cId: string) {
-    const { data } = await supabase.from("questions").select("*").eq("company_id", cId);
+    const { data, error } = await supabase.from("questions").select("*").eq("company_id", cId);
+    if (error) throw error;
+    
     return data?.map((q: any) => ({
-      ...q,
+      id: q.id,
+      text: q.text,
+      type: q.type,
+      required: q.required,
       options: typeof q.options === 'string' ? JSON.parse(q.options) : q.options,
       companyId: q.company_id,
     })) || [];
   }
 
   public async addQuestion(q: any) {
-    await supabase.from("questions").insert({ text: q.text, type: q.type, required: q.required, options: q.options, company_id: q.companyId } as any);
+    const { error } = await supabase.from("questions").insert({ 
+      text: q.text, 
+      type: q.type, 
+      required: q.required, 
+      options: q.options, 
+      company_id: q.companyId 
+    });
+    
+    if (error) throw error;
   }
 
- public async updateQuestion(q: any) {
-   
+  public async updateQuestion(q: any) {
     const { error } = await supabase.from("questions").update({
       text: q.text,
       type: q.type,
@@ -791,12 +805,12 @@ class SupabaseDataService {
       company_id: q.companyId
     }).eq("id", q.id);
 
-    
     if (error) throw error;
   }
 
   public async deleteQuestion(id: string) {
-    await supabase.from("questions").delete().eq("id", id);
+    const { error } = await supabase.from("questions").delete().eq("id", id);
+    if (error) throw error;
   }
 
   public async getQuestionnaireAnswers(cId: string) {

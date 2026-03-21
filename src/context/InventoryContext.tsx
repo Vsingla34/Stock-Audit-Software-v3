@@ -59,6 +59,8 @@ export interface Assignment {
   scheduledDate: string;
   auditorId?: string;
   auditorIds?: string[];
+  clientIds?: string[];
+  showSystemQuantity?: boolean; // 🔥 Added setting
 }
 
 export type QuestionType = "text" | "single_select" | "multi_select" | "yes_no" | "file";
@@ -122,8 +124,8 @@ interface InventoryContextType {
   updateItemRemark: (itemId: string, remark: string) => Promise<void>;
   updateLocationAuditStatus: (locationId: string, status: AuditStatus) => Promise<void>;
   
-  createAssignment: (locationId: string, companyId: string, status: AuditStatus, date?: string, auditorIds?: string[]) => Promise<void>; 
-  updateAssignment: (id: number, status: AuditStatus, date?: string, auditorIds?: string[]) => Promise<void>;
+  createAssignment: (locationId: string, companyId: string, status: AuditStatus, date?: string, auditorIds?: string[], clientIds?: string[], showSystemQuantity?: boolean) => Promise<void>; 
+  updateAssignment: (id: number, status: AuditStatus, date?: string, auditorIds?: string[], clientIds?: string[], showSystemQuantity?: boolean) => Promise<void>;
   
   deleteAssignment: (id: number) => Promise<void>;
   
@@ -341,11 +343,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         init();
   }, [selectedCompanyId, selectedAssignmentId]);
 
-// ─────────────────────────────────────────────────────────────
-  // 🔥 REALTIME DASHBOARD SYNC LOGIC
-  // ─────────────────────────────────────────────────────────────
   useEffect(() => {
-    // 🔥 FIX: Removed selectedAssignmentId from the early return so the global Admin Dashboard stays live!
     if (!selectedCompanyId) return; 
 
     let channel: ReturnType<typeof supabase.channel> | null = null;
@@ -353,7 +351,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const connectRealtime = () => {
       if (!navigator.onLine) return; 
 
-      // Dynamically filter: If inside an assignment, listen to that. Otherwise, listen to the whole company.
       const filterString = selectedAssignmentId 
         ? `assignment_id=eq.${selectedAssignmentId}`
         : `company_id=eq.${selectedCompanyId}`;
@@ -363,7 +360,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         .on(
           'postgres_changes',
           { 
-            event: '*', // 🔥 FIX: Listen to INSERT (Surplus items) and UPDATE (Scans/Deductions)
+            event: '*', 
             schema: 'public', 
             table: 'inventory_items', 
             filter: filterString 
@@ -372,7 +369,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             if (payload.eventType === 'DELETE') return;
 
             try {
-                // Fetch fresh item to ensure all nested JSONB (auditor entries) is formatted perfectly
                 const freshItem = await SupabaseDataService.getSingleItem(payload.new.id);
                 
                 setAuditedItemsState(prev => {
@@ -395,7 +391,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                   return [...prev, freshItem];
                 });
                 
-                // Triggers the top-level stats widget update
                 refreshStatsDebounced();
             } catch (err) {
                 console.error("Live sync fetch failed:", err);
@@ -498,15 +493,19 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     await SupabaseDataService.updateLocationAuditStatus(locationId, status);
   };
 
-  const createAssignment = async (locationId: string, companyId: string, status: AuditStatus, date?: string, auditorIds?: string[]) => {
-    const newAssignment = await SupabaseDataService.createAssignment({ locationId, companyId, status, scheduledDate: date || new Date().toISOString(), auditorIds });
+  const createAssignment = async (locationId: string, companyId: string, status: AuditStatus, date?: string, auditorIds?: string[], clientIds?: string[], showSystemQuantity?: boolean) => {
+    const newAssignment = await SupabaseDataService.createAssignment({ 
+      locationId, companyId, status, scheduledDate: date || new Date().toISOString(), auditorIds, clientIds, showSystemQuantity 
+    });
     setAssignments(prev => [newAssignment, ...prev]);
     if (status === 'active' || status === 'pending') await updateLocationAuditStatus(locationId, 'active');
   };
 
-  const updateAssignment = async (id: number, status: AuditStatus, date?: string, auditorIds?: string[]) => {
-    await SupabaseDataService.updateAssignment(id, { status, scheduledDate: date, auditorIds });
-    setAssignments(prev => prev.map(a => a.id === id ? { ...a, status, scheduledDate: date || a.scheduledDate, auditorIds: auditorIds || a.auditorIds } : a));
+  const updateAssignment = async (id: number, status: AuditStatus, date?: string, auditorIds?: string[], clientIds?: string[], showSystemQuantity?: boolean) => {
+    await SupabaseDataService.updateAssignment(id, { status, scheduledDate: date, auditorIds, clientIds, showSystemQuantity });
+    setAssignments(prev => prev.map(a => a.id === id ? { 
+      ...a, status, scheduledDate: date || a.scheduledDate, auditorIds: auditorIds || a.auditorIds, clientIds: clientIds || a.clientIds, showSystemQuantity: showSystemQuantity !== undefined ? showSystemQuantity : a.showSystemQuantity
+    } : a));
   };
 
   const deleteAssignment = async (id: number) => {
@@ -560,21 +559,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return itemMaster.filter(item => item.id?.toLowerCase().includes(lowerCaseQuery) || item.sku?.toLowerCase().includes(lowerCaseQuery) || item.name?.toLowerCase().includes(lowerCaseQuery) || item.category?.toLowerCase().includes(lowerCaseQuery));
   };
 
-  // ─────────────────────────────────────────────────────────────
-  // 🔥 DEDUCTION LOGIC: Includes Admin check and negative values
-  // ─────────────────────────────────────────────────────────────
   const addItemToAudit = async (item: InventoryItem, quantity: number, auditorId?: string, auditorName?: string, subLocation?: string): Promise<number> => {
     if (quantity === 0) return item.physicalQuantity || 0;
     
-    // Check permission for negative quantities (deductions)
     if (quantity < 0) {
         const isAllowedAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
-        if (!isAllowedAdmin) {
-            throw new Error("Only administrators can decrease audited quantities.");
-        }
-        if ((item.physicalQuantity || 0) + quantity < 0) {
-            throw new Error("Cannot decrease total physical quantity below zero.");
-        }
+        if (!isAllowedAdmin) throw new Error("Only administrators can decrease audited quantities.");
+        if ((item.physicalQuantity || 0) + quantity < 0) throw new Error("Cannot decrease total physical quantity below zero.");
     }
 
     const masterItem = itemMaster.find((i) => i.sku === item.sku && i.location === item.location);
@@ -612,18 +603,15 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         const pendingCount = await SyncService.getPendingCount();
         setPendingSyncCount(pendingCount);
-
         return optimisticQuantity;
       }
 
       const freshItem = await SupabaseDataService.getSingleItem(masterItem.id);
-
       setAuditedItemsState(prev => {
         const idx = prev.findIndex(i => i.id === freshItem.id);
         if (idx >= 0) { const newArr = [...prev]; newArr[idx] = freshItem; return newArr; }
         return [...prev, freshItem];
       });
-
       refreshStatsDebounced();
       return freshItem.physicalQuantity || 0;
     } catch (error: any) {

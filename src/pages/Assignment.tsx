@@ -65,7 +65,6 @@ interface CompanyOption {
   name: string;
 }
 
-// Reusable interface for both Auditors and Clients
 interface UserOption {
   id: string;
   name: string;
@@ -102,7 +101,10 @@ const AssignmentPage = () => {
   const [selectedDate, setSelectedDate] = useState<string>(""); 
   
   const [selectedAuditorIds, setSelectedAuditorIds] = useState<string[]>([]);
-  const [selectedClientIds, setSelectedClientIds] = useState<string[]>([]); // 🔥 Added client selection state
+  const [selectedClientIds, setSelectedClientIds] = useState<string[]>([]); 
+
+  // 🔥 NEW: State for tracking the checkbox
+  const [showSystemQuantity, setShowSystemQuantity] = useState<boolean>(true); 
 
   const [isVerificationOpen, setIsVerificationOpen] = useState(false);
   const [otpCode, setOtpCode] = useState("");
@@ -110,17 +112,13 @@ const AssignmentPage = () => {
   const [verificationStatus, setVerificationStatus] = useState<"idle" | "sending" | "verifying">("idle");
 
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
-  
-  // Auditor States
   const [auditors, setAuditors] = useState<UserOption[]>([]);
   const [filteredAuditors, setFilteredAuditors] = useState<UserOption[]>([]);
-  const [loadingUsers, setLoadingUsers] = useState(false); // Generic loading for users
+  const [loadingUsers, setLoadingUsers] = useState(false); 
   const [auditorMap, setAuditorMap] = useState<Map<string, string>>(new Map());
 
-  // Client States
   const [clients, setClients] = useState<UserOption[]>([]);
   const [filteredClients, setFilteredClients] = useState<UserOption[]>([]);
-
   const [companyMap, setCompanyMap] = useState<Map<string, string>>(new Map());
 
   const isSuperAdmin = currentUser?.role === "super_admin";
@@ -128,7 +126,6 @@ const AssignmentPage = () => {
 
   useEffect(() => {
     const fetchMetadata = async () => {
-      // 1. Fetch Companies
       const { data: companyData } = await supabase.from("companies").select("id, name");
       if (companyData) {
         let accessibleCompanies = companyData;
@@ -139,8 +136,7 @@ const AssignmentPage = () => {
         setCompanyMap(new Map(companyData.map(c => [c.id, c.name])));
       }
 
-      // 2. Fetch ALL relevant users (Auditors and Clients)
-      const { data: userData, error } = await supabase
+      const { data: userData } = await supabase
         .from("user_profiles")
         .select("id, name, email, assigned_companies, role")
         .in("role", ["auditor", "client"]);
@@ -194,7 +190,7 @@ const AssignmentPage = () => {
           locationId: a.locationId,
           locationName: locName,
           status: a.status,
-          completionDate: a.scheduledDate, // Fix date mapping
+          completionDate: a.scheduledDate, 
           auditorNames: auditorNames as string[]
         };
       });
@@ -221,6 +217,9 @@ const AssignmentPage = () => {
       setSelectedAuditorIds(currentAssignment?.auditorIds || []);
       setSelectedClientIds(currentAssignment?.clientIds || []);
       
+      // 🔥 NEW: Load the existing setting into the checkbox
+      setShowSystemQuantity(currentAssignment?.showSystemQuantity ?? true); 
+      
       fetchUsersForCompany(assignment.companyId);
 
     } else {
@@ -232,6 +231,9 @@ const AssignmentPage = () => {
       setSelectedDate(new Date().toISOString().split('T')[0]);
       setSelectedAuditorIds([]);
       setSelectedClientIds([]);
+      
+      // 🔥 NEW: Default checkbox to true for new assignments
+      setShowSystemQuantity(true); 
       
       if (defaultCompany) {
           fetchUsersForCompany(defaultCompany);
@@ -245,7 +247,6 @@ const AssignmentPage = () => {
 
   const fetchUsersForCompany = async (companyId: string) => {
       setLoadingUsers(true);
-      
       if (!companyId) {
           setFilteredAuditors([]);
           setFilteredClients([]);
@@ -253,37 +254,22 @@ const AssignmentPage = () => {
           return;
       }
 
-      // Filter Auditors
-      const relevantAuditors = auditors.filter(auditor => {
-          if (!auditor.assigned_companies) return false;
-          return auditor.assigned_companies.includes(companyId);
-      });
-      
-      // Filter Clients
-      const relevantClients = clients.filter(client => {
-          if (!client.assigned_companies) return false;
-          return client.assigned_companies.includes(companyId);
-      });
+      const relevantAuditors = auditors.filter(auditor => auditor.assigned_companies?.includes(companyId));
+      const relevantClients = clients.filter(client => client.assigned_companies?.includes(companyId));
       
       setFilteredAuditors(relevantAuditors);
       setFilteredClients(relevantClients);
       setLoadingUsers(false);
   };
 
-  const toggleAuditor = (auditorId: string) => {
-    setSelectedAuditorIds(prev => prev.includes(auditorId) ? prev.filter(id => id !== auditorId) : [...prev, auditorId]);
-  };
-
-  const toggleClient = (clientId: string) => {
-    setSelectedClientIds(prev => prev.includes(clientId) ? prev.filter(id => id !== clientId) : [...prev, clientId]);
-  };
+  const toggleAuditor = (auditorId: string) => setSelectedAuditorIds(prev => prev.includes(auditorId) ? prev.filter(id => id !== auditorId) : [...prev, auditorId]);
+  const toggleClient = (clientId: string) => setSelectedClientIds(prev => prev.includes(clientId) ? prev.filter(id => id !== clientId) : [...prev, clientId]);
 
   const handleSave = async () => {
     if (!targetCompanyId || !selectedLocationId || !selectedDate) {
       toast.error("Please fill all required fields");
       return;
     }
-    
     try {
       const assignmentData = {
         companyId: targetCompanyId,
@@ -291,34 +277,25 @@ const AssignmentPage = () => {
         status: selectedStatus,
         scheduledDate: selectedDate,
         auditorIds: selectedAuditorIds,
-        clientIds: selectedClientIds // 🔥 Submitting client mappings
+        clientIds: selectedClientIds,
+        showSystemQuantity: showSystemQuantity // 🔥 Save the setting to DB
       };
 
       if (dialogMode === "create") {
          await SupabaseDataService.createAssignment(assignmentData as any);
          toast.success("Assignment created");
       } else if (selectedAssignmentIdState) {
-         await SupabaseDataService.updateAssignment(selectedAssignmentIdState, {
-            status: selectedStatus,
-            scheduledDate: selectedDate,
-            auditorIds: selectedAuditorIds,
-            clientIds: selectedClientIds
-         });
+         await SupabaseDataService.updateAssignment(selectedAssignmentIdState, assignmentData as any);
          toast.success("Assignment updated");
       }
       setIsDialogOpen(false);
       window.location.reload(); 
-    } catch (e: any) {
-      toast.error(e.message || "Operation failed");
-    }
+    } catch (e: any) { toast.error(e.message || "Operation failed"); }
   };
 
   const handleDelete = async (id: number) => {
     if(confirm("Delete this assignment?")) {
-        try {
-            await deleteAssignment(id);
-            toast.success("Deleted");
-            setRows(prev => prev.filter(r => r.dbId !== id));
+        try { await deleteAssignment(id); toast.success("Deleted"); setRows(prev => prev.filter(r => r.dbId !== id));
         } catch(e) { toast.error("Delete failed"); }
     }
   };
@@ -333,10 +310,7 @@ const AssignmentPage = () => {
   };
 
   const handleInitiateFinalization = async (row: AssignmentRow) => {
-    setVerificationPendingRow(row);
-    setIsVerificationOpen(true);
-    setVerificationStatus("idle");
-    setOtpCode("");
+    setVerificationPendingRow(row); setIsVerificationOpen(true); setVerificationStatus("idle"); setOtpCode("");
   };
 
   const handleSendOtp = async () => {
@@ -346,31 +320,21 @@ const AssignmentPage = () => {
             const msg = await SupabaseDataService.sendAssignmentOtp(verificationPendingRow.dbId);
             toast.success(msg);
         }
-    } catch (error: any) {
-        toast.error(error.message || "Failed to send OTP.");
-    } finally {
-        setVerificationStatus("idle");
-    }
+    } catch (error: any) { toast.error(error.message || "Failed to send OTP."); } finally { setVerificationStatus("idle"); }
   };
 
   const handleVerifyOtp = async () => {
-    if (otpCode.length < 6) {
-        toast.error("Please enter full 6-digit OTP");
-        return;
-    }
+    if (otpCode.length < 6) { toast.error("Please enter full 6-digit OTP"); return; }
     setVerificationStatus("verifying");
     if (verificationPendingRow) {
         try {
             const isValid = await SupabaseDataService.verifyAssignmentOtp(verificationPendingRow.dbId, otpCode);
             if (!isValid) throw new Error("Invalid verification code");
-
             await updateAssignment(verificationPendingRow.dbId, 'finalized');
             toast.success("Assignment Finalized!");
             setIsVerificationOpen(false);
             window.location.reload();
-        } catch (e: any) { 
-            toast.error(e.message || "Finalization failed"); 
-        }
+        } catch (e: any) { toast.error(e.message || "Finalization failed"); }
     }
     setVerificationStatus("idle");
   };
@@ -380,28 +344,18 @@ const AssignmentPage = () => {
       <div className="space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
-                 <ArrowLeft className="h-5 w-5" />
-            </Button>
+            <Button variant="ghost" size="icon" onClick={() => navigate(-1)}><ArrowLeft className="h-5 w-5" /></Button>
             <div>
                 <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-900">Assignment Management</h2>
                 <p className="text-sm text-muted-foreground">Manage audit assignments for locations</p>
             </div>
           </div>
-          
-          {(isSuperAdmin || isAdmin) && (
-            <Button onClick={() => openDialog("create")} className="bg-indigo-600 hover:bg-indigo-700 w-full md:w-auto">
-              <Plus className="mr-2 h-4 w-4" /> Create Assignment
-            </Button>
-          )}
+          {(isSuperAdmin || isAdmin) && (<Button onClick={() => openDialog("create")} className="bg-indigo-600 hover:bg-indigo-700 w-full md:w-auto"><Plus className="mr-2 h-4 w-4" /> Create Assignment</Button>)}
         </div>
 
         <Card className="shadow-sm border-gray-200">
           <CardHeader className="border-b border-gray-100 bg-gray-50/50">
-            <CardTitle className="flex items-center gap-2 text-gray-900">
-              <ClipboardList className="h-5 w-5 text-indigo-600" />
-              Assignments List
-            </CardTitle>
+            <CardTitle className="flex items-center gap-2 text-gray-900"><ClipboardList className="h-5 w-5 text-indigo-600" /> Assignments List</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
@@ -427,22 +381,15 @@ const AssignmentPage = () => {
                             <TableRow key={row.dbId} className="hover:bg-gray-50">
                                 <TableCell className="font-mono text-xs text-gray-500">#{row.dbId}</TableCell>
                                 <TableCell className="font-medium">
-                                    <div className="flex flex-col">
-                                        <span>{row.locationName}</span>
-                                        <span className="md:hidden text-xs text-gray-500">{row.companyName}</span>
-                                    </div>
+                                    <div className="flex flex-col"><span>{row.locationName}</span><span className="md:hidden text-xs text-gray-500">{row.companyName}</span></div>
                                 </TableCell>
                                 <TableCell className="hidden md:table-cell text-gray-600">{row.companyName}</TableCell>
                                 <TableCell className="hidden lg:table-cell">
                                     <div className="flex flex-wrap gap-1">
-                                        {row.auditorNames.map((name, i) => (
-                                            <span key={i} className="text-[10px] bg-gray-100 px-2 py-0.5 rounded border border-gray-200">{name}</span>
-                                        ))}
+                                        {row.auditorNames.map((name, i) => (<span key={i} className="text-[10px] bg-gray-100 px-2 py-0.5 rounded border border-gray-200">{name}</span>))}
                                     </div>
                                 </TableCell>
-                                <TableCell className="hidden md:table-cell text-gray-600">
-                                    {row.completionDate ? format(new Date(row.completionDate), 'MMM dd, yyyy') : '-'}
-                                </TableCell>
+                                <TableCell className="hidden md:table-cell text-gray-600">{row.completionDate ? format(new Date(row.completionDate), 'MMM dd, yyyy') : '-'}</TableCell>
                                 <TableCell>{getStatusBadge(row.status)}</TableCell>
                                 <TableCell className="text-right">
                                     <div className="flex justify-end gap-2">
@@ -451,13 +398,9 @@ const AssignmentPage = () => {
                                                 <Lock className="mr-1 h-3 w-3" /> Finalize
                                             </Button>
                                         )}
-                                        <Button variant="ghost" size="icon" onClick={() => openDialog("modify", row)} className="h-8 w-8 text-gray-500 hover:text-indigo-600">
-                                            <Pencil className="h-4 w-4" />
-                                        </Button>
+                                        <Button variant="ghost" size="icon" onClick={() => openDialog("modify", row)} className="h-8 w-8 text-gray-500 hover:text-indigo-600"><Pencil className="h-4 w-4" /></Button>
                                         {(isSuperAdmin || isAdmin) && (
-                                            <Button variant="ghost" size="icon" onClick={() => handleDelete(row.dbId)} className="h-8 w-8 text-gray-500 hover:text-red-600">
-                                                <Trash2 className="h-4 w-4" />
-                                            </Button>
+                                            <Button variant="ghost" size="icon" onClick={() => handleDelete(row.dbId)} className="h-8 w-8 text-gray-500 hover:text-red-600"><Trash2 className="h-4 w-4" /></Button>
                                         )}
                                     </div>
                                 </TableCell>
@@ -476,13 +419,7 @@ const AssignmentPage = () => {
               <div className="grid gap-4 py-4">
                   <div className="space-y-2">
                       <Label>Company</Label>
-                      <Select 
-                        value={targetCompanyId} 
-                        onValueChange={(val) => { 
-                            setTargetCompanyId(val); 
-                            fetchUsersForCompany(val);
-                        }}
-                      >
+                      <Select value={targetCompanyId} onValueChange={(val) => { setTargetCompanyId(val); fetchUsersForCompany(val); }}>
                           <SelectTrigger><SelectValue placeholder="Select Company" /></SelectTrigger>
                           <SelectContent>{companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
                       </Select>
@@ -492,53 +429,32 @@ const AssignmentPage = () => {
                       <Select value={selectedLocationId} onValueChange={setSelectedLocationId}>
                           <SelectTrigger><SelectValue placeholder="Select Location" /></SelectTrigger>
                           <SelectContent>
-                            {globalLocations
-                                .filter(l => l.companyId === targetCompanyId)
-                                .map(l => <SelectItem key={l.id} value={l.id.toString()}>{l.name}</SelectItem>)
-                            }
+                            {globalLocations.filter(l => l.companyId === targetCompanyId).map(l => <SelectItem key={l.id} value={l.id.toString()}>{l.name}</SelectItem>)}
                           </SelectContent>
                       </Select>
                   </div>
                   
-                  {/* Two column layout for Auditors and Clients */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {/* Auditors selection */}
                       <div className="space-y-2">
                           <Label>Auditors</Label>
                           <div className="border rounded-md p-3 max-h-40 overflow-y-auto space-y-2 bg-gray-50/50">
-                              {loadingUsers ? (
-                                  <p className="text-xs text-muted-foreground">Loading...</p>
-                              ) : filteredAuditors.length === 0 ? (
-                                  <p className="text-xs text-muted-foreground italic">No auditors found.</p>
-                              ) : (
+                              {loadingUsers ? (<p className="text-xs text-muted-foreground">Loading...</p>) : filteredAuditors.length === 0 ? (<p className="text-xs text-muted-foreground italic">No auditors found.</p>) : (
                                   filteredAuditors.map(auditor => (
                                       <div key={auditor.id} className="flex items-center gap-2">
-                                          <Checkbox 
-                                            checked={selectedAuditorIds.includes(auditor.id)} 
-                                            onCheckedChange={() => toggleAuditor(auditor.id)} 
-                                          />
+                                          <Checkbox checked={selectedAuditorIds.includes(auditor.id)} onCheckedChange={() => toggleAuditor(auditor.id)} />
                                           <span className="text-sm truncate" title={auditor.email}>{auditor.name || auditor.email}</span>
                                       </div>
                                   ))
                               )}
                           </div>
                       </div>
-
-                      {/* Clients selection */}
                       <div className="space-y-2">
                           <Label>Clients (OTP Recipients)</Label>
                           <div className="border rounded-md p-3 max-h-40 overflow-y-auto space-y-2 bg-gray-50/50">
-                              {loadingUsers ? (
-                                  <p className="text-xs text-muted-foreground">Loading...</p>
-                              ) : filteredClients.length === 0 ? (
-                                  <p className="text-xs text-muted-foreground italic">No clients found.</p>
-                              ) : (
+                              {loadingUsers ? (<p className="text-xs text-muted-foreground">Loading...</p>) : filteredClients.length === 0 ? (<p className="text-xs text-muted-foreground italic">No clients found.</p>) : (
                                   filteredClients.map(client => (
                                       <div key={client.id} className="flex items-center gap-2">
-                                          <Checkbox 
-                                            checked={selectedClientIds.includes(client.id)} 
-                                            onCheckedChange={() => toggleClient(client.id)} 
-                                          />
+                                          <Checkbox checked={selectedClientIds.includes(client.id)} onCheckedChange={() => toggleClient(client.id)} />
                                           <span className="text-sm truncate" title={client.email}>{client.name || client.email}</span>
                                       </div>
                                   ))
@@ -565,11 +481,30 @@ const AssignmentPage = () => {
                           <Input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
                       </div>
                   </div>
+
+                  {/* 🔥 NEW: The Checkbox UI */}
+                  <div className="flex flex-row items-start space-x-3 space-y-0 rounded-md border border-gray-200 bg-gray-50 p-4 mt-2">
+                      <Checkbox 
+                        id="showSysQty" 
+                        checked={showSystemQuantity} 
+                        onCheckedChange={(checked) => setShowSystemQuantity(!!checked)} 
+                        className="mt-1"
+                      />
+                      <div className="space-y-1 leading-none">
+                        <Label htmlFor="showSysQty" className="font-medium cursor-pointer text-gray-900">
+                          Show System Quantity to Auditors
+                        </Label>
+                        <p className="text-xs text-gray-500">
+                          If unchecked, auditors will scan blindly without seeing the expected system quantities.
+                        </p>
+                      </div>
+                  </div>
               </div>
               <DialogFooter><Button onClick={handleSave}>Save Assignment</Button></DialogFooter>
            </DialogContent>
         </Dialog>
 
+        {/* Verification Dialog... */}
         <Dialog open={isVerificationOpen} onOpenChange={setIsVerificationOpen}>
            <DialogContent className="sm:max-w-md">
               <DialogHeader><DialogTitle>Finalize Audit</DialogTitle><DialogDescription>An OTP will be sent to the assigned client(s).</DialogDescription></DialogHeader>

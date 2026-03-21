@@ -3,7 +3,7 @@ import { useInventory, InventoryItem } from "@/context/InventoryContext";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Search, Plus, Minus, MapPin, AlertCircle, PackagePlus, ScanBarcode, ArrowLeft, Check, ChevronsUpDown, MessageSquare } from "lucide-react";
+import { Search, Plus, Minus, MapPin, AlertCircle, PackagePlus, ScanBarcode, ArrowLeft, Check, ChevronsUpDown, MessageSquare, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { useUser } from "@/context/UserContext";
 import { useCompany } from "@/context/CompanyContext";
@@ -41,7 +41,7 @@ export const SearchInventory = () => {
   const [debouncedQuery, setDebouncedQuery] = useState("");
   
   const [quantities, setQuantities] = useState<Record<string, number>>({});
-  const [remarks, setRemarks] = useState<Record<string, string>>({}); // 🔥 NEW: State to track remarks
+  const [remarks, setRemarks] = useState<Record<string, string>>({});
   
   const [isDecimalMode, setIsDecimalMode] = useState(false);
   const [decimalQuantities, setDecimalQuantities] = useState<Record<string, string>>({});
@@ -73,7 +73,7 @@ export const SearchInventory = () => {
     activeSubLocations, 
     fetchSubLocations,  
     addSubLocationToDb,
-    updateItemRemark // 🔥 NEW: Pulled update function from context
+    updateItemRemark
   } = useInventory();
 
   const { currentUser } = useUser();
@@ -81,9 +81,13 @@ export const SearchInventory = () => {
 
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
 
-  const currentAssignment = assignments.find(a => a.id === selectedAssignmentId);
+  // 🔥 Verify setting applies specifically to Auditors
+  const currentAssignment = assignments.find(a => String(a.id) === String(selectedAssignmentId));
   const activeLocationId = currentAssignment?.locationId;
-  const activeLocationName = locations.find(l => l.id === activeLocationId)?.name;
+  const activeLocationName = locations.find(l => String(l.id) === String(activeLocationId))?.name;
+
+  const isAuditor = currentUser?.role === 'auditor';
+  const hideSystemQuantity = isAuditor && currentAssignment?.showSystemQuantity === false;
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -177,12 +181,10 @@ export const SearchInventory = () => {
         }
   };
 
-  // 🔥 NEW: Handle saving the remark if the user types something and clicks away (onBlur)
   const handleRemarkBlur = async (item: InventoryItem) => {
     const itemKey = getItemKey(item);
     const currentRemark = remarks[itemKey];
     
-    // If remark was modified and differs from the database value
     if (currentRemark !== undefined && currentRemark !== (item.clientRemarks || "")) {
         try {
             await updateItemRemark(item.id, currentRemark);
@@ -230,7 +232,6 @@ export const SearchInventory = () => {
         selectedSubLocation
       );
       
-      // 🔥 NEW: Also save the remark when adding/deducting, if it was modified
       const currentRemark = remarks[itemKey] !== undefined ? remarks[itemKey] : (item.clientRemarks || "");
       if (currentRemark !== (item.clientRemarks || "")) {
           await updateItemRemark(item.id, currentRemark);
@@ -435,7 +436,15 @@ export const SearchInventory = () => {
                       <h3 className="font-medium text-gray-900">{item.name}</h3>
                       <div className="text-sm text-gray-500">SKU: {item.sku}</div>
                       <div className="text-sm text-gray-500">Category: {item.category || '-'}</div>
-                      <div className="text-sm text-gray-900 mt-1">System Quantity: {item.systemQuantity} {itemUploadedUnit}</div>
+                      
+                      {/* 🔥 HIDE LOGIC ACTIVE */}
+                      {!hideSystemQuantity ? (
+                          <div className="text-sm text-gray-900 mt-1">System Quantity: {item.systemQuantity} {itemUploadedUnit}</div>
+                      ) : (
+                          <div className="text-sm text-gray-500 mt-1 italic flex items-center gap-1">
+                              <ShieldAlert className="h-3 w-3" /> System Quantity: Hidden
+                          </div>
+                      )}
                       
                       {consolidatedEntries.length > 0 && (
                         <div className="mt-2 text-xs bg-white p-2 rounded border border-gray-200 shadow-sm">
@@ -454,7 +463,6 @@ export const SearchInventory = () => {
                     </div>
                     <div className="flex flex-col items-end gap-2 w-full md:w-auto">
                       
-                      {/* Quantity Controls */}
                       {isDecimalMode ? (
                           <div className="flex items-center gap-2 mb-1 w-full justify-end">
                               <Input 
@@ -504,7 +512,6 @@ export const SearchInventory = () => {
                           </div>
                       )}
 
-                      {/* 🔥 NEW: Remark Input Field */}
                       <div className="w-full relative mb-2">
                         <MessageSquare className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" />
                         <Input
@@ -516,7 +523,6 @@ export const SearchInventory = () => {
                         />
                       </div>
 
-                      {/* Add / Deduct Buttons */}
                       <div className="flex gap-2 w-full md:w-[208px]">
                         {isAdmin && (
                             <Button 
