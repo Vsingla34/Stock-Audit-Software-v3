@@ -65,9 +65,9 @@ export const processItemMasterData = (rows: CSVRow[]): Omit<InventoryItem, 'id'>
       throw new Error(`Row ${index + 2} in Item Master is missing 'category' column.`);
     }
     
-    // Quantity logic (if included in master upload) - OPTIONAL
+    // 🔥 FIX: Changed parseInt to parseFloat to allow decimals
     const quantityStr = row['systemquantity'] || row['system quantity'] || row['quantity'] || row['qty'] || '0';
-    const systemQuantity = parseInt(quantityStr, 10) || 0;
+    const systemQuantity = parseFloat(quantityStr) || 0;
 
     // RESERVED FIELDS - These are NOT custom attributes
     const reservedKeys = [
@@ -163,8 +163,9 @@ export const processClosingStockData = (
         seenSkus.set(sku, index + 2);
       }
 
+      // 🔥 FIX: Changed parseInt to parseFloat
       const quantityStr = row['systemquantity'] || row['system quantity'] || row['quantity'] || row['qty'] || '0';
-      const systemQuantity = parseInt(quantityStr, 10);
+      const systemQuantity = parseFloat(quantityStr);
       if (isNaN(systemQuantity)) throw new Error(`Row ${index + 2} has invalid quantity.`);
       
       // RESERVED FIELDS
@@ -221,8 +222,9 @@ export const processClosingStockData = (
         seenSkus.set(sku, index + 2);
       }
 
+      // 🔥 FIX: Changed parseInt to parseFloat
       const quantityStr = row['systemquantity'] || row['system quantity'] || row['quantity'] || row['qty'] || '0';
-      const systemQuantity = parseInt(quantityStr, 10);
+      const systemQuantity = parseFloat(quantityStr);
       if (isNaN(systemQuantity)) throw new Error(`Row ${index + 2} has invalid quantity.`);
 
       const rowLocation = row['location'] || row['warehouse'] || row['store'];
