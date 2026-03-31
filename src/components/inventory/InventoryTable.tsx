@@ -78,13 +78,10 @@ export const InventoryTable = () => {
   }, [itemMaster, auditedItems]);
 
   const locationFilteredData = useMemo(() => {
-    // 🔥 CRITICAL FIX: If we are actively in an assignment, the DB already scoped the items perfectly.
-    // We bypass the strict string location matching so auditors never see an empty table!
     if (selectedAssignmentId) {
        return allTableData; 
     }
 
-    // Global View Logic (Outside of an assignment, e.g., for Admins looking at the global dashboard)
     const isAllLocations = !selectedLocation || selectedLocation === "all";
 
     if (isAllLocations) {
@@ -113,6 +110,9 @@ export const InventoryTable = () => {
     const priceKeywords = ['unit price', 'unit_price', 'price', 'rate', 'cost', 'mrp', 'unit cost'];
     return rawDynamicColumns.find(col => priceKeywords.includes(col.toLowerCase()));
   }, [rawDynamicColumns]);
+
+  // 🔥 THE FIX: Properly define hasPricing so the app doesn't crash!
+  const hasPricing = !!priceColumnKey;
 
   const displayDynamicColumns = useMemo(() => {
     const excluded = [priceColumnKey, 'system_value', 'physical_value'].filter(Boolean);
@@ -225,7 +225,7 @@ export const InventoryTable = () => {
               
               {displayDynamicColumns.map(colKey => (<TableHead key={colKey} className="font-semibold capitalize min-w-[100px]">{colKey.replace(/_/g, ' ')}</TableHead>))}
 
-              {priceColumnKey && !hideSystemQuantity && (
+              {hasPricing && !hideSystemQuantity && (
                 <>
                   <TableHead className="text-right font-semibold w-[100px] bg-indigo-50/50">Unit Price</TableHead>
                   <TableHead className="text-right font-semibold w-[100px] bg-indigo-50/50">Sys Value</TableHead>
@@ -249,7 +249,7 @@ export const InventoryTable = () => {
                 const physicalQty = item.physicalQuantity ?? 0;
                 let unitPrice = 0, sysValue = 0, phyValue = 0, valueVariance = 0;
 
-                if (priceColumnKey && !hideSystemQuantity) {
+                if (hasPricing && !hideSystemQuantity && priceColumnKey) {
                    unitPrice = parsePrice(item.customAttributes?.['unit_price'] || item.customAttributes?.[priceColumnKey]);
                    sysValue = item.customAttributes?.['system_value'] ? parsePrice(item.customAttributes['system_value']) : unitPrice * item.systemQuantity;
                    phyValue = item.customAttributes?.['physical_value'] ? parsePrice(item.customAttributes['physical_value']) : unitPrice * physicalQty;
@@ -264,7 +264,7 @@ export const InventoryTable = () => {
 
                     {displayDynamicColumns.map(colKey => (<TableCell key={colKey} className="text-xs text-gray-600">{item.customAttributes?.[colKey] !== undefined ? String(item.customAttributes[colKey]) : "-"}</TableCell>))}
 
-                    {priceColumnKey && !hideSystemQuantity && (
+                    {hasPricing && !hideSystemQuantity && (
                         <>
                           <TableCell className="text-right text-xs font-mono bg-indigo-50/30">{formatCurrency(unitPrice)}</TableCell>
                           <TableCell className="text-right text-xs font-mono bg-indigo-50/30 font-medium text-gray-700">{formatCurrency(sysValue)}</TableCell>
@@ -308,7 +308,7 @@ export const InventoryTable = () => {
               })
             ) : (
               <TableRow>
-                  <TableCell colSpan={hideSystemQuantity ? 8 : (10 + (hasPricing ? 4 : 0))} className="text-center py-4 text-gray-500">No data available matching filters</TableCell>
+                  <TableCell colSpan={hideSystemQuantity ? 6 : (8 + (hasPricing ? 4 : 0))} className="text-center py-4 text-gray-500">No data available matching filters</TableCell>
               </TableRow>
             )}
           </TableBody>
