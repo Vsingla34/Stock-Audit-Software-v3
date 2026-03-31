@@ -81,7 +81,7 @@ export const SearchInventory = () => {
 
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
 
-  // 🔥 Verify setting applies specifically to Auditors
+  // 🔥 CHECK BLIND AUDIT STATUS
   const currentAssignment = assignments.find(a => String(a.id) === String(selectedAssignmentId));
   const activeLocationId = currentAssignment?.locationId;
   const activeLocationName = locations.find(l => String(l.id) === String(activeLocationId))?.name;
@@ -128,8 +128,13 @@ export const SearchInventory = () => {
         item.category?.toLowerCase().includes(lowerCaseQuery)
     );
 
+    // 🔥 CRITICAL FIX: Robust, case-insensitive, trimmed matching to ensure auditors always see items
     if (activeLocationName) {
-        results = results.filter(item => item.location === activeLocationName);
+        const cleanActiveLocation = activeLocationName.trim().toLowerCase();
+        results = results.filter(item => {
+            const cleanItemLocation = (item.location || "").trim().toLowerCase();
+            return cleanItemLocation === cleanActiveLocation;
+        });
     }
 
     return results;
@@ -437,7 +442,7 @@ export const SearchInventory = () => {
                       <div className="text-sm text-gray-500">SKU: {item.sku}</div>
                       <div className="text-sm text-gray-500">Category: {item.category || '-'}</div>
                       
-                      {/* 🔥 HIDE LOGIC ACTIVE */}
+                      {/* 🔥 BLIND AUDIT MASKING APPLIED HERE */}
                       {!hideSystemQuantity ? (
                           <div className="text-sm text-gray-900 mt-1">System Quantity: {item.systemQuantity} {itemUploadedUnit}</div>
                       ) : (

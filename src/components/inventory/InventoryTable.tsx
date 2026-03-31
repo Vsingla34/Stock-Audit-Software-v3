@@ -78,6 +78,13 @@ export const InventoryTable = () => {
   }, [itemMaster, auditedItems]);
 
   const locationFilteredData = useMemo(() => {
+    // 🔥 CRITICAL FIX: If we are actively in an assignment, the DB already scoped the items perfectly.
+    // We bypass the strict string location matching so auditors never see an empty table!
+    if (selectedAssignmentId) {
+       return allTableData; 
+    }
+
+    // Global View Logic (Outside of an assignment, e.g., for Admins looking at the global dashboard)
     const isAllLocations = !selectedLocation || selectedLocation === "all";
 
     if (isAllLocations) {
@@ -92,7 +99,7 @@ export const InventoryTable = () => {
     
     if (currentLocationObj) return allTableData.filter((item) => item.location === currentLocationObj.name);
     return [];
-  }, [allTableData, selectedLocation, currentLocationObj, currentUser?.role, userLocations]);
+  }, [allTableData, selectedLocation, currentLocationObj, currentUser?.role, userLocations, selectedAssignmentId]);
 
   const rawDynamicColumns = useMemo(() => {
     const keys = new Set<string>();
@@ -228,14 +235,9 @@ export const InventoryTable = () => {
               )}
 
               <TableHead className="font-semibold">Location</TableHead>
-              
-              {/* 🔥 HIDE SYSTEM QUANTITY & VAR COLUMNS ENTIRELY */}
               {!hideSystemQuantity && <TableHead className="text-center font-semibold w-[80px]">Sys Qty</TableHead>}
-              
               <TableHead className="text-center font-semibold w-[80px]">Phy Qty</TableHead>
-              
               {!hideSystemQuantity && <TableHead className="text-center font-semibold w-[80px]">Var</TableHead>}
-              
               <TableHead className="text-center font-semibold w-[120px]">Status</TableHead>
               <TableHead className="font-semibold w-[150px]">Last Audited</TableHead>
               <TableHead className="font-semibold w-[200px]">Remarks</TableHead>
@@ -273,10 +275,9 @@ export const InventoryTable = () => {
 
                     <TableCell className="text-xs">{item.location}</TableCell>
                     
-                    {/* 🔥 HIDE SYSTEM QUANTITY & VAR CELLS ENTIRELY */}
                     {!hideSystemQuantity && (
-                        <TableCell className="text-center font-medium text-sm">
-                          {item.systemQuantity}
+                        <TableCell className="text-center font-medium">
+                            {item.systemQuantity}
                         </TableCell>
                     )}
                     
@@ -307,8 +308,7 @@ export const InventoryTable = () => {
               })
             ) : (
               <TableRow>
-                {/* Dynamically calculate colspan based on visible columns */}
-                <TableCell colSpan={hideSystemQuantity ? 9 + displayDynamicColumns.length : 11 + displayDynamicColumns.length + (priceColumnKey ? 4 : 0)} className="text-center py-8 text-muted-foreground">No data found.</TableCell>
+                  <TableCell colSpan={hideSystemQuantity ? 8 : (10 + (hasPricing ? 4 : 0))} className="text-center py-4 text-gray-500">No data available matching filters</TableCell>
               </TableRow>
             )}
           </TableBody>
