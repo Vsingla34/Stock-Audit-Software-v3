@@ -60,7 +60,7 @@ export interface Assignment {
   auditorId?: string;
   auditorIds?: string[];
   clientIds?: string[];
-  showSystemQuantity?: boolean; // 🔥 Added setting
+  showSystemQuantity?: boolean;
 }
 
 export type QuestionType = "text" | "single_select" | "multi_select" | "yes_no" | "file";
@@ -101,7 +101,6 @@ interface InventoryContextType {
   selectedLocationFilter: string;
   activeSubLocations: string[]; 
   
-  // Offline Sync State
   pendingSyncCount: number;
   isSyncing: boolean;
 
@@ -206,7 +205,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  const { currentUser } = useUser();   
+  // 🔥 DOUBLE FALLBACK FIX: Extracting 'user' as well as 'currentUser'
+  const { currentUser, user } = useUser();   
   const [questionnaireAnswers, setQuestionnaireAnswers] = useState<QuestionnaireAnswer[]>([]);
   const { selectedCompanyId, selectedAssignmentId } = useCompany();
   const statsRefreshTimer = useRef<NodeJS.Timeout | null>(null);
@@ -240,7 +240,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         return {
             ...item,
-            physicalQuantity: Math.max(0, newQty), // Prevent UI dropping below 0
+            physicalQuantity: Math.max(0, newQty),
             status: newQty === item.systemQuantity ? 'matched' : 'discrepancy',
             auditorEntries: entries,
             lastAudited: itemPendingScans[itemPendingScans.length - 1].attemptedAt
@@ -339,8 +339,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setPendingSyncCount(count);
       }
     };
-
-        init();
+    init();
   }, [selectedCompanyId, selectedAssignmentId]);
 
   useEffect(() => {
@@ -359,56 +358,32 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         .channel(`live-dashboard-${selectedAssignmentId || 'global'}`)
         .on(
           'postgres_changes',
-          { 
-            event: '*', 
-            schema: 'public', 
-            table: 'inventory_items', 
-            filter: filterString 
-          },
+          { event: '*', schema: 'public', table: 'inventory_items', filter: filterString },
           async (payload) => {
             if (payload.eventType === 'DELETE') return;
-
             try {
                 const freshItem = await SupabaseDataService.getSingleItem(payload.new.id);
-                
                 setAuditedItemsState(prev => {
                   const idx = prev.findIndex(i => i.id === freshItem.id);
-                  if (idx >= 0) {
-                    const newArr = [...prev];
-                    newArr[idx] = freshItem;
-                    return newArr;
-                  }
+                  if (idx >= 0) { const newArr = [...prev]; newArr[idx] = freshItem; return newArr; }
                   return [...prev, freshItem];
                 });
-                
                 setItemMasterState(prev => {
                   const idx = prev.findIndex(i => i.id === freshItem.id);
-                  if (idx >= 0) {
-                    const newArr = [...prev];
-                    newArr[idx] = freshItem;
-                    return newArr;
-                  }
+                  if (idx >= 0) { const newArr = [...prev]; newArr[idx] = freshItem; return newArr; }
                   return [...prev, freshItem];
                 });
-                
                 refreshStatsDebounced();
             } catch (err) {
                 console.error("Live sync fetch failed:", err);
             }
           }
         )
-        .subscribe((status) => {
-           if (status === 'SUBSCRIBED') {
-             console.log("🔴 Live Dashboard WebSockets Connected!");
-           }
-        });
+        .subscribe();
     };
 
     const disconnectRealtime = () => {
-      if (channel) {
-        supabase.removeChannel(channel);
-        channel = null;
-      }
+      if (channel) { supabase.removeChannel(channel); channel = null; }
     };
 
     connectRealtime();
@@ -475,7 +450,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     if (!item.id) throw new Error("Item ID required");
     await SupabaseDataService.updateItemAttributes(item.id, item.customAttributes || {}, item.clientRemarks);
     const freshItem = await SupabaseDataService.getSingleItem(item.id);
-    
     setAuditedItemsState(prev => {
       const idx = prev.findIndex(i => i.id === freshItem.id);
       if (idx >= 0) { const newArr = [...prev]; newArr[idx] = freshItem; return newArr; }
@@ -550,7 +524,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const scanItem = async (barcode: string, locationName: string) => {
     const item = itemMaster.find((i) => (i.id === barcode || i.sku === barcode) && i.location === locationName);
     if (!item) throw new Error(`Item not found`);
-    await addItemToAudit(item, 1, currentUser?.id, currentUser?.email || "Unknown Auditor", undefined);
+    // Pass robust name fallback here too
+    const activeName = currentUser?.email || currentUser?.name || user?.email || "Unknown Auditor";
+    await addItemToAudit(item, 1, currentUser?.id || user?.id, activeName, undefined);
   };
 
   const searchItem = (query: string) => {
@@ -571,9 +547,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const masterItem = itemMaster.find((i) => i.sku === item.sku && i.location === item.location);
     if (!masterItem?.id) throw new Error("Item ID missing - cannot record scan");
     
+    // 🔥 THE FALLBACK FIX: Grab the base user ID/Email if the profile failed to load offline
+    const activeUserId = currentUser?.id || user?.id || auditorId || "unknown";
+    const activeUserName = currentUser?.email || currentUser?.name || user?.email || auditorName || "Unknown Auditor";
+
     const newEntry = { 
-      auditorId: currentUser?.id || auditorId || "unknown", 
-      auditorName: currentUser?.email || "Unknown Auditor", 
+      auditorId: activeUserId, 
+      auditorName: activeUserName, 
       quantityFound: quantity, 
       auditedAt: new Date().toISOString(), 
       subLocation: subLocation || "General" 
@@ -627,7 +607,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const loc = locations.find(l => l.id === assignment.locationId);
     if (!loc) throw new Error("Location not found.");
     
-    await SupabaseDataService.addSurplusItem({ item, companyId: selectedCompanyId, assignmentId: selectedAssignmentId, locationName: loc.name, userId: currentUser?.id, userName: currentUser?.email || "Unknown Auditor" });
+    // Apply double fallback here too
+    const activeUserId = currentUser?.id || user?.id;
+    const activeUserName = currentUser?.email || currentUser?.name || user?.email || "Unknown Auditor";
+
+    await SupabaseDataService.addSurplusItem({ item, companyId: selectedCompanyId, assignmentId: selectedAssignmentId, locationName: loc.name, userId: activeUserId, userName: activeUserName });
     await loadData();
   };
 
@@ -639,7 +623,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const deleteQuestion = async (questionId: string) => { await SupabaseDataService.deleteQuestion(questionId); setQuestions((prev) => prev.filter((q) => q.id !== questionId)); };
   
   const saveQuestionnaireAnswer = async (answer: Omit<QuestionnaireAnswer, "answeredOn">) => {
-    const newAnswer: QuestionnaireAnswer = { ...answer, answeredOn: new Date().toISOString(), answeredBy: currentUser?.email || "Unknown", companyId: locations.find(loc => loc.id === answer.locationId)?.companyId };
+    // Fallback for questionnaire
+    const activeUserName = currentUser?.email || currentUser?.name || user?.email || "Unknown";
+    
+    const newAnswer: QuestionnaireAnswer = { ...answer, answeredOn: new Date().toISOString(), answeredBy: activeUserName, companyId: locations.find(loc => loc.id === answer.locationId)?.companyId };
     setQuestionnaireAnswers((prev) => {
       const existingIndex = prev.findIndex((a) => a.questionId === answer.questionId && a.assignmentId === answer.assignmentId);
       if (existingIndex !== -1) { const updated = [...prev]; updated[existingIndex] = newAnswer; return updated; }

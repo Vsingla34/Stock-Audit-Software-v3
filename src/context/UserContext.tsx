@@ -3,7 +3,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { Session, User } from "@supabase/supabase-js";
 import { toast } from "sonner";
 
-// Updated Interface: removed 'assigned_locations'
 export interface UserProfile {
   id: string;
   email: string;
@@ -34,7 +33,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // 1. Check active session on mount
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
@@ -45,7 +43,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
       }
     });
 
-    // 2. Listen for auth changes (login, logout, token refresh)
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -53,12 +50,12 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
       setUser(session?.user ?? null);
       
       if (session?.user) {
-        // Only fetch profile if we don't have it or if the user changed
         if (!currentUser || currentUser.id !== session.user.id) {
            fetchUserProfile(session.user.id);
         }
       } else {
         setCurrentUser(null);
+        localStorage.removeItem('offline_user_profile'); // Clear cache on logout
         setLoading(false);
       }
     });
@@ -68,7 +65,15 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const fetchUserProfile = async (userId: string) => {
     try {
-      // Query updated: removed assigned_locations
+      // 🔥 OFFLINE FIX: Instantly load cached profile if available
+      const cachedProfile = localStorage.getItem('offline_user_profile');
+      if (cachedProfile) {
+        const parsed = JSON.parse(cachedProfile);
+        if (parsed.id === userId) {
+          setCurrentUser(parsed);
+        }
+      }
+
       const { data, error } = await supabase
         .from("user_profiles")
         .select("id, email, name, role, assigned_companies")
@@ -77,10 +82,12 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
 
       if (error) {
         console.error("Error fetching profile:", error);
-        // Don't throw here to avoid crashing the UI loop, just set null
-        setCurrentUser(null);
+        // If we have no internet and no cache, we just leave it as is
+        if (!cachedProfile) setCurrentUser(null);
       } else {
         setCurrentUser(data as UserProfile);
+        // 🔥 Save to cache for offline use
+        localStorage.setItem('offline_user_profile', JSON.stringify(data));
       }
     } catch (error) {
       console.error("Unexpected error fetching user profile:", error);
@@ -102,6 +109,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
     setUser(null);
     setSession(null);
     setCurrentUser(null);
+    localStorage.removeItem('offline_user_profile');
     toast.success("Logged out successfully");
   };
 
