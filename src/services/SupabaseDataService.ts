@@ -526,8 +526,9 @@ class SupabaseDataService {
     if (error) throw error;
   }
 
-  public async addSurplusItem(params: {
-    item: { sku: string; name: string; category: string; physicalQuantity: number };
+public async addSurplusItem(params: {
+    // 🔥 FIX: Added customAttributes to the interface
+    item: { sku: string; name: string; category: string; physicalQuantity: number; customAttributes?: Record<string, any> };
     companyId: string;
     assignmentId: number;
     locationName: string;
@@ -556,7 +557,8 @@ class SupabaseDataService {
       client_remarks: "Added from Master / Surplus",
       auditor_entries: [auditorEntry],
       last_audited: new Date().toISOString(),
-      custom_attributes: {},
+      // 🔥 FIX: Actually save the custom_attributes to the database instead of {}
+      custom_attributes: item.customAttributes || {},
     });
 
     if (error) throw error;

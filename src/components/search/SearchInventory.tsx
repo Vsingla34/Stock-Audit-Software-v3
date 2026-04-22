@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo } from "react";
 import { useInventory, InventoryItem } from "@/context/InventoryContext";
+import { supabase } from "@/integrations/supabase/client";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Search, Plus, Minus, MapPin, AlertCircle, PackagePlus, ScanBarcode, ArrowLeft, Check, ChevronsUpDown, MessageSquare, ShieldAlert } from "lucide-react";
+import { Search, Plus, Minus, MapPin, AlertCircle, PackagePlus, ScanBarcode, ArrowLeft, Check, ChevronsUpDown, MessageSquare, ShieldAlert, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useUser } from "@/context/UserContext";
 import { useCompany } from "@/context/CompanyContext";
@@ -54,12 +55,23 @@ export const SearchInventory = () => {
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isScanningNewItem, setIsScanningNewItem] = useState(false);
+  
+  // 🔥 DYNAMIC FORM STATE
   const [newItem, setNewItem] = useState({
     sku: "",
     name: "",
-    category: "",
     physicalQuantity: 1 as number | string
   });
+  const [selectedCategory, setSelectedCategory] = useState<string>("");
+  const [customCategory, setCustomCategory] = useState<string>("");
+  
+  // 🔥 FIX: Changed Record<string, string> to Record<string, any> to support numeric rate field
+  const [newCustomAttributes, setNewCustomAttributes] = useState<Record<string, any>>({});
+  
+  const [globalCategories, setGlobalCategories] = useState<string[]>([]);
+  const [globalCustomFields, setGlobalCustomFields] = useState<string[]>([]);
+  const [isLookingUp, setIsLookingUp] = useState(false);
+  const [lastAutoFilledSku, setLastAutoFilledSku] = useState("");
 
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
@@ -73,15 +85,15 @@ export const SearchInventory = () => {
     activeSubLocations, 
     fetchSubLocations,  
     addSubLocationToDb,
-    updateItemRemark
+    updateItemRemark,
+    fetchGlobalItem
   } = useInventory();
 
-  const { currentUser } = useUser();
-  const { selectedAssignmentId } = useCompany();
+  const { currentUser, user } = useUser();
+  const { selectedCompanyId, selectedAssignmentId } = useCompany();
 
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
 
-  // 🔥 CHECK BLIND AUDIT STATUS
   const currentAssignment = assignments.find(a => String(a.id) === String(selectedAssignmentId));
   const activeLocationId = currentAssignment?.locationId;
   const activeLocationName = locations.find(l => String(l.id) === String(activeLocationId))?.name;
@@ -114,6 +126,78 @@ export const SearchInventory = () => {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
+  // 🔥 FETCH GLOBAL FIELDS
+  useEffect(() => {
+    let isMounted = true;
+    const fetchGlobalFields = async () => {
+        if (!selectedCompanyId || !isOnline) return;
+        try {
+            const { data } = await supabase
+                .from('inventory_items')
+                .select('category, custom_attributes')
+                .eq('company_id', selectedCompanyId);
+                
+            if (data && isMounted) {
+                const cats = new Set<string>();
+                const attrs = new Set<string>();
+                const excludedKeys = ['unit price', 'unit_price', 'price', 'rate', 'cost', 'mrp', 'unit cost', 'system_value', 'physical_value'];
+                
+                data.forEach(item => {
+                    if (item.category) cats.add(item.category.trim());
+                    if (item.custom_attributes) {
+                        Object.keys(item.custom_attributes).forEach(k => {
+                            if (!excludedKeys.includes(k.toLowerCase().trim())) attrs.add(k.trim());
+                        });
+                    }
+                });
+                
+                setGlobalCategories(Array.from(cats));
+                setGlobalCustomFields(Array.from(attrs));
+            }
+        } catch (e) {
+            console.error("Failed to fetch global fields", e);
+        }
+    };
+    
+    fetchGlobalFields();
+    return () => { isMounted = false; };
+  }, [selectedCompanyId, isOnline]);
+
+  // 🔥 AUTO-LOOKUP SURPLUS ITEM BY SKU
+  useEffect(() => {
+    const lookupSku = async () => {
+        const currentSku = newItem.sku.trim();
+        if (currentSku && currentSku.length >= 2 && isOnline && currentSku !== lastAutoFilledSku) {
+            setIsLookingUp(true);
+            try {
+                const globalItem = await fetchGlobalItem(currentSku);
+                if (globalItem) {
+                    setNewItem(prev => ({
+                        ...prev, 
+                        name: prev.name || globalItem.name || ""
+                    }));
+                    if (globalItem.category && !selectedCategory) {
+                        setSelectedCategory(globalItem.category);
+                    }
+                    if (globalItem.customAttributes || globalItem.custom_attributes) {
+                        const attrs = globalItem.customAttributes || globalItem.custom_attributes || {};
+                        setNewCustomAttributes(prev => ({...attrs, ...prev}));
+                    }
+                    setLastAutoFilledSku(currentSku);
+                    toast.success("Auto-filled details from Master Database!");
+                }
+            } catch(e) {
+                // silently ignore lookup failures
+            } finally {
+                setIsLookingUp(false);
+            }
+        }
+    };
+    
+    const timer = setTimeout(lookupSku, 800);
+    return () => clearTimeout(timer);
+  }, [newItem.sku, isOnline, lastAutoFilledSku, fetchGlobalItem, selectedCategory]);
+
   const searchResults = useMemo(() => {
     if (!debouncedQuery || debouncedQuery.length < 2) {
       return [];
@@ -128,7 +212,6 @@ export const SearchInventory = () => {
         item.category?.toLowerCase().includes(lowerCaseQuery)
     );
 
-    // 🔥 CRITICAL FIX: Robust, case-insensitive, trimmed matching to ensure auditors always see items
     if (activeLocationName) {
         const cleanActiveLocation = activeLocationName.trim().toLowerCase();
         results = results.filter(item => {
@@ -139,6 +222,51 @@ export const SearchInventory = () => {
 
     return results;
   }, [debouncedQuery, itemMaster, activeLocationName]);
+
+  // 🔥 THE FIX: CASE-INSENSITIVE DEDUPLICATION MAPS + RATE FIELD GUARANTEE
+  const dynamicFormFields = useMemo(() => {
+    const categoriesMap = new Map<string, string>();
+    const attributesMap = new Map<string, string>();
+    const excludedKeys = ['unit price', 'unit_price', 'price', 'rate', 'cost', 'mrp', 'unit cost', 'system_value', 'physical_value'];
+
+    // 1. Add Global fields
+    globalCategories.forEach(c => {
+        if (c) categoriesMap.set(c.trim().toLowerCase(), c.trim());
+    });
+    globalCustomFields.forEach(f => {
+        if (f) attributesMap.set(f.trim().toLowerCase(), f.trim());
+    });
+
+    // 2. Add Local Item Master fields
+    itemMaster.forEach(item => {
+        if (item.category) {
+            const cat = item.category.trim();
+            if (!categoriesMap.has(cat.toLowerCase())) {
+                categoriesMap.set(cat.toLowerCase(), cat);
+            }
+        }
+        if (item.customAttributes) {
+            Object.keys(item.customAttributes).forEach(key => {
+                const cleanKey = key.trim();
+                if (!excludedKeys.includes(cleanKey.toLowerCase())) {
+                    if (!attributesMap.has(cleanKey.toLowerCase())) {
+                        attributesMap.set(cleanKey.toLowerCase(), cleanKey);
+                    }
+                }
+            });
+        }
+    });
+
+    // 🔥 Guarantee that the Rate/unit_price field is always rendered
+    if (!attributesMap.has('unit_price')) {
+        attributesMap.set('unit_price', 'unit_price');
+    }
+
+    return {
+        categories: Array.from(categoriesMap.values()).sort(),
+        customFields: Array.from(attributesMap.values()).sort()
+    };
+  }, [itemMaster, globalCategories, globalCustomFields]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -229,11 +357,12 @@ export const SearchInventory = () => {
     const quantityToApply = isDeduction ? -Math.abs(inputQuantity) : Math.abs(inputQuantity);
 
     try {
+      const activeName = currentUser?.email || currentUser?.name || user?.email || "Unknown Auditor";
       await addItemToAudit(
         item, 
         quantityToApply,
-        currentUser?.id,
-        currentUser?.email || currentUser?.name || 'Unknown Auditor',
+        currentUser?.id || user?.id,
+        activeName,
         selectedSubLocation
       );
       
@@ -260,17 +389,35 @@ export const SearchInventory = () => {
   };
 
   const handleAddSurplus = async () => {
-    if (!newItem.sku || !newItem.name) return;
+    if (!newItem.sku || !newItem.name) {
+        toast.error("SKU and Name are required");
+        return;
+    }
+    
+    const finalCategory = selectedCategory === "other" ? customCategory : selectedCategory;
+    if (!finalCategory) {
+        toast.error("Please select or enter a category");
+        return;
+    }
+
     try {
       const submissionItem = {
           ...newItem,
-          physicalQuantity: Number(newItem.physicalQuantity) || 0
+          category: finalCategory,
+          physicalQuantity: Number(newItem.physicalQuantity) || 0,
+          customAttributes: newCustomAttributes 
       };
+      
       await addSurplusItem(submissionItem);
+      
       toast.success("Surplus item added successfully");
       setIsAddOpen(false);
       setSearchQuery(newItem.sku); 
-      setNewItem({ sku: "", name: "", category: "", physicalQuantity: 1 });
+      
+      setNewItem({ sku: "", name: "", physicalQuantity: 1 });
+      setSelectedCategory("");
+      setCustomCategory("");
+      setNewCustomAttributes({});
     } catch (error: any) {
       toast.error("Failed to add surplus item", {
         description: error.message
@@ -419,15 +566,12 @@ export const SearchInventory = () => {
 
                 const consolidatedMap = new Map();
                 auditorEntries.forEach(entry => {
-                    const key = `${entry.auditorId}-${entry.subLocation || 'General'}`;
+                    const mappedName = entry.auditorName || 'Unknown';
+                    const key = `${mappedName}-${entry.subLocation || 'General'}`;
                     if (!consolidatedMap.has(key)) {
-                        consolidatedMap.set(key, { ...entry, quantityFound: Number(entry.quantityFound) || 0 });
+                        consolidatedMap.set(key, { name: mappedName, subLocation: entry.subLocation, quantityFound: Number(entry.quantityFound) || 0 });
                     } else {
-                        const existing = consolidatedMap.get(key);
-                        existing.quantityFound += (Number(entry.quantityFound) || 0);
-                        if (existing.auditorName.includes('@') && !entry.auditorName.includes('@')) {
-                            existing.auditorName = entry.auditorName;
-                        }
+                        consolidatedMap.get(key).quantityFound += (Number(entry.quantityFound) || 0);
                     }
                 });
                 const consolidatedEntries = Array.from(consolidatedMap.values());
@@ -442,7 +586,6 @@ export const SearchInventory = () => {
                       <div className="text-sm text-gray-500">SKU: {item.sku}</div>
                       <div className="text-sm text-gray-500">Category: {item.category || '-'}</div>
                       
-                      {/* 🔥 BLIND AUDIT MASKING APPLIED HERE */}
                       {!hideSystemQuantity ? (
                           <div className="text-sm text-gray-900 mt-1">System Quantity: {item.systemQuantity} {itemUploadedUnit}</div>
                       ) : (
@@ -455,9 +598,9 @@ export const SearchInventory = () => {
                         <div className="mt-2 text-xs bg-white p-2 rounded border border-gray-200 shadow-sm">
                           <strong className="text-gray-900 block mb-1">Auditor Breakdown:</strong>
                           {consolidatedEntries.map((entry, idx) => (
-                            <div key={idx} className={entry.auditorId === currentUser?.id ? "text-indigo-600 font-medium" : "text-gray-600"}>
-                              • {entry.auditorName} {entry.subLocation ? `(${entry.subLocation})` : ''}: {entry.quantityFound}
-                              {entry.auditorId === currentUser?.id && " (You)"}
+                            <div key={idx} className="flex justify-between items-center gap-2 text-gray-600">
+                                <span className="truncate pr-2">窶｢ {entry.name} {entry.subLocation && `(${entry.subLocation})`}</span>
+                                <span className="font-medium text-indigo-600">{entry.quantityFound}</span>
                             </div>
                           ))}
                           <div className="mt-2 pt-1 border-t border-gray-100 font-medium text-gray-900">
@@ -581,7 +724,7 @@ export const SearchInventory = () => {
                     {isOnline ? "Add New Item" : "Requires Internet to Add"}
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="sm:max-w-[425px]">
+                <DialogContent className="sm:max-w-[425px] max-h-[90vh] overflow-y-auto">
                   <DialogHeader>
                     <DialogTitle>{isScanningNewItem ? "Scan Barcode" : "Add Surplus Item"}</DialogTitle>
                     <DialogDescription>
@@ -610,14 +753,19 @@ export const SearchInventory = () => {
                   ) : (
                       <div className="grid gap-4 py-4">
                         <div className="grid gap-2">
-                          <Label htmlFor="sku">SKU / Barcode</Label>
-                          <div className="flex gap-2">
+                          <Label htmlFor="sku">SKU / Barcode <span className="text-red-500">*</span></Label>
+                          <div className="flex gap-2 relative">
                               <Input 
                                 id="sku" 
                                 value={newItem.sku} 
                                 onChange={(e) => setNewItem({...newItem, sku: e.target.value})}
                                 placeholder="e.g. 100256"
                               />
+                              {isLookingUp && (
+                                  <div className="absolute right-12 top-2.5">
+                                      <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
+                                  </div>
+                              )}
                               <Button 
                                   type="button" 
                                   variant="outline" 
@@ -630,7 +778,7 @@ export const SearchInventory = () => {
                           </div>
                         </div>
                         <div className="grid gap-2">
-                          <Label htmlFor="name">Item Name</Label>
+                          <Label htmlFor="name">Item Name <span className="text-red-500">*</span></Label>
                           <Input 
                             id="name" 
                             value={newItem.name} 
@@ -638,16 +786,67 @@ export const SearchInventory = () => {
                             placeholder="e.g. Wireless Mouse"
                           />
                         </div>
+                        
                         <div className="grid gap-2">
-                          <Label htmlFor="category">Category</Label>
-                          <Input 
-                            id="category" 
-                            value={newItem.category} 
-                            onChange={(e) => setNewItem({...newItem, category: e.target.value})}
-                            placeholder="e.g. Electronics"
-                          />
+                          <Label htmlFor="category">Category <span className="text-red-500">*</span></Label>
+                          <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+                              <SelectTrigger>
+                                  <SelectValue placeholder="Select a category" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                  {dynamicFormFields.categories.map(cat => (
+                                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                                  ))}
+                                  <SelectItem value="other" className="font-bold text-indigo-600">
+                                      + Add New Category (Other)
+                                  </SelectItem>
+                              </SelectContent>
+                          </Select>
                         </div>
-                        <div className="grid gap-2">
+
+                        {selectedCategory === "other" && (
+                            <div className="grid gap-2">
+                              <Label htmlFor="customCat">Type New Category <span className="text-red-500">*</span></Label>
+                              <Input 
+                                id="customCat" 
+                                value={customCategory} 
+                                onChange={(e) => setCustomCategory(e.target.value)}
+                                placeholder="e.g. Peripherals"
+                                className="border-indigo-300 focus-visible:ring-indigo-500"
+                              />
+                            </div>
+                        )}
+
+                        {/* 🔥 RENDER DYNAMIC CUSTOM FIELDS + RATE FIELD */}
+                        {dynamicFormFields.customFields.length > 0 && (
+                            <div className="mt-2 space-y-3 p-3 bg-gray-50 border border-gray-100 rounded-md">
+                                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Additional Attributes</h4>
+                                {dynamicFormFields.customFields.map(field => (
+                                    <div key={field} className="grid gap-1.5">
+                                        <Label htmlFor={`custom-${field}`} className="text-xs capitalize">
+                                            {field === 'unit_price' ? 'Rate / Unit Price' : field.replace(/_/g, ' ')}
+                                        </Label>
+                                        <Input 
+                                            id={`custom-${field}`}
+                                            type={field === 'unit_price' ? 'number' : 'text'}
+                                            step={field === 'unit_price' ? '0.01' : undefined}
+                                            className="h-8 text-sm bg-white"
+                                            value={newCustomAttributes[field] || ""}
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                setNewCustomAttributes(prev => ({
+                                                    ...prev, 
+                                                    [field]: field === 'unit_price' ? (val ? parseFloat(val) : "") : val
+                                                }))
+                                            }}
+                                            placeholder={field === 'unit_price' ? '0.00' : `Enter ${field.replace(/_/g, ' ')}`}
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        <div className="grid gap-2 mt-2">
                           <Label htmlFor="qty">Physical Quantity Found</Label>
                           <Input 
                             id="qty" 
@@ -675,7 +874,7 @@ export const SearchInventory = () => {
                   {!isScanningNewItem && (
                       <DialogFooter>
                         <Button variant="outline" onClick={() => setIsAddOpen(false)}>Cancel</Button>
-                        <Button onClick={handleAddSurplus} disabled={!newItem.sku || !newItem.name}>
+                        <Button onClick={handleAddSurplus} disabled={!newItem.sku || !newItem.name || (!selectedCategory) || (selectedCategory === 'other' && !customCategory)}>
                           Add Item
                         </Button>
                       </DialogFooter>

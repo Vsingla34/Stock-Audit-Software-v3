@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useInventory } from "@/context/InventoryContext"; 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -62,11 +62,22 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
     const [isNotFoundOpen, setIsNotFoundOpen] = useState(false);
     const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
     const [scannedUnknownBarcode, setScannedUnknownBarcode] = useState("");
-    const [newItem, setNewItem] = useState({
+    
+    // 🔥 FIX: Category Option State
+    const [categoryOption, setCategoryOption] = useState<string>("");
+
+    const [newItem, setNewItem] = useState<{
+        sku: string;
+        name: string;
+        category: string;
+        physicalQuantity: number | string;
+        customAttributes: Record<string, any>;
+    }>({
         sku: "",
         name: "",
         category: "",
-        physicalQuantity: 1 as number | string 
+        physicalQuantity: 1,
+        customAttributes: {}
     });
 
     const { 
@@ -87,6 +98,35 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
 
     const currentAssignment = assignments.find(a => a.id === selectedAssignmentId);
     const selectedLocation = currentAssignment?.locationId || "";
+    
+    // 🔥 FIX: Extract dynamic columns from master data and ensure Rate/unit_price is included
+    const dynamicColumns = useMemo(() => {
+        const keys = new Set<string>();
+        itemMaster.forEach(item => {
+            if (item.customAttributes) {
+                Object.keys(item.customAttributes).forEach(k => {
+                    // Ignore computed value fields
+                    if (!['system_value', 'physical_value'].includes(k.toLowerCase())) {
+                        keys.add(k);
+                    }
+                });
+            }
+        });
+        // Always include unit_price so the Rate field is guaranteed to appear
+        keys.add('unit_price');
+        return Array.from(keys).sort(); // Sort alphabetically for consistency
+    }, [itemMaster]);
+
+    // 🔥 FIX: Extract unique categories from master data
+    const uniqueCategories = useMemo(() => {
+        const cats = new Set<string>();
+        itemMaster.forEach(item => {
+            if (item.category && item.category !== "-" && item.category.trim() !== "") {
+                cats.add(item.category.trim());
+            }
+        });
+        return Array.from(cats).sort();
+    }, [itemMaster]);
     
     const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
     const isProcessingRef = useRef(false); 
@@ -157,7 +197,8 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                             sku: globalItem.sku,
                             name: globalItem.name || "Unnamed Item",
                             category: globalItem.category || "-",
-                            physicalQuantity: 1 
+                            physicalQuantity: 1,
+                            customAttributes: globalItem.custom_attributes || {} 
                         };
                         
                         await addSurplusItem(newItemPayload);
@@ -190,16 +231,14 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
 
             const targetItem = auditedItems.find(item => item.sku === masterItem.sku && item.location === locationName) || masterItem;
 
-            // 🔥 FIX: Await the accurate real-time total from the Context directly
             const accurateNewTotal = await addItemToAudit(
                 targetItem,
-                1, // Always add exactly 1 per scan
+                1, 
                 currentUser?.id,
                 (currentUser as any)?.name || currentUser?.email || 'Unknown Auditor',
                 selectedSubLocation
             );
 
-            // Use the accurate total for the UI feedback
             const isMatch = accurateNewTotal === masterItem.systemQuantity;
 
             toast.success("Scan recorded successfully!", {
@@ -227,15 +266,21 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
         if (!newItem.sku || !newItem.name) return;
         try {
             const submissionItem = {
-                ...newItem,
-                physicalQuantity: Number(newItem.physicalQuantity) || 0
+                sku: newItem.sku,
+                name: newItem.name,
+                category: newItem.category,
+                physicalQuantity: Number(newItem.physicalQuantity) || 0,
+                customAttributes: newItem.customAttributes
             };
             
             await addSurplusItem(submissionItem);
             toast.success("Surplus item added successfully");
             setIsAddDialogOpen(false);
             setScannedBarcode(newItem.sku);
-            setNewItem({ sku: "", name: "", category: "", physicalQuantity: 1 });
+            
+            // Reset state properly
+            setNewItem({ sku: "", name: "", category: "", physicalQuantity: 1, customAttributes: {} });
+            setCategoryOption("");
             
             if (isScanning && html5QrCodeRef.current?.getState() === Html5QrcodeScannerState.PAUSED) {
                 html5QrCodeRef.current.resume();
@@ -287,7 +332,9 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
 
     const handleOpenAddForm = () => {
         setIsNotFoundOpen(false);
-        setNewItem(prev => ({ ...prev, sku: scannedUnknownBarcode }));
+        // Reset state and prepopulate SKU
+        setNewItem(prev => ({ ...prev, sku: scannedUnknownBarcode, customAttributes: {}, category: "" }));
+        setCategoryOption("");
         setIsAddDialogOpen(true);
     };
 
@@ -402,7 +449,6 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
             `}</style>
 
             <div className={isPickerMode ? "" : "order-1 lg:order-1 flex flex-col"}>
-                {/* 🔥 OFFLINE FEATURE: Renders banner when disconnected/syncing */}
                 <SyncStatusBanner />
 
                 <Card className="shadow-sm border-gray-200">
@@ -629,7 +675,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
             </Dialog>
 
             <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-                <DialogContent className="sm:max-w-[425px]">
+                <DialogContent className="sm:max-w-[425px] max-h-[85vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>Add Surplus Item</DialogTitle>
                         <DialogDescription>
@@ -651,15 +697,44 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                                 autoFocus
                             />
                         </div>
+
+                        {/* 🔥 FIX: Category Dropdown implementation */}
                         <div className="grid gap-2">
                             <Label htmlFor="scan-cat">Category</Label>
-                            <Input 
-                                id="scan-cat" 
-                                value={newItem.category} 
-                                onChange={(e) => setNewItem({...newItem, category: e.target.value})}
-                                placeholder="e.g. Electronics"
-                            />
+                            <Select 
+                                value={categoryOption} 
+                                onValueChange={(val) => {
+                                    setCategoryOption(val);
+                                    if (val !== 'Other') {
+                                        setNewItem({...newItem, category: val});
+                                    } else {
+                                        setNewItem({...newItem, category: ""}); // clear for custom input
+                                    }
+                                }}
+                            >
+                                <SelectTrigger id="scan-cat" className="bg-white">
+                                    <SelectValue placeholder="Select Category" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {uniqueCategories.map(cat => (
+                                        <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                                    ))}
+                                    <SelectItem value="Other">Other (Custom)</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            
+                            {/* Shows text input only when "Other" is selected */}
+                            {categoryOption === 'Other' && (
+                                <Input 
+                                    placeholder="Enter custom category..."
+                                    value={newItem.category}
+                                    onChange={(e) => setNewItem({...newItem, category: e.target.value})}
+                                    className="mt-1"
+                                    autoFocus
+                                />
+                            )}
                         </div>
+
                         <div className="grid gap-2">
                             <Label htmlFor="scan-qty">Physical Quantity Found</Label>
                             <Input 
@@ -676,6 +751,33 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                                 }}
                             />
                         </div>
+
+                        {/* Dynamic Fields from Master Data + Rate Field */}
+                        {dynamicColumns.map(col => (
+                            <div className="grid gap-2" key={col}>
+                                <Label htmlFor={`scan-custom-${col}`} className="capitalize text-gray-700">
+                                    {col === 'unit_price' ? 'Rate / Unit Price' : col.replace(/_/g, ' ')}
+                                </Label>
+                                <Input 
+                                    id={`scan-custom-${col}`} 
+                                    type={col === 'unit_price' ? 'number' : 'text'}
+                                    step={col === 'unit_price' ? '0.01' : undefined}
+                                    value={newItem.customAttributes[col] || ""} 
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        setNewItem({
+                                            ...newItem,
+                                            customAttributes: {
+                                                ...newItem.customAttributes,
+                                                [col]: col === 'unit_price' ? (val ? parseFloat(val) : "") : val
+                                            }
+                                        });
+                                    }}
+                                    placeholder={col === 'unit_price' ? '0.00' : `e.g. ${col}`}
+                                />
+                            </div>
+                        ))}
+
                         <div className="bg-indigo-50 p-3 rounded-md border border-indigo-100 text-xs text-indigo-800">
                             <strong>Note:</strong> System Quantity will be 0. 
                             This item will be recorded at <strong>{selectedSubLocation}</strong>.
@@ -683,7 +785,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
-                        <Button onClick={handleAddSurplus} disabled={!newItem.name} className="bg-indigo-600 hover:bg-indigo-700">
+                        <Button onClick={handleAddSurplus} disabled={!newItem.name || (categoryOption === 'Other' && !newItem.category)} className="bg-indigo-600 hover:bg-indigo-700">
                             Save Item
                         </Button>
                     </DialogFooter>

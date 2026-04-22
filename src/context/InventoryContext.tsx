@@ -153,6 +153,7 @@ interface InventoryContextType {
   scanItem: (barcode: string, location: string) => Promise<void>;
   searchItem: (query: string) => InventoryItem[];
   
+  // 🔥 FIX: Added customAttributes to the addSurplusItem interface
   addItemToAudit: (
     item: InventoryItem,
     quantity: number,
@@ -162,7 +163,7 @@ interface InventoryContextType {
   ) => Promise<number>;
   
   addSurplusItem: (
-    item: { sku: string; name: string; category: string; physicalQuantity: number }
+    item: { sku: string; name: string; category: string; physicalQuantity: number; customAttributes?: Record<string, any> }
   ) => Promise<void>;
 
   fetchGlobalItem: (sku: string) => Promise<any | null>;
@@ -205,7 +206,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // 🔥 DOUBLE FALLBACK FIX: Extracting 'user' as well as 'currentUser'
   const { currentUser, user } = useUser();   
   const [questionnaireAnswers, setQuestionnaireAnswers] = useState<QuestionnaireAnswer[]>([]);
   const { selectedCompanyId, selectedAssignmentId } = useCompany();
@@ -524,7 +524,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const scanItem = async (barcode: string, locationName: string) => {
     const item = itemMaster.find((i) => (i.id === barcode || i.sku === barcode) && i.location === locationName);
     if (!item) throw new Error(`Item not found`);
-    // Pass robust name fallback here too
     const activeName = currentUser?.email || currentUser?.name || user?.email || "Unknown Auditor";
     await addItemToAudit(item, 1, currentUser?.id || user?.id, activeName, undefined);
   };
@@ -547,7 +546,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const masterItem = itemMaster.find((i) => i.sku === item.sku && i.location === item.location);
     if (!masterItem?.id) throw new Error("Item ID missing - cannot record scan");
     
-    // 🔥 THE FALLBACK FIX: Grab the base user ID/Email if the profile failed to load offline
     const activeUserId = currentUser?.id || user?.id || auditorId || "unknown";
     const activeUserName = currentUser?.email || currentUser?.name || user?.email || auditorName || "Unknown Auditor";
 
@@ -600,14 +598,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     } 
   };
 
-  const addSurplusItem = async (item: { sku: string; name: string; category: string; physicalQuantity: number }) => {
+  // 🔥 FIX: Updated implementation to accept customAttributes parameter 
+  const addSurplusItem = async (item: { sku: string; name: string; category: string; physicalQuantity: number; customAttributes?: Record<string, any> }) => {
     if (!selectedCompanyId || !selectedAssignmentId) throw new Error("No active assignment selected.");
     const assignment = assignments.find(a => a.id === selectedAssignmentId);
     if (!assignment) throw new Error("Assignment not found.");
     const loc = locations.find(l => l.id === assignment.locationId);
     if (!loc) throw new Error("Location not found.");
     
-    // Apply double fallback here too
     const activeUserId = currentUser?.id || user?.id;
     const activeUserName = currentUser?.email || currentUser?.name || user?.email || "Unknown Auditor";
 
@@ -623,7 +621,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const deleteQuestion = async (questionId: string) => { await SupabaseDataService.deleteQuestion(questionId); setQuestions((prev) => prev.filter((q) => q.id !== questionId)); };
   
   const saveQuestionnaireAnswer = async (answer: Omit<QuestionnaireAnswer, "answeredOn">) => {
-    // Fallback for questionnaire
     const activeUserName = currentUser?.email || currentUser?.name || user?.email || "Unknown";
     
     const newAnswer: QuestionnaireAnswer = { ...answer, answeredOn: new Date().toISOString(), answeredBy: activeUserName, companyId: locations.find(loc => loc.id === answer.locationId)?.companyId };
