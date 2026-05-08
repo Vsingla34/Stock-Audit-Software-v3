@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useInventory, InventoryItem } from "@/context/InventoryContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Input } from "@/components/ui/input";
@@ -37,6 +37,167 @@ import { cn } from "@/lib/utils";
 
 import { SyncStatusBanner } from "@/components/scanner/SyncStatusBanner";
 
+// 🔥 OPTIMIZATION: React.memo prevents useless re-renders when other items are updated
+const SearchItemRow = React.memo(({ 
+    item, 
+    itemKey, 
+    isAdmin, 
+    isDecimalMode, 
+    hideSystemQuantity, 
+    decimalQuantity, 
+    onDecimalChange, 
+    selectedUnit, 
+    onUnitChange, 
+    quantity, 
+    onIncrement, 
+    onDecrement, 
+    remark, 
+    onRemarkChange, 
+    onRemarkBlur, 
+    onAdd, 
+    onDeduct,
+    selectedSubLocation 
+}: any) => {
+    
+    const auditorEntries = item.auditorEntries || [];
+    const calculatedTotal = Number(auditorEntries.reduce((sum: number, entry: any) => sum + (entry.quantityFound || 0), 0).toFixed(4));
+
+    const consolidatedMap = new Map();
+    auditorEntries.forEach((entry: any) => {
+        const mappedName = entry.auditorName || 'Unknown';
+        const key = `${mappedName}-${entry.subLocation || 'General'}`;
+        if (!consolidatedMap.has(key)) {
+            consolidatedMap.set(key, { name: mappedName, subLocation: entry.subLocation, quantityFound: Number(entry.quantityFound) || 0 });
+        } else {
+            consolidatedMap.get(key).quantityFound += (Number(entry.quantityFound) || 0);
+        }
+    });
+    const consolidatedEntries = Array.from(consolidatedMap.values());
+
+    const itemUploadedUnit = item.customAttributes?.['Unit'];
+    const currentSelectedUnit = selectedUnit !== undefined ? selectedUnit : (itemUploadedUnit || "none");
+
+    return (
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 p-4 border-b border-gray-100 last:border-0 items-start hover:bg-gray-50/50 transition-colors">
+            <div>
+                <h3 className="font-medium text-gray-900">{item.name}</h3>
+                <div className="text-sm text-gray-500">SKU: {item.sku}</div>
+                <div className="text-sm text-gray-500">Category: {item.category || '-'}</div>
+                
+                {!hideSystemQuantity ? (
+                    <div className="text-sm text-gray-900 mt-1">System Quantity: {item.systemQuantity} {itemUploadedUnit}</div>
+                ) : (
+                    <div className="text-sm text-gray-500 mt-1 italic flex items-center gap-1">
+                        <ShieldAlert className="h-3 w-3" /> System Quantity: Hidden
+                    </div>
+                )}
+                
+                {consolidatedEntries.length > 0 && (
+                <div className="mt-2 text-xs bg-white p-2 rounded border border-gray-200 shadow-sm">
+                    <strong className="text-gray-900 block mb-1">Auditor Breakdown:</strong>
+                    {consolidatedEntries.map((entry: any, idx: number) => (
+                    <div key={idx} className="flex justify-between items-center gap-2 text-gray-600">
+                        <span className="truncate pr-2">• {entry.name} {entry.subLocation && `(${entry.subLocation})`}</span>
+                        <span className="font-medium text-indigo-600">{entry.quantityFound}</span>
+                    </div>
+                    ))}
+                    <div className="mt-2 pt-1 border-t border-gray-100 font-medium text-gray-900">
+                    Total Physical: <span className="text-indigo-600">{calculatedTotal}</span>
+                    </div>
+                </div>
+                )}
+            </div>
+            <div className="flex flex-col items-end gap-2 w-full md:w-auto">
+                
+                {isDecimalMode ? (
+                    <div className="flex items-center gap-2 mb-1 w-full justify-end">
+                        <Input 
+                            type="number" 
+                            step="any" 
+                            placeholder="Qty" 
+                            value={decimalQuantity || ""} 
+                            onChange={(e) => onDecimalChange(e.target.value)}
+                            className="w-24 h-9 font-medium"
+                        />
+                        <Select 
+                            value={currentSelectedUnit} 
+                            onValueChange={onUnitChange}
+                        >
+                            <SelectTrigger className="w-[100px] h-9 bg-white">
+                                <SelectValue placeholder="Unit" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="none">No Unit</SelectItem>
+                                {itemUploadedUnit && (
+                                    <SelectItem value={itemUploadedUnit}>{itemUploadedUnit}</SelectItem>
+                                )}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                ) : (
+                    <div className="flex items-center space-x-2 mb-1 bg-white rounded-md border border-gray-200 p-1 w-full md:w-auto justify-between md:justify-end">
+                    <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-7 w-7 hover:bg-gray-100 text-gray-600"
+                        onClick={onDecrement}
+                    >
+                        <Minus className="h-4 w-4" />
+                    </Button>
+                    <span className="w-8 text-center font-medium text-gray-900">
+                        {quantity || 0}
+                    </span>
+                    <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-7 w-7 hover:bg-gray-100 text-gray-600"
+                        onClick={onIncrement}
+                    >
+                        <Plus className="h-4 w-4" />
+                    </Button>
+                    </div>
+                )}
+
+                <div className="w-full relative mb-2">
+                <MessageSquare className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" />
+                <Input
+                    placeholder="Add a remark (optional)..."
+                    value={remark !== undefined ? remark : (item.clientRemarks || "")}
+                    onChange={(e) => onRemarkChange(e.target.value)}
+                    onBlur={onRemarkBlur}
+                    className="h-9 w-full md:w-[208px] pl-8 text-xs"
+                />
+                </div>
+
+                <div className="flex gap-2 w-full md:w-[208px]">
+                {isAdmin && (
+                    <Button 
+                        variant="destructive"
+                        size="sm"
+                        className="flex-1 shadow-sm px-2"
+                        onClick={onDeduct}
+                        disabled={isDecimalMode ? !(parseFloat(decimalQuantity) > 0) || !selectedSubLocation : !(quantity > 0) || !selectedSubLocation}
+                        title="Deduct this quantity from the total"
+                    >
+                        <Minus className="h-4 w-4 mr-1" /> Deduct
+                    </Button>
+                )}
+                <Button 
+                    variant="default"
+                    size="sm"
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex-1"
+                    onClick={onAdd}
+                    disabled={isDecimalMode ? !(parseFloat(decimalQuantity) > 0) || !selectedSubLocation : !(quantity > 0) || !selectedSubLocation}
+                >
+                    <Check className="h-4 w-4 mr-1" /> Add
+                </Button>
+                </div>
+
+            </div>
+        </div>
+    );
+});
+
 export const SearchInventory = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -56,7 +217,9 @@ export const SearchInventory = () => {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isScanningNewItem, setIsScanningNewItem] = useState(false);
   
-  // 🔥 DYNAMIC FORM STATE
+  // 🔥 Limit reduced to 20 for smoother performance
+  const [visibleLimit, setVisibleLimit] = useState(20);
+  
   const [newItem, setNewItem] = useState({
     sku: "",
     name: "",
@@ -64,8 +227,6 @@ export const SearchInventory = () => {
   });
   const [selectedCategory, setSelectedCategory] = useState<string>("");
   const [customCategory, setCustomCategory] = useState<string>("");
-  
-  // 🔥 FIX: Changed Record<string, string> to Record<string, any> to support numeric rate field
   const [newCustomAttributes, setNewCustomAttributes] = useState<Record<string, any>>({});
   
   const [globalCategories, setGlobalCategories] = useState<string[]>([]);
@@ -118,15 +279,15 @@ export const SearchInventory = () => {
     }
   }, [activeLocationId, subLocationSearchQuery, fetchSubLocations, isOnline]); 
 
+  // 🔥 INCREASED DEBOUNCING TIME (500ms) for smoother typing
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedQuery(searchQuery);
-    }, 300);
-
+      setVisibleLimit(20); // Reset limit to 20 on new search
+    }, 500);
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // 🔥 FETCH GLOBAL FIELDS
   useEffect(() => {
     let isMounted = true;
     const fetchGlobalFields = async () => {
@@ -163,7 +324,6 @@ export const SearchInventory = () => {
     return () => { isMounted = false; };
   }, [selectedCompanyId, isOnline]);
 
-  // 🔥 AUTO-LOOKUP SURPLUS ITEM BY SKU
   useEffect(() => {
     const lookupSku = async () => {
         const currentSku = newItem.sku.trim();
@@ -187,7 +347,6 @@ export const SearchInventory = () => {
                     toast.success("Auto-filled details from Master Database!");
                 }
             } catch(e) {
-                // silently ignore lookup failures
             } finally {
                 setIsLookingUp(false);
             }
@@ -199,9 +358,7 @@ export const SearchInventory = () => {
   }, [newItem.sku, isOnline, lastAutoFilledSku, fetchGlobalItem, selectedCategory]);
 
   const searchResults = useMemo(() => {
-    if (!debouncedQuery || debouncedQuery.length < 2) {
-      return [];
-    }
+    if (!debouncedQuery || debouncedQuery.length < 2) return [];
 
     const lowerCaseQuery = debouncedQuery.toLowerCase();
     
@@ -223,13 +380,11 @@ export const SearchInventory = () => {
     return results;
   }, [debouncedQuery, itemMaster, activeLocationName]);
 
-  // 🔥 THE FIX: CASE-INSENSITIVE DEDUPLICATION MAPS + RATE FIELD GUARANTEE
   const dynamicFormFields = useMemo(() => {
     const categoriesMap = new Map<string, string>();
     const attributesMap = new Map<string, string>();
     const excludedKeys = ['unit price', 'unit_price', 'price', 'rate', 'cost', 'mrp', 'unit cost', 'system_value', 'physical_value'];
 
-    // 1. Add Global fields
     globalCategories.forEach(c => {
         if (c) categoriesMap.set(c.trim().toLowerCase(), c.trim());
     });
@@ -237,7 +392,6 @@ export const SearchInventory = () => {
         if (f) attributesMap.set(f.trim().toLowerCase(), f.trim());
     });
 
-    // 2. Add Local Item Master fields
     itemMaster.forEach(item => {
         if (item.category) {
             const cat = item.category.trim();
@@ -257,7 +411,6 @@ export const SearchInventory = () => {
         }
     });
 
-    // 🔥 Guarantee that the Rate/unit_price field is always rendered
     if (!attributesMap.has('unit_price')) {
         attributesMap.set('unit_price', 'unit_price');
     }
@@ -273,25 +426,7 @@ export const SearchInventory = () => {
     setDebouncedQuery(searchQuery);
   };
 
-  const getItemKey = (item: InventoryItem) => `${item.id}-${item.location}`;
-
-  const incrementQuantity = (item: InventoryItem) => {
-    const itemKey = getItemKey(item);
-    setQuantities(prev => ({
-      ...prev,
-      [itemKey]: (prev[itemKey] || 0) + 1
-    }));
-  };
-
-  const decrementQuantity = (item: InventoryItem) => {
-    const itemKey = getItemKey(item);
-    if ((quantities[itemKey] || 0) > 0) {
-      setQuantities(prev => ({
-        ...prev,
-        [itemKey]: prev[itemKey] - 1
-      }));
-    }
-  };
+  const getItemKey = useCallback((item: InventoryItem) => `${item.id}-${item.location}`, []);
 
   const handleAddSubLocation = async () => {
         if (!isOnline) {
@@ -314,7 +449,7 @@ export const SearchInventory = () => {
         }
   };
 
-  const handleRemarkBlur = async (item: InventoryItem) => {
+  const handleRemarkBlur = useCallback(async (item: InventoryItem) => {
     const itemKey = getItemKey(item);
     const currentRemark = remarks[itemKey];
     
@@ -326,9 +461,9 @@ export const SearchInventory = () => {
             toast.error("Failed to save remark");
         }
     }
-  };
+  }, [getItemKey, remarks, updateItemRemark]);
 
-  const handleAddToAudit = async (item: InventoryItem, isDeduction: boolean = false) => {
+  const handleAddToAudit = useCallback(async (item: InventoryItem, isDeduction: boolean = false) => {
     if (!selectedSubLocation) {
         toast.error("Sub-Location Required", { description: "Please select a Box, Row, or Rack before adding." });
         return;
@@ -386,7 +521,7 @@ export const SearchInventory = () => {
         description: error.message || "An error occurred"
       });
     }
-  };
+  }, [selectedSubLocation, getItemKey, isDecimalMode, decimalQuantities, selectedUnits, quantities, currentUser, user, addItemToAudit, remarks, updateItemRemark]);
 
   const handleAddSurplus = async () => {
     if (!newItem.sku || !newItem.name) {
@@ -558,147 +693,44 @@ export const SearchInventory = () => {
                 <div>Item Details</div>
                 <div className="text-right">Audit Controls</div>
               </div>
-              {searchResults.map((item) => {
+              
+              {/* Only render up to visibleLimit (now 20) */}
+              {searchResults.slice(0, visibleLimit).map((item) => {
                 const itemKey = getItemKey(item);
-                
-                const auditorEntries = item.auditorEntries || [];
-                const calculatedTotal = Number(auditorEntries.reduce((sum, entry) => sum + (entry.quantityFound || 0), 0).toFixed(4));
-
-                const consolidatedMap = new Map();
-                auditorEntries.forEach(entry => {
-                    const mappedName = entry.auditorName || 'Unknown';
-                    const key = `${mappedName}-${entry.subLocation || 'General'}`;
-                    if (!consolidatedMap.has(key)) {
-                        consolidatedMap.set(key, { name: mappedName, subLocation: entry.subLocation, quantityFound: Number(entry.quantityFound) || 0 });
-                    } else {
-                        consolidatedMap.get(key).quantityFound += (Number(entry.quantityFound) || 0);
-                    }
-                });
-                const consolidatedEntries = Array.from(consolidatedMap.values());
-
-                const itemUploadedUnit = item.customAttributes?.['Unit'];
-                const currentSelectedUnit = selectedUnits[itemKey] !== undefined ? selectedUnits[itemKey] : (itemUploadedUnit || "none");
-
                 return (
-                  <div key={itemKey} className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 p-4 border-b border-gray-100 last:border-0 items-start hover:bg-gray-50/50 transition-colors">
-                    <div>
-                      <h3 className="font-medium text-gray-900">{item.name}</h3>
-                      <div className="text-sm text-gray-500">SKU: {item.sku}</div>
-                      <div className="text-sm text-gray-500">Category: {item.category || '-'}</div>
-                      
-                      {!hideSystemQuantity ? (
-                          <div className="text-sm text-gray-900 mt-1">System Quantity: {item.systemQuantity} {itemUploadedUnit}</div>
-                      ) : (
-                          <div className="text-sm text-gray-500 mt-1 italic flex items-center gap-1">
-                              <ShieldAlert className="h-3 w-3" /> System Quantity: Hidden
-                          </div>
-                      )}
-                      
-                      {consolidatedEntries.length > 0 && (
-                        <div className="mt-2 text-xs bg-white p-2 rounded border border-gray-200 shadow-sm">
-                          <strong className="text-gray-900 block mb-1">Auditor Breakdown:</strong>
-                          {consolidatedEntries.map((entry, idx) => (
-                            <div key={idx} className="flex justify-between items-center gap-2 text-gray-600">
-                                <span className="truncate pr-2">窶｢ {entry.name} {entry.subLocation && `(${entry.subLocation})`}</span>
-                                <span className="font-medium text-indigo-600">{entry.quantityFound}</span>
-                            </div>
-                          ))}
-                          <div className="mt-2 pt-1 border-t border-gray-100 font-medium text-gray-900">
-                            Total Physical: <span className="text-indigo-600">{calculatedTotal}</span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex flex-col items-end gap-2 w-full md:w-auto">
-                      
-                      {isDecimalMode ? (
-                          <div className="flex items-center gap-2 mb-1 w-full justify-end">
-                              <Input 
-                                  type="number" 
-                                  step="any" 
-                                  placeholder="Qty" 
-                                  value={decimalQuantities[itemKey] || ""} 
-                                  onChange={(e) => setDecimalQuantities(prev => ({ ...prev, [itemKey]: e.target.value }))}
-                                  className="w-24 h-9 font-medium"
-                              />
-                              <Select 
-                                  value={currentSelectedUnit} 
-                                  onValueChange={(val) => setSelectedUnits(prev => ({ ...prev, [itemKey]: val }))}
-                              >
-                                  <SelectTrigger className="w-[100px] h-9 bg-white">
-                                      <SelectValue placeholder="Unit" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                      <SelectItem value="none">No Unit</SelectItem>
-                                      {itemUploadedUnit && (
-                                          <SelectItem value={itemUploadedUnit}>{itemUploadedUnit}</SelectItem>
-                                      )}
-                                  </SelectContent>
-                              </Select>
-                          </div>
-                      ) : (
-                          <div className="flex items-center space-x-2 mb-1 bg-white rounded-md border border-gray-200 p-1 w-full md:w-auto justify-between md:justify-end">
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              className="h-7 w-7 hover:bg-gray-100 text-gray-600"
-                              onClick={() => decrementQuantity(item)}
-                            >
-                              <Minus className="h-4 w-4" />
-                            </Button>
-                            <span className="w-8 text-center font-medium text-gray-900">
-                              {quantities[itemKey] || 0}
-                            </span>
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              className="h-7 w-7 hover:bg-gray-100 text-gray-600"
-                              onClick={() => incrementQuantity(item)}
-                            >
-                              <Plus className="h-4 w-4" />
-                            </Button>
-                          </div>
-                      )}
-
-                      <div className="w-full relative mb-2">
-                        <MessageSquare className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" />
-                        <Input
-                          placeholder="Add a remark (optional)..."
-                          value={remarks[itemKey] !== undefined ? remarks[itemKey] : (item.clientRemarks || "")}
-                          onChange={(e) => setRemarks(prev => ({ ...prev, [itemKey]: e.target.value }))}
-                          onBlur={() => handleRemarkBlur(item)}
-                          className="h-9 w-full md:w-[208px] pl-8 text-xs"
-                        />
-                      </div>
-
-                      <div className="flex gap-2 w-full md:w-[208px]">
-                        {isAdmin && (
-                            <Button 
-                              variant="destructive"
-                              size="sm"
-                              className="flex-1 shadow-sm px-2"
-                              onClick={() => handleAddToAudit(item, true)}
-                              disabled={isDecimalMode ? !(parseFloat(decimalQuantities[itemKey]) > 0) || !selectedSubLocation : !(quantities[itemKey] > 0) || !selectedSubLocation}
-                              title="Deduct this quantity from the total"
-                            >
-                              <Minus className="h-4 w-4 mr-1" /> Deduct
-                            </Button>
-                        )}
-                        <Button 
-                          variant="default"
-                          size="sm"
-                          className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex-1"
-                          onClick={() => handleAddToAudit(item, false)}
-                          disabled={isDecimalMode ? !(parseFloat(decimalQuantities[itemKey]) > 0) || !selectedSubLocation : !(quantities[itemKey] > 0) || !selectedSubLocation}
-                        >
-                          <Check className="h-4 w-4 mr-1" /> Add
-                        </Button>
-                      </div>
-
-                    </div>
-                  </div>
+                    <SearchItemRow 
+                        key={itemKey}
+                        item={item}
+                        itemKey={itemKey}
+                        isAdmin={isAdmin}
+                        isDecimalMode={isDecimalMode}
+                        hideSystemQuantity={hideSystemQuantity}
+                        decimalQuantity={decimalQuantities[itemKey]}
+                        onDecimalChange={(val: any) => setDecimalQuantities(prev => ({ ...prev, [itemKey]: val }))}
+                        selectedUnit={selectedUnits[itemKey]}
+                        onUnitChange={(val: any) => setSelectedUnits(prev => ({ ...prev, [itemKey]: val }))}
+                        quantity={quantities[itemKey]}
+                        onIncrement={() => setQuantities(prev => ({ ...prev, [itemKey]: (prev[itemKey] || 0) + 1 }))}
+                        onDecrement={() => setQuantities(prev => ({ ...prev, [itemKey]: Math.max(0, (prev[itemKey] || 0) - 1) }))}
+                        remark={remarks[itemKey]}
+                        onRemarkChange={(val: any) => setRemarks(prev => ({ ...prev, [itemKey]: val }))}
+                        onRemarkBlur={() => handleRemarkBlur(item)}
+                        onAdd={() => handleAddToAudit(item, false)}
+                        onDeduct={() => handleAddToAudit(item, true)}
+                        selectedSubLocation={selectedSubLocation}
+                    />
                 );
               })}
+
+              {/* Load More Button (+20 Results) */}
+              {searchResults.length > visibleLimit && (
+                  <div className="p-4 bg-gray-50 text-center border-t border-gray-200">
+                      <p className="text-sm text-gray-500 mb-2">Showing {visibleLimit} of {searchResults.length} results</p>
+                      <Button variant="outline" onClick={() => setVisibleLimit(prev => prev + 20)}>
+                          Load More Results
+                      </Button>
+                  </div>
+              )}
             </div>
           ) : hasNoResults ? (
             <div className="flex flex-col items-center justify-center py-12 bg-gray-50 rounded-lg border border-dashed border-gray-300">
@@ -817,7 +849,6 @@ export const SearchInventory = () => {
                             </div>
                         )}
 
-                        {/* 🔥 RENDER DYNAMIC CUSTOM FIELDS + RATE FIELD */}
                         {dynamicFormFields.customFields.length > 0 && (
                             <div className="mt-2 space-y-3 p-3 bg-gray-50 border border-gray-100 rounded-md">
                                 <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Additional Attributes</h4>
