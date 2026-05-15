@@ -71,7 +71,6 @@ const Reports = () => {
   const selectedLocation = currentAssignment?.locationId || "";
   const locationName = locations.find(l => l.id === selectedLocation)?.name || "";
 
-  // 🔥 CHECK BLIND AUDIT STATUS
   const isAuditor = currentUser?.role === 'auditor';
   const hideSystemQuantity = isAuditor && currentAssignment?.showSystemQuantity === false;
 
@@ -446,6 +445,7 @@ const Reports = () => {
       return String(val);
   }, []);
 
+  // 🔥 THE FIX: Prevent duplicate quantity appending on 'systemUpload:' tags
   const getSubLocationSummary = useCallback((entries: any[]) => {
     if (!entries || entries.length === 0) return "-";
     const summary: Record<string, number> = {};
@@ -454,7 +454,12 @@ const Reports = () => {
         summary[subLoc] = (summary[subLoc] || 0) + entry.quantityFound;
     });
     return Object.entries(summary)
-        .map(([loc, qty]) => `${loc}: ${qty}`)
+        .map(([loc, qty]) => {
+            if (loc.startsWith("systemUpload:")) {
+                return loc; // Just return the tag "systemUpload:8" without the extra ": 8"
+            }
+            return `${loc}: ${qty}`;
+        })
         .join("; ");
   }, []);
 
@@ -677,7 +682,6 @@ const Reports = () => {
   }, [baseTableData, locationName, generateCSV, auditorMap, hideSystemQuantity]);
 
   const downloadDiscrepancyReport = useCallback(() => {
-    // Prevent auditors from just downloading the discrepancy report to find out what they missed
     if (hideSystemQuantity) {
         toast.error("Discrepancy reports are disabled during Blind Audits.");
         return;
@@ -945,7 +949,6 @@ const Reports = () => {
   }, [baseTableData, summary, locationName, companyName, questionnaireAnswers, questions, locations, formatQuestionnaireAnswer, hasPricing, getItemValues, getSubLocationSummary, activeSubLocations, auditorMap, hideSystemQuantity]);
 
   const generatePDFReport = useCallback(() => {
-    // Disable detailed PDF exports for auditors on blind audits
     if (hideSystemQuantity) {
         toast.error("Detailed PDF exports are disabled during Blind Audits.");
         return;
@@ -1194,7 +1197,6 @@ const Reports = () => {
                         </>
                       )}
                       
-                      {/* 🔥 COMPLETELY REMOVE HEADERS IF BLIND AUDIT */}
                       {!hideSystemQuantity && (
                           <TableHead className="text-center w-[80px]">Sys</TableHead>
                       )}
@@ -1279,7 +1281,6 @@ const Reports = () => {
                                 </>
                             )}
 
-                            {/* 🔥 COMPLETELY REMOVE CELLS IF BLIND AUDIT */}
                             {!hideSystemQuantity && (
                                 <TableCell className="text-center font-medium">
                                     {item.systemQuantity}

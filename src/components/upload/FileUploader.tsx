@@ -7,9 +7,10 @@ import {
   processCSV,
   processItemMasterData,
   processClosingStockData,
+  processPhysicalQtyData
 } from "./utils/csvUtils";
 import { Button } from "@/components/ui/button";
-import { Loader2, AlertCircle, MapPin, Lock, CheckCircle2 } from "lucide-react"; 
+import { Loader2, AlertCircle, MapPin, Lock, CheckCircle2, PackagePlus, FileSpreadsheet } from "lucide-react"; 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useCompany } from "@/context/CompanyContext";
 import SupabaseDataService from "@/services/SupabaseDataService";
@@ -47,8 +48,10 @@ export const FileUploader = ({
 }: FileUploaderProps) => {
   const [itemMasterFile, setItemMasterFile] = useState<File | null>(null);
   const [closingStockFile, setClosingStockFile] = useState<File | null>(null);
+  const [surplusFile, setSurplusFile] = useState<File | null>(null);
+  const [physicalQtyFile, setPhysicalQtyFile] = useState<File | null>(null); 
 
-  const { setItemMaster, setClosingStock, locations, itemMaster, assignments, closingStockUploaded, refreshData } = useInventory();
+  const { setItemMaster, setClosingStock, addBulkSurplusItems, uploadPhysicalQuantityStock, locations, itemMaster, assignments, closingStockUploaded, refreshData } = useInventory();
   const { selectedCompanyId, selectedAssignmentId: contextAssignmentId } = useCompany();
 
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string>(
@@ -56,7 +59,7 @@ export const FileUploader = ({
   );
 
   const [localAssignmentUploaded, setLocalAssignmentUploaded] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false); // Validating state
+  const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
     if (contextAssignmentId) {
@@ -94,9 +97,6 @@ export const FileUploader = ({
     });
   }, [assignments, userRole, assignedLocations]);
 
-  // Use this length check only for UI feedback, NOT for validation
-  const hasItemMaster = itemMaster.length > 0;
-
   const currentActiveAssignment = useMemo(() => {
      return activeAssignments.find(a => String(a.id) === selectedAssignmentId);
   }, [activeAssignments, selectedAssignmentId]);
@@ -114,15 +114,17 @@ export const FileUploader = ({
     setFile(file);
   };
 
-const handleImport = async (type: 'master' | 'stock') => {
+  const handleImport = async (type: 'master' | 'stock' | 'surplus' | 'physical') => {
     if (!selectedCompanyId) {
       toast.error("No company selected");
       return;
     }
 
-    const file = type === 'master' ? itemMasterFile : closingStockFile;
+    const fileMap = { 'master': itemMasterFile, 'stock': closingStockFile, 'surplus': surplusFile, 'physical': physicalQtyFile };
+    const file = fileMap[type];
+    
     if (!file) {
-      toast.error(`Please select a ${type === 'master' ? 'Item Master' : 'Closing Stock'} CSV file`);
+      toast.error(`Please select a file to upload.`);
       return;
     }
 
@@ -140,10 +142,10 @@ const handleImport = async (type: 'master' | 'stock') => {
 
         const batchKey = generateBatchKey();
 
+        // 1. IMPORT ITEM MASTER
         if (type === 'master') {
           const processedItems = processItemMasterData(rawRows);
           
-          // Validate and Trim Item Master data
           const trimmedItems = processedItems.map((item, index) => {
             if (!item.sku || !item.sku.trim()) throw new Error(`Row ${index + 2}: SKU is required`);
             if (!item.name || !item.name.trim()) throw new Error(`Row ${index + 2}: Name is required`);
@@ -173,8 +175,78 @@ const handleImport = async (type: 'master' | 'stock') => {
           toast.success(`Item Master imported successfully! (${trimmedItems.length} items)`);
           setItemMasterFile(null);
         
+        // 2. IMPORT BULK SURPLUS / NEW ITEMS 
+        } else if (type === 'surplus') {
+          if (!selectedAssignmentId) throw new Error("Please select an assignment first");
+
+          const processedSurplus = rawRows.map((row, index) => {
+            const getCol = (keys: string[]) => {
+               const foundKey = Object.keys(row).find(k => keys.includes(k.toLowerCase().trim()));
+               return foundKey ? row[foundKey] : undefined;
+            };
+
+            const sku = String(getCol(['sku', 'item code', 'barcode']) || '').trim();
+            const name = String(getCol(['name', 'item name', 'description']) || '').trim();
+            const category = String(getCol(['category', 'group', 'type']) || 'Other').trim();
+            const qtyStr = String(getCol(['physical quantity', 'qty', 'quantity', 'found']) || '1');
+            const physicalQuantity = parseFloat(qtyStr) || 1;
+            
+            const subLocation = String(getCol(['sub-location', 'sub location', 'sublocation', 'location', 'box', 'rack']) || 'General').trim();
+
+            if (!sku || !name) throw new Error(`Row ${index + 2}: SKU and Name are required for new items`);
+
+            const customAttributes = { ...row };
+            Object.keys(row).forEach(k => {
+               const lowerK = k.toLowerCase().trim();
+               if (['sku', 'item code', 'barcode', 'name', 'item name', 'description', 'category', 'group', 'type', 'physical quantity', 'qty', 'quantity', 'found', 'sub-location', 'sub location', 'sublocation', 'location', 'box', 'rack'].includes(lowerK)) {
+                  delete customAttributes[k];
+               }
+            });
+
+            return { sku, name, category, physicalQuantity, subLocation, customAttributes };
+          });
+
+          // 🔥 FIX: Passed batchKey here so it binds to the history item for easy targeted deletion
+          await addBulkSurplusItems(processedSurplus, batchKey);
+
+          await SupabaseDataService.logUploadBatch({
+            batchKey,
+            companyId: selectedCompanyId,
+            locationId: targetLocationId,
+            locationName: locations.find(l => l.id === targetLocationId)?.name || "Unknown",
+            uploadType: "bulk_surplus",
+            totalItems: processedSurplus.length,
+            assignmentId: parseInt(selectedAssignmentId)
+          });
+
+          toast.success(`Successfully uploaded ${processedSurplus.length} bulk new items!`);
+          setSurplusFile(null);
+          await refreshData();
+
+        // 3. IMPORT PHYSICAL QUANTITY SHEET
+        } else if (type === 'physical') {
+          if (!selectedAssignmentId) throw new Error("Please select an assignment first");
+
+          const processedPhysical = processPhysicalQtyData(rawRows);
+          
+          await uploadPhysicalQuantityStock(processedPhysical, batchKey);
+
+          await SupabaseDataService.logUploadBatch({
+             batchKey,
+             companyId: selectedCompanyId,
+             locationId: targetLocationId,
+             locationName: locations.find(l => l.id === targetLocationId)?.name || "Unknown",
+             uploadType: "physical_quantity", 
+             totalItems: processedPhysical.length,
+             assignmentId: parseInt(selectedAssignmentId)
+          });
+
+          toast.success(`Physical Quantities updated successfully for ${processedPhysical.length} items!`);
+          setPhysicalQtyFile(null);
+          await refreshData();
+
+        // 4. IMPORT CLOSING STOCK
         } else {
-          // --- CLOSING STOCK UPLOAD WITH METADATA LOOKUP ---
           if (!selectedAssignmentId) throw new Error("Please select an assignment first");
           
           const processedStock = processClosingStockData(
@@ -184,34 +256,24 @@ const handleImport = async (type: 'master' | 'stock') => {
             locations
           );
 
-          // 1. Fetch full Item Master to map Names and Categories
           toast.info("Fetching Item Master for validation...");
           const masterItems = await SupabaseDataService.getItemMaster(selectedCompanyId);
-          
-          // 2. Create a lookup map for fast matching
           const masterMap = new Map(masterItems.map(item => [item.sku.trim(), item]));
-
           const missingSkus: string[] = [];
           
-          // 3. Enrich the Closing Stock rows with data from Item Master
           const enrichedStock = processedStock.map((item, index) => {
             const trimmedSku = item.sku?.trim() || '';
             if (!trimmedSku) throw new Error(`Row ${index + 2}: SKU is empty`);
 
             const masterInfo = masterMap.get(trimmedSku);
-
-            if (!masterInfo) {
-              missingSkus.push(trimmedSku);
-            }
+            if (!masterInfo) missingSkus.push(trimmedSku);
 
             return {
               sku: trimmedSku,
-              // PRIORITY: Use Master Name > CSV Name > Unnamed
               name: masterInfo?.name || item.name || "Unnamed Item",
               category: masterInfo?.category || item.category || "General",
               location: item.location?.trim() || '',
               systemQuantity: item.systemQuantity || 0,
-              // Merge Custom Attributes (Master attributes + specific stock attributes)
               customAttributes: {
                 ...(masterInfo?.customAttributes || {}),
                 ...(item.customAttributes || {})
@@ -220,7 +282,6 @@ const handleImport = async (type: 'master' | 'stock') => {
             };
           });
 
-          // 4. Handle Missing SKUs (Strict Validation)
           if (missingSkus.length > 0) {
             const uniqueMissing = [...new Set(missingSkus)];
             const exampleSkus = uniqueMissing.slice(0, 5).join('", "');
@@ -233,7 +294,6 @@ const handleImport = async (type: 'master' | 'stock') => {
             );
           }
 
-          // 5. Upload Enriched Data
           await SupabaseDataService.setClosingStock(
             enrichedStock, 
             selectedCompanyId, 
@@ -279,10 +339,9 @@ const handleImport = async (type: 'master' | 'stock') => {
   return (
     <div className="space-y-6">
       
-      {/* Assignment Selection Logic - Only visible if not Auditor or handled externally */}
       {(userRole === 'admin' || userRole === 'super_admin') && (
         <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm space-y-3">
-           <Label>Select Assignment for Closing Stock</Label>
+           <Label>Select Assignment for Action</Label>
            <Select value={selectedAssignmentId} onValueChange={(val) => setSelectedAssignmentId(val)}>
              <SelectTrigger><SelectValue placeholder="Choose active assignment..." /></SelectTrigger>
              <SelectContent>
@@ -303,8 +362,8 @@ const handleImport = async (type: 'master' | 'stock') => {
         </div>
       )}
 
-      <div className="grid md:grid-cols-2 gap-6">
-        {/* Item Master Upload */}
+      <div className="grid md:grid-cols-2 lg:grid-cols-2 gap-6">
+        
         {canUploadItemMaster ? (
           <FileInputCard
             title="Item Master"
@@ -320,7 +379,6 @@ const handleImport = async (type: 'master' | 'stock') => {
           <NoPermissionCard title="Item Master" description="You do not have permission to upload master data." />
         )}
 
-        {/* Closing Stock Upload */}
         {canUploadClosingStock ? (
           <div className="relative">
               <FileInputCard
@@ -351,6 +409,33 @@ const handleImport = async (type: 'master' | 'stock') => {
         ) : (
           <NoPermissionCard title="Closing Stock" description="You do not have permission to upload closing stock." />
         )}
+
+        {canUploadClosingStock && isAssignmentActive && isStockUploadedForCurrentSelection && (
+          <FileInputCard
+            title="Bulk New Items"
+            description={`Add missing surplus items directly into ${locations.find(l => l.id === targetLocationId)?.name || 'selected assignment'}`}
+            file={surplusFile}
+            onFileChange={(f) => handleFileChange(f, setSurplusFile)}
+            onUpload={() => handleImport('surplus')}
+            accept=".csv"
+            isUploading={isProcessing}
+            icon={<PackagePlus className="h-5 w-5 text-indigo-600" />} 
+          />
+        )}
+
+        {canUploadClosingStock && isAssignmentActive && isStockUploadedForCurrentSelection && (
+          <FileInputCard
+            title="Physical Qty Sheet"
+            description="Upload reconciled quantities. Will merge with existing live audit data safely."
+            file={physicalQtyFile}
+            onFileChange={(f) => handleFileChange(f, setPhysicalQtyFile)}
+            onUpload={() => handleImport('physical')}
+            accept=".csv"
+            isUploading={isProcessing}
+            icon={<FileSpreadsheet className="h-5 w-5 text-indigo-600" />} 
+          />
+        )}
+
       </div>
 
       {isProcessing && (

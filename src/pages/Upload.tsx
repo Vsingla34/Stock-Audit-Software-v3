@@ -14,18 +14,21 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useUserAccess } from "@/hooks/useUserAccess";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertCircle, UploadCloud } from "lucide-react"; // Added UploadCloud icon
+import { AlertCircle, UploadCloud } from "lucide-react"; 
 import { useNavigate } from "react-router-dom";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useUser } from "@/context/UserContext";
 import { useCompany } from "@/context/CompanyContext";
+import { useInventory } from "@/context/InventoryContext"; // 🔥 IMPORT ADDED
 import SupabaseDataService from "@/services/SupabaseDataService";
-import { Button } from "@/components/ui/button"; // Added Button import
+import { Button } from "@/components/ui/button"; 
 
 const Upload = () => {
   const { currentUser } = useUser();
   const { selectedCompanyId, selectedAssignmentId } = useCompany();
   const { canUploadData, canUploadItemMaster, canUploadClosingStock } = useUserAccess();
+  // 🔥 FETCH STATE FOR TEMPLATE RENDER VISIBILITY
+  const { closingStockUploaded, assignments } = useInventory(); 
   const navigate = useNavigate();
 
   const [history, setHistory] = useState<any[]>([]);
@@ -66,6 +69,9 @@ const Upload = () => {
   }
 
   const isAdminCanUploadItemMaster = canUploadItemMaster();
+  
+  // Conditionally calculate if they are allowed to see the surplus card based on their assignment selection
+  const showSurplusTemplate = canUploadClosingStock() && !!selectedAssignmentId && closingStockUploaded;
 
   return (
     <AppLayout>
@@ -132,12 +138,6 @@ const Upload = () => {
                   canUploadClosingStock={canUploadClosingStock()}
                   onUploadComplete={loadHistory}
                 />
-                
-                {/* Added explicit Submit/Process button area if FileUploader doesn't have one, 
-                    though typically FileUploader handles the action. 
-                    If you needed a visual cue or external trigger, it would go here.
-                    Assuming FileUploader handles the logic internally, I'm ensuring the container is ready.
-                */}
               </CardContent>
             </Card>
 
@@ -163,7 +163,8 @@ const Upload = () => {
           </TabsContent>
 
           <TabsContent value="examples">
-            <ExampleData />
+            {/* 🔥 Passed the calculated prop down so templates mirror actual availability */}
+            <ExampleData showSurplusTemplate={showSurplusTemplate} />
           </TabsContent>
 
           {isAdminCanUploadItemMaster && (

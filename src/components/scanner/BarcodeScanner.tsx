@@ -262,7 +262,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
         }
     };
 
-    const handleAddSurplus = async () => {
+ const handleAddSurplus = async () => {
         if (!newItem.sku || !newItem.name) return;
         try {
             const submissionItem = {
@@ -270,7 +270,8 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                 name: newItem.name,
                 category: newItem.category,
                 physicalQuantity: Number(newItem.physicalQuantity) || 0,
-                customAttributes: newItem.customAttributes
+                subLocation: selectedSubLocation, // 🔥 FIX: Passing subLocation automatically
+                customAttributes: newItem.customAttributes 
             };
             
             await addSurplusItem(submissionItem);
@@ -278,7 +279,6 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
             setIsAddDialogOpen(false);
             setScannedBarcode(newItem.sku);
             
-            // Reset state properly
             setNewItem({ sku: "", name: "", category: "", physicalQuantity: 1, customAttributes: {} });
             setCategoryOption("");
             

@@ -32,10 +32,10 @@ export const InventoryOverview = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // 1. Get Current Assignment & Location
-  const currentAssignment = assignments.find(a => a.id === selectedAssignmentId);
+  const currentAssignment = assignments.find(a => String(a.id) === String(selectedAssignmentId));
   
   const locationName = currentAssignment 
-    ? locations.find(l => l.id === currentAssignment.locationId)?.name 
+    ? locations.find(l => String(l.id) === String(currentAssignment.locationId))?.name 
     : "Unknown Location";
 
   const auditStatus = currentAssignment?.status || "pending";
@@ -43,7 +43,7 @@ export const InventoryOverview = () => {
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
   const isClient = isClientUser();
 
-  // 🔥 PERFORMANCE FIX: O(N) Hash Map instead of O(N^2) Array.find()
+  // 🔥 CRITICAL FIX: Wrap in String() so Javascript doesn't fail the equality check between Number and String!
   const latestItems = useMemo(() => {
     if (!selectedAssignmentId) return [];
 
@@ -55,7 +55,8 @@ export const InventoryOverview = () => {
     
     // 2. Loop the master list ONCE and grab from the dictionary
     itemMaster.forEach(masterItem => {
-      if (masterItem.assignmentId === selectedAssignmentId) {
+      // THIS is where the dashboard was dropping real-time updates! 
+      if (String(masterItem.assignmentId) === String(selectedAssignmentId)) {
         results.push(auditedMap.get(masterItem.id) || masterItem);
       }
     });
@@ -99,7 +100,7 @@ export const InventoryOverview = () => {
     if (confirm("Are you sure you want to submit this report to the client?")) {
       setIsSubmitting(true);
       try {
-        await submitAudit(selectedAssignmentId);
+        await submitAudit(Number(selectedAssignmentId));
         toast.success("Audit Submitted Successfully");
       } catch (e: any) {
         toast.error(e.message || "Failed to submit");

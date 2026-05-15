@@ -172,7 +172,7 @@ class SupabaseDataService {
         clientIds: cliIds,
         status: item.status as AuditStatus,
         scheduledDate: item.scheduled_date || item.created_at,
-        showSystemQuantity: item.show_system_quantity ?? true, // 🔥 Extract visibility setting
+        showSystemQuantity: item.show_system_quantity ?? true,
       } as any;
     });
   }
@@ -184,7 +184,7 @@ class SupabaseDataService {
     scheduledDate?: string;
     auditorIds?: string[];
     clientIds?: string[];
-    showSystemQuantity?: boolean; // 🔥 Added setting
+    showSystemQuantity?: boolean;
   }): Promise<Assignment> {
     const { data, error } = await supabase
       .from("assignments")
@@ -195,7 +195,7 @@ class SupabaseDataService {
         scheduled_date: assignment.scheduledDate,
         auditor_ids: assignment.auditorIds || [],
         client_ids: assignment.clientIds || [], 
-        show_system_quantity: assignment.showSystemQuantity !== false, // 🔥 Save setting
+        show_system_quantity: assignment.showSystemQuantity !== false,
       })
       .select()
       .single();
@@ -214,7 +214,7 @@ class SupabaseDataService {
       clientIds: cliIds,
       status: data.status as AuditStatus,
       scheduledDate: data.scheduled_date || data.created_at,
-      showSystemQuantity: data.show_system_quantity ?? true, // 🔥 Return setting
+      showSystemQuantity: data.show_system_quantity ?? true,
     } as any;
   }
 
@@ -223,14 +223,14 @@ class SupabaseDataService {
     scheduledDate?: string;
     auditorIds?: string[];
     clientIds?: string[];
-    showSystemQuantity?: boolean; // 🔥 Added setting
+    showSystemQuantity?: boolean;
   }): Promise<void> {
     const payload: any = {};
     if (updates.status)        payload.status          = updates.status;
     if (updates.scheduledDate) payload.scheduled_date  = updates.scheduledDate;
     if (updates.auditorIds !== undefined) payload.auditor_ids = updates.auditorIds;
     if (updates.clientIds !== undefined) payload.client_ids = updates.clientIds;
-    if (updates.showSystemQuantity !== undefined) payload.show_system_quantity = updates.showSystemQuantity; // 🔥 Update setting
+    if (updates.showSystemQuantity !== undefined) payload.show_system_quantity = updates.showSystemQuantity;
 
     const { error } = await supabase.from("assignments").update(payload).eq("id", id);
     if (error) throw error;
@@ -499,6 +499,80 @@ class SupabaseDataService {
     }
   }
 
+  public async uploadPhysicalQuantityStock(params: {
+    items: { sku: string; physicalQuantity: number }[];
+    companyId: string;
+    assignmentId: number;
+    batchKey: string;
+    userId: string;
+    userName: string;
+  }) {
+    const { items, assignmentId, batchKey, userId, userName } = params;
+
+    const { data: existingItems, error: fetchErr } = await supabase
+      .from('inventory_items')
+      // 🔥 FIX: Added name, category, and location to satisfy NOT NULL constraints during upsert
+      .select('id, sku, name, category, location, physical_quantity, system_quantity, auditor_entries, company_id, assignment_id')
+      .eq('assignment_id', assignmentId);
+
+    if (fetchErr) throw fetchErr;
+
+    const existingMap = new Map(existingItems?.map(i => [i.sku, i]) || []);
+    const missingSkus: string[] = [];
+
+    const updates = items.map(upd => {
+      const existing = existingMap.get(upd.sku);
+      if (!existing) {
+        missingSkus.push(upd.sku);
+        return null;
+      }
+
+      let entries = existing.auditor_entries;
+      if (typeof entries === 'string') entries = JSON.parse(entries);
+      if (!Array.isArray(entries)) entries = [];
+
+      const newEntry = {
+        auditorId: userId || 'unknown',
+        auditorName: userName || 'System',
+        quantityFound: upd.physicalQuantity,
+        auditedAt: new Date().toISOString(),
+        subLocation: `systemUpload:${upd.physicalQuantity}`,
+        batchKey: batchKey 
+      };
+
+      entries.push(newEntry);
+
+      const newQty = (parseFloat(existing.physical_quantity) || 0) + upd.physicalQuantity;
+      const sysQty = parseFloat(existing.system_quantity) || 0;
+
+      return {
+        id: existing.id,
+        company_id: existing.company_id,
+        assignment_id: existing.assignment_id,
+        sku: existing.sku,
+        name: existing.name,             // 🔥 FIX: Pass existing name back
+        category: existing.category,     // 🔥 FIX: Pass existing category back
+        location: existing.location,     // 🔥 FIX: Pass existing location back
+        system_quantity: existing.system_quantity,
+        physical_quantity: newQty,
+        status: newQty === sysQty ? 'matched' : 'discrepancy',
+        auditor_entries: entries,
+        last_audited: new Date().toISOString()
+      };
+    }).filter(Boolean);
+
+    if (missingSkus.length > 0) {
+      throw new Error(`Validation Failed: ${missingSkus.length} SKUs from your sheet were not found in this Assignment's Closing Stock.\nExample SKUs: ${missingSkus.slice(0,3).join(', ')}.\nEnsure the SKUs perfectly match.`);
+    }
+
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
+      const chunk = updates.slice(i, i + CHUNK_SIZE);
+      const { error } = await supabase.from('inventory_items').upsert(chunk as any);
+      if (error) throw error;
+    }
+  }
+
   public async setAuditedItems(items: InventoryItem[]): Promise<void> {
     const dbItems = items.map(item => {
       const payload: any = {
@@ -526,9 +600,8 @@ class SupabaseDataService {
     if (error) throw error;
   }
 
-public async addSurplusItem(params: {
-    // 🔥 FIX: Added customAttributes to the interface
-    item: { sku: string; name: string; category: string; physicalQuantity: number; customAttributes?: Record<string, any> };
+  public async addSurplusItem(params: {
+    item: { sku: string; name: string; category: string; physicalQuantity: number; subLocation?: string; customAttributes?: Record<string, any> };
     companyId: string;
     assignmentId: number;
     locationName: string;
@@ -542,6 +615,7 @@ public async addSurplusItem(params: {
       auditorName: userName || 'Unknown',
       quantityFound: item.physicalQuantity,
       auditedAt: new Date().toISOString(),
+      subLocation: item.subLocation || "General",
     };
 
     const { error } = await supabase.from("inventory_items").insert({
@@ -557,11 +631,54 @@ public async addSurplusItem(params: {
       client_remarks: "Added from Master / Surplus",
       auditor_entries: [auditorEntry],
       last_audited: new Date().toISOString(),
-      // 🔥 FIX: Actually save the custom_attributes to the database instead of {}
       custom_attributes: item.customAttributes || {},
     });
 
     if (error) throw error;
+  }
+
+ 
+  public async addBulkSurplusItems(params: {
+    items: { sku: string; name: string; category: string; physicalQuantity: number; subLocation?: string; customAttributes?: Record<string, any> }[];
+    companyId: string;
+    assignmentId: number;
+    locationName: string;
+    batchKey: string; 
+    userId?: string;
+    userName?: string;
+  }): Promise<void> {
+    const { items, companyId, assignmentId, locationName, batchKey, userId, userName } = params;
+
+    const rows = items.map(item => ({
+      company_id: companyId,
+      assignment_id: assignmentId,
+      sku: item.sku,
+      name: item.name,
+      category: item.category,
+      location: locationName,
+      system_quantity: 0,
+      physical_quantity: item.physicalQuantity,
+      status: 'discrepancy',
+      client_remarks: "Bulk added from Master / Surplus",
+      upload_batch_key: batchKey, // 🔥 FIX: Bind the item to the upload history!
+      auditor_entries: [{
+        auditorId: userId || 'unknown',
+        auditorName: userName || 'Unknown',
+        quantityFound: item.physicalQuantity,
+        auditedAt: new Date().toISOString(),
+        subLocation: item.subLocation || "General",
+        batchKey: batchKey // Tag the specific entry too
+      }],
+      last_audited: new Date().toISOString(),
+      custom_attributes: item.customAttributes || {},
+    }));
+
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+      const chunk = rows.slice(i, i + CHUNK_SIZE);
+      const { error } = await supabase.from("inventory_items").insert(chunk);
+      if (error) throw error;
+    }
   }
 
   public async updateItemRemark(itemId: string, remark: string): Promise<void> {
@@ -726,12 +843,56 @@ public async addSurplusItem(params: {
   public async deleteUploadBatch(id: string): Promise<void> {
     const { data: history } = await supabase
       .from("inventory_upload_history")
-      .select("batch_key, company_id")
+      .select("batch_key, company_id, upload_type, assignment_id")
       .eq("id", id)
       .single();
 
-    if (history) {
-      await supabase.from("inventory_items")
+    if (!history) return;
+
+    if (history.upload_type === 'physical_quantity') {
+       const { data: items } = await supabase
+         .from("inventory_items")
+       
+         .select("id, physical_quantity, system_quantity, auditor_entries, company_id, assignment_id, sku, name, category, location")
+         .eq("assignment_id", history.assignment_id);
+
+       const updates = (items || []).map(item => {
+          let entries = item.auditor_entries;
+          if (typeof entries === 'string') entries = JSON.parse(entries);
+          if (!Array.isArray(entries)) entries = [];
+
+          const hasBatch = entries.some((e: any) => e.batchKey === history.batch_key);
+          if (!hasBatch) return null; 
+
+          const keptEntries = entries.filter((e: any) => e.batchKey !== history.batch_key);
+          
+          const newQty = keptEntries.reduce((sum, e) => sum + (Number(e.quantityFound) || 0), 0);
+          const sysQty = Number(item.system_quantity) || 0;
+
+          return {
+             id: item.id,
+             company_id: item.company_id,
+             assignment_id: item.assignment_id,
+             sku: item.sku,
+             name: item.name,             // 🔥 FIX: Pass existing name back
+             category: item.category,     // 🔥 FIX: Pass existing category back
+             location: item.location,     // 🔥 FIX: Pass existing location back
+             system_quantity: item.system_quantity,
+             physical_quantity: newQty,
+             status: newQty === sysQty ? 'matched' : 'discrepancy',
+             auditor_entries: keptEntries
+          };
+       }).filter(Boolean);
+
+       if (updates.length > 0) {
+          const CHUNK_SIZE = 500;
+          for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
+             const { error } = await supabase.from('inventory_items').upsert(updates.slice(i, i + CHUNK_SIZE) as any);
+             if (error) throw error;
+          }
+       }
+    } else {
+       await supabase.from("inventory_items")
         .delete()
         .eq("upload_batch_key", history.batch_key)
         .eq("company_id", history.company_id);
@@ -750,6 +911,16 @@ public async addSurplusItem(params: {
     await supabase.from("inventory_items").delete()
       .eq("company_id", companyId)
       .eq("location", locationName);
+  }
+
+  public async deleteInventoryItems(itemIds: string[]): Promise<void> {
+    if (!itemIds || itemIds.length === 0) return;
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < itemIds.length; i += CHUNK_SIZE) {
+      const chunk = itemIds.slice(i, i + CHUNK_SIZE);
+      const { error } = await supabase.from('inventory_items').delete().in('id', chunk);
+      if (error) throw error;
+    }
   }
 
   public async getLocations() {

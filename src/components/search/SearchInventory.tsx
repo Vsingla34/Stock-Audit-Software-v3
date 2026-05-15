@@ -4,10 +4,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Search, Plus, Minus, MapPin, AlertCircle, PackagePlus, ScanBarcode, ArrowLeft, Check, ChevronsUpDown, MessageSquare, ShieldAlert, Loader2 } from "lucide-react";
+import { Search, Plus, Minus, MapPin, AlertCircle, PackagePlus, ScanBarcode, ArrowLeft, Check, ChevronsUpDown, MessageSquare, ShieldAlert, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useUser } from "@/context/UserContext";
 import { useCompany } from "@/context/CompanyContext";
+import { Checkbox } from "@/components/ui/checkbox"; // 🔥 Checkbox Import
 import {
   Dialog,
   DialogContent,
@@ -37,7 +38,6 @@ import { cn } from "@/lib/utils";
 
 import { SyncStatusBanner } from "@/components/scanner/SyncStatusBanner";
 
-// 🔥 OPTIMIZATION: React.memo prevents useless re-renders when other items are updated
 const SearchItemRow = React.memo(({ 
     item, 
     itemKey, 
@@ -56,7 +56,9 @@ const SearchItemRow = React.memo(({
     onRemarkBlur, 
     onAdd, 
     onDeduct,
-    selectedSubLocation 
+    selectedSubLocation,
+    isSelected,       // 🔥 Passed Prop
+    onToggleSelect    // 🔥 Passed Prop
 }: any) => {
     
     const auditorEntries = item.auditorEntries || [];
@@ -77,8 +79,20 @@ const SearchItemRow = React.memo(({
     const itemUploadedUnit = item.customAttributes?.['Unit'];
     const currentSelectedUnit = selectedUnit !== undefined ? selectedUnit : (itemUploadedUnit || "none");
 
+    // 🔥 Added dynamic background class if selected
     return (
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 p-4 border-b border-gray-100 last:border-0 items-start hover:bg-gray-50/50 transition-colors">
+        <div className={`grid grid-cols-[auto_1fr] md:grid-cols-[auto_1fr_auto] gap-4 p-4 border-b border-gray-100 last:border-0 items-start hover:bg-gray-50/50 transition-colors ${isSelected ? 'bg-indigo-50/40' : ''}`}>
+            {/* 🔥 Checkbox Column */}
+            {isAdmin && (
+                <div className="pt-1">
+                    <Checkbox 
+                        checked={isSelected} 
+                        onCheckedChange={() => onToggleSelect(item.id)} 
+                        aria-label={`Select ${item.name}`}
+                    />
+                </div>
+            )}
+            
             <div>
                 <h3 className="font-medium text-gray-900">{item.name}</h3>
                 <div className="text-sm text-gray-500">SKU: {item.sku}</div>
@@ -107,8 +121,8 @@ const SearchItemRow = React.memo(({
                 </div>
                 )}
             </div>
-            <div className="flex flex-col items-end gap-2 w-full md:w-auto">
-                
+            
+            <div className="flex flex-col items-end gap-2 w-full md:w-auto col-span-2 md:col-span-1 mt-2 md:mt-0">
                 {isDecimalMode ? (
                     <div className="flex items-center gap-2 mb-1 w-full justify-end">
                         <Input 
@@ -192,7 +206,6 @@ const SearchItemRow = React.memo(({
                     <Check className="h-4 w-4 mr-1" /> Add
                 </Button>
                 </div>
-
             </div>
         </div>
     );
@@ -217,9 +230,11 @@ export const SearchInventory = () => {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isScanningNewItem, setIsScanningNewItem] = useState(false);
   
-  // 🔥 Limit reduced to 20 for smoother performance
   const [visibleLimit, setVisibleLimit] = useState(20);
   
+  // 🔥 Selection State for Admins
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+
   const [newItem, setNewItem] = useState({
     sku: "",
     name: "",
@@ -238,9 +253,9 @@ export const SearchInventory = () => {
 
   const { 
     itemMaster,
-    searchItem, 
     addItemToAudit, 
-    addSurplusItem, 
+    addSurplusItem,
+    deleteItems, // 🔥 Imported delete context
     assignments, 
     locations, 
     activeSubLocations, 
@@ -279,11 +294,10 @@ export const SearchInventory = () => {
     }
   }, [activeLocationId, subLocationSearchQuery, fetchSubLocations, isOnline]); 
 
-  // 🔥 INCREASED DEBOUNCING TIME (500ms) for smoother typing
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedQuery(searchQuery);
-      setVisibleLimit(20); // Reset limit to 20 on new search
+      setVisibleLimit(20); 
     }, 500);
     return () => clearTimeout(timer);
   }, [searchQuery]);
@@ -540,6 +554,7 @@ export const SearchInventory = () => {
           ...newItem,
           category: finalCategory,
           physicalQuantity: Number(newItem.physicalQuantity) || 0,
+          subLocation: selectedSubLocation,
           customAttributes: newCustomAttributes 
       };
       
@@ -560,10 +575,46 @@ export const SearchInventory = () => {
     }
   };
 
+  // 🔥 SELECTION & BULK DELETE HANDLERS
+  const handleToggleSelect = useCallback((id: string) => {
+      setSelectedItemIds(prev => {
+          const next = new Set(prev);
+          if (next.has(id)) next.delete(id);
+          else next.add(id);
+          return next;
+      });
+  }, []);
+
+  const handleSelectAllVisible = useCallback((checked: boolean) => {
+      const visibleIds = searchResults.slice(0, visibleLimit).map(item => item.id);
+      setSelectedItemIds(prev => {
+          const next = new Set(prev);
+          if (checked) {
+              visibleIds.forEach(id => next.add(id));
+          } else {
+              visibleIds.forEach(id => next.delete(id));
+          }
+          return next;
+      });
+  }, [searchResults, visibleLimit]);
+
+  const handleBulkDelete = async () => {
+      if (!window.confirm(`Are you sure you want to permanently delete ${selectedItemIds.size} item(s)? This action cannot be undone.`)) {
+          return;
+      }
+      try {
+          await deleteItems(Array.from(selectedItemIds));
+          setSelectedItemIds(new Set()); // Clear selection
+      } catch (error: any) {
+          toast.error("Failed to delete items", { description: error.message });
+      }
+  };
+
   const hasNoResults = debouncedQuery.length >= 2 && searchResults.length === 0;
+  const visibleItems = searchResults.slice(0, visibleLimit);
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 relative pb-16">
       
       <SyncStatusBanner />
 
@@ -689,13 +740,23 @@ export const SearchInventory = () => {
 
           {searchResults.length > 0 ? (
             <div className="border border-gray-200 rounded-md overflow-hidden">
-              <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 p-4 font-medium border-b border-gray-200 bg-gray-50 text-gray-900 hidden md:grid">
+              
+              {/* 🔥 Adjusted Header Grid for Checkbox */}
+              <div className="grid grid-cols-[auto_1fr] md:grid-cols-[auto_1fr_auto] gap-4 p-4 font-medium border-b border-gray-200 bg-gray-50 text-gray-900 hidden md:grid">
+                {isAdmin && (
+                    <div className="flex items-center">
+                        <Checkbox 
+                            checked={visibleItems.length > 0 && visibleItems.every(i => selectedItemIds.has(i.id))}
+                            onCheckedChange={handleSelectAllVisible}
+                            aria-label="Select all visible"
+                        />
+                    </div>
+                )}
                 <div>Item Details</div>
                 <div className="text-right">Audit Controls</div>
               </div>
               
-              {/* Only render up to visibleLimit (now 20) */}
-              {searchResults.slice(0, visibleLimit).map((item) => {
+              {visibleItems.map((item) => {
                 const itemKey = getItemKey(item);
                 return (
                     <SearchItemRow 
@@ -703,6 +764,8 @@ export const SearchInventory = () => {
                         item={item}
                         itemKey={itemKey}
                         isAdmin={isAdmin}
+                        isSelected={selectedItemIds.has(item.id)} // 🔥
+                        onToggleSelect={handleToggleSelect}      // 🔥
                         isDecimalMode={isDecimalMode}
                         hideSystemQuantity={hideSystemQuantity}
                         decimalQuantity={decimalQuantities[itemKey]}
@@ -722,7 +785,6 @@ export const SearchInventory = () => {
                 );
               })}
 
-              {/* Load More Button (+20 Results) */}
               {searchResults.length > visibleLimit && (
                   <div className="p-4 bg-gray-50 text-center border-t border-gray-200">
                       <p className="text-sm text-gray-500 mb-2">Showing {visibleLimit} of {searchResults.length} results</p>
@@ -920,6 +982,34 @@ export const SearchInventory = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* 🔥 FLOATING BULK DELETE ACTION BAR */}
+      {isAdmin && selectedItemIds.size > 0 && (
+          <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50 animate-in slide-in-from-bottom-5">
+              <span className="font-medium text-sm whitespace-nowrap">
+                  {selectedItemIds.size} item(s) selected
+              </span>
+              <div className="h-4 w-px bg-gray-700"></div>
+              <Button 
+                  variant="destructive" 
+                  size="sm" 
+                  className="rounded-full shadow-none h-8 text-xs font-semibold px-4 whitespace-nowrap"
+                  onClick={handleBulkDelete}
+              >
+                  <Trash2 className="h-3.5 w-3.5 mr-2" />
+                  Delete Selected
+              </Button>
+              <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="rounded-full h-8 text-gray-300 hover:text-white hover:bg-gray-800 px-3"
+                  onClick={() => setSelectedItemIds(new Set())}
+              >
+                  Clear
+              </Button>
+          </div>
+      )}
+
     </div>
   );
 };

@@ -19,6 +19,7 @@ export interface AuditorEntry {
   quantityFound: number;
   auditedAt: string;
   subLocation?: string;
+  batchKey?: string;
 }
 
 export interface InventoryItem {
@@ -153,7 +154,6 @@ interface InventoryContextType {
   scanItem: (barcode: string, location: string) => Promise<void>;
   searchItem: (query: string) => InventoryItem[];
   
-  // 🔥 FIX: Added customAttributes to the addSurplusItem interface
   addItemToAudit: (
     item: InventoryItem,
     quantity: number,
@@ -163,8 +163,20 @@ interface InventoryContextType {
   ) => Promise<number>;
   
   addSurplusItem: (
-    item: { sku: string; name: string; category: string; physicalQuantity: number; customAttributes?: Record<string, any> }
+    item: { sku: string; name: string; category: string; physicalQuantity: number; subLocation?: string; customAttributes?: Record<string, any> }
   ) => Promise<void>;
+
+  addBulkSurplusItems: (
+    items: { sku: string; name: string; category: string; physicalQuantity: number; subLocation?: string; customAttributes?: Record<string, any> }[],
+    batchKey: string
+  ) => Promise<void>;
+
+  uploadPhysicalQuantityStock: (
+    items: any[], 
+    batchKey: string
+  ) => Promise<void>;
+
+  deleteItems: (itemIds: string[]) => Promise<void>;
 
   fetchGlobalItem: (sku: string) => Promise<any | null>;
 
@@ -288,7 +300,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       if (selectedAssignmentId) {
-        setClosingStockUploaded(await SupabaseDataService.hasClosingStockForAssignment(selectedAssignmentId));
+        setClosingStockUploaded(await SupabaseDataService.hasClosingStockForAssignment(Number(selectedAssignmentId)));
       } else {
         setClosingStockUploaded(false);
       }
@@ -342,47 +354,84 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     init();
   }, [selectedCompanyId, selectedAssignmentId]);
 
+  // 🔥 PERFORMANCE FIX: Smart Batching Queue for WebSockets
+  // Prevents the browser from freezing if a CSV upload triggers 500 events
   useEffect(() => {
     if (!selectedCompanyId) return; 
 
+    const channelName = `live-dashboard-${selectedCompanyId}-${selectedAssignmentId || 'global'}`;
     let channel: ReturnType<typeof supabase.channel> | null = null;
+    
+    let pendingUpdates = new Set<string>();
+    let batchTimer: NodeJS.Timeout | null = null;
 
     const connectRealtime = () => {
       if (!navigator.onLine) return; 
 
-      const filterString = selectedAssignmentId 
-        ? `assignment_id=eq.${selectedAssignmentId}`
-        : `company_id=eq.${selectedCompanyId}`;
-
       channel = supabase
-        .channel(`live-dashboard-${selectedAssignmentId || 'global'}`)
+        .channel(channelName)
         .on(
           'postgres_changes',
-          { event: '*', schema: 'public', table: 'inventory_items', filter: filterString },
-          async (payload) => {
+          { event: '*', schema: 'public', table: 'inventory_items' },
+          (payload) => {
             if (payload.eventType === 'DELETE') return;
-            try {
-                const freshItem = await SupabaseDataService.getSingleItem(payload.new.id);
-                setAuditedItemsState(prev => {
-                  const idx = prev.findIndex(i => i.id === freshItem.id);
-                  if (idx >= 0) { const newArr = [...prev]; newArr[idx] = freshItem; return newArr; }
-                  return [...prev, freshItem];
-                });
-                setItemMasterState(prev => {
-                  const idx = prev.findIndex(i => i.id === freshItem.id);
-                  if (idx >= 0) { const newArr = [...prev]; newArr[idx] = freshItem; return newArr; }
-                  return [...prev, freshItem];
-                });
-                refreshStatsDebounced();
-            } catch (err) {
-                console.error("Live sync fetch failed:", err);
-            }
+            
+            // Queue the ID that was just changed
+            pendingUpdates.add(payload.new.id);
+            
+            if (batchTimer) clearTimeout(batchTimer);
+            
+            // Wait 300ms. If 500 messages come in quickly, they are batched into 1 operation!
+            batchTimer = setTimeout(async () => {
+                const idsToFetch = Array.from(pendingUpdates);
+                pendingUpdates.clear();
+                
+                if (idsToFetch.length === 0) return;
+                
+                try {
+                    // Massive burst (like a CSV upload)? Just do 1 clean data reload
+                    if (idsToFetch.length > 15) {
+                        await loadData();
+                        refreshStatsDebounced();
+                        return;
+                    }
+                    
+                    // Small burst (like a few scanners)? Fetch perfectly to save bandwidth
+                    const freshItems = await Promise.all(
+                        idsToFetch.map(id => SupabaseDataService.getSingleItem(id))
+                    );
+                    
+                    const validItems = freshItems.filter(item => 
+                        String(item.companyId) === String(selectedCompanyId) &&
+                        (!selectedAssignmentId || String(item.assignmentId) === String(selectedAssignmentId))
+                    );
+                    
+                    if (validItems.length > 0) {
+                        const updateState = (prev: InventoryItem[]) => {
+                            const newArr = [...prev];
+                            validItems.forEach(freshItem => {
+                                const idx = newArr.findIndex(i => i.id === freshItem.id);
+                                if (idx >= 0) newArr[idx] = freshItem;
+                                else newArr.push(freshItem);
+                            });
+                            return newArr;
+                        };
+                        
+                        setAuditedItemsState(updateState);
+                        setItemMasterState(updateState);
+                        refreshStatsDebounced();
+                    }
+                } catch (err) {
+                    console.error("Live sync fetch failed:", err);
+                }
+            }, 300);
           }
         )
         .subscribe();
     };
 
     const disconnectRealtime = () => {
+      if (batchTimer) clearTimeout(batchTimer);
       if (channel) { supabase.removeChannel(channel); channel = null; }
     };
 
@@ -397,20 +446,24 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     };
   }, [selectedCompanyId, selectedAssignmentId]);
 
+  // 🔥 PERFORMANCE FIX: Debounce IndexedDB writes
+  // Prevents the UI from lagging by stopping massive arrays from saving on every keystroke
   useEffect(() => {
     if (!selectedAssignmentId || itemMaster.length === 0) return;
-    const cacheInventory = async () => {
-      try {
-        await offlineDB.cachedInventory.put({
-          assignmentId: Number(selectedAssignmentId),
-          items: itemMaster,
-          cachedAt: new Date().toISOString()
-        });
-      } catch (error) {
-        console.warn('Failed to cache inventory locally:', error);
-      }
-    };
-    cacheInventory();
+    
+    const timer = setTimeout(async () => {
+        try {
+          await offlineDB.cachedInventory.put({
+            assignmentId: Number(selectedAssignmentId),
+            items: itemMaster,
+            cachedAt: new Date().toISOString()
+          });
+        } catch (error) {
+          console.warn('Failed to cache inventory locally:', error);
+        }
+    }, 2000); 
+    
+    return () => clearTimeout(timer);
   }, [itemMaster, selectedAssignmentId]);
 
   const setItemMaster = async (items: Omit<InventoryItem, "id">[], companyId: string | null) => {
@@ -450,15 +503,21 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     if (!item.id) throw new Error("Item ID required");
     await SupabaseDataService.updateItemAttributes(item.id, item.customAttributes || {}, item.clientRemarks);
     const freshItem = await SupabaseDataService.getSingleItem(item.id);
-    setAuditedItemsState(prev => {
+    
+    const updateState = (prev: InventoryItem[]) => {
       const idx = prev.findIndex(i => i.id === freshItem.id);
       if (idx >= 0) { const newArr = [...prev]; newArr[idx] = freshItem; return newArr; }
       return [...prev, freshItem];
-    });
+    };
+    
+    setAuditedItemsState(updateState);
+    setItemMasterState(updateState);
   };
 
   const updateItemRemark = async (itemId: string, remark: string) => {
-    setItemMasterState(prev => prev.map(i => i.id === itemId ? { ...i, clientRemarks: remark } : i));
+    const updateState = (prev: InventoryItem[]) => prev.map(i => i.id === itemId ? { ...i, clientRemarks: remark } : i);
+    setItemMasterState(updateState);
+    setAuditedItemsState(updateState);
     await SupabaseDataService.updateItemRemark(itemId, remark);
   };
 
@@ -537,10 +596,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const addItemToAudit = async (item: InventoryItem, quantity: number, auditorId?: string, auditorName?: string, subLocation?: string): Promise<number> => {
     if (quantity === 0) return item.physicalQuantity || 0;
     
+    // 🔥 FIX: Deductions safely validate against live memory
+    const currentMemoryItem = itemMaster.find(i => i.id === item.id) || item;
+
     if (quantity < 0) {
         const isAllowedAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
         if (!isAllowedAdmin) throw new Error("Only administrators can decrease audited quantities.");
-        if ((item.physicalQuantity || 0) + quantity < 0) throw new Error("Cannot decrease total physical quantity below zero.");
+        if ((currentMemoryItem.physicalQuantity || 0) + quantity < 0) throw new Error("Cannot decrease total physical quantity below zero.");
     }
 
     const masterItem = itemMaster.find((i) => i.sku === item.sku && i.location === item.location);
@@ -561,9 +623,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const mode = await SyncService.recordScan(masterItem.id, newEntry, quantity);
 
       if (mode === 'offline') {
-        const optimisticQuantity = Math.max(0, (item.physicalQuantity || 0) + quantity);
+        const optimisticQuantity = Math.max(0, (currentMemoryItem.physicalQuantity || 0) + quantity);
 
-        setAuditedItemsState(prev => {
+        const updateState = (prev: InventoryItem[]) => {
           const idx = prev.findIndex(i => i.id === masterItem.id);
           if (idx >= 0) {
             const newArr = [...prev];
@@ -577,7 +639,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             return newArr;
           }
           return prev;
-        });
+        };
+
+        setAuditedItemsState(updateState);
+        setItemMasterState(updateState); // 🔥 Instant local update so subsequent deducts don't fail!
 
         const pendingCount = await SyncService.getPendingCount();
         setPendingSyncCount(pendingCount);
@@ -585,11 +650,16 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       const freshItem = await SupabaseDataService.getSingleItem(masterItem.id);
-      setAuditedItemsState(prev => {
+      
+      const updateOnlineState = (prev: InventoryItem[]) => {
         const idx = prev.findIndex(i => i.id === freshItem.id);
         if (idx >= 0) { const newArr = [...prev]; newArr[idx] = freshItem; return newArr; }
         return [...prev, freshItem];
-      });
+      };
+
+      setAuditedItemsState(updateOnlineState);
+      setItemMasterState(updateOnlineState); // 🔥 Keep local state flawlessly in sync
+
       refreshStatsDebounced();
       return freshItem.physicalQuantity || 0;
     } catch (error: any) {
@@ -598,10 +668,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     } 
   };
 
-  // 🔥 FIX: Updated implementation to accept customAttributes parameter 
-  const addSurplusItem = async (item: { sku: string; name: string; category: string; physicalQuantity: number; customAttributes?: Record<string, any> }) => {
+  const addSurplusItem = async (item: { sku: string; name: string; category: string; physicalQuantity: number; subLocation?: string; customAttributes?: Record<string, any> }) => {
     if (!selectedCompanyId || !selectedAssignmentId) throw new Error("No active assignment selected.");
-    const assignment = assignments.find(a => a.id === selectedAssignmentId);
+    const assignment = assignments.find(a => String(a.id) === String(selectedAssignmentId));
     if (!assignment) throw new Error("Assignment not found.");
     const loc = locations.find(l => l.id === assignment.locationId);
     if (!loc) throw new Error("Location not found.");
@@ -609,8 +678,60 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const activeUserId = currentUser?.id || user?.id;
     const activeUserName = currentUser?.email || currentUser?.name || user?.email || "Unknown Auditor";
 
-    await SupabaseDataService.addSurplusItem({ item, companyId: selectedCompanyId, assignmentId: selectedAssignmentId, locationName: loc.name, userId: activeUserId, userName: activeUserName });
+    await SupabaseDataService.addSurplusItem({ item, companyId: selectedCompanyId, assignmentId: Number(selectedAssignmentId), locationName: loc.name, userId: activeUserId, userName: activeUserName });
     await loadData();
+  };
+
+  const addBulkSurplusItems = async (items: { sku: string; name: string; category: string; physicalQuantity: number; subLocation?: string; customAttributes?: Record<string, any> }[], batchKey: string) => {
+    if (!selectedCompanyId || !selectedAssignmentId) throw new Error("No active assignment selected.");
+    const assignment = assignments.find(a => String(a.id) === String(selectedAssignmentId));
+    if (!assignment) throw new Error("Assignment not found.");
+    const loc = locations.find(l => l.id === assignment.locationId);
+    if (!loc) throw new Error("Location not found.");
+
+    const activeUserId = currentUser?.id || user?.id;
+    const activeUserName = currentUser?.email || currentUser?.name || user?.email || "Unknown Auditor";
+
+    await SupabaseDataService.addBulkSurplusItems({
+      items,
+      companyId: selectedCompanyId,
+      assignmentId: Number(selectedAssignmentId),
+      locationName: loc.name,
+      batchKey: batchKey,
+      userId: activeUserId,
+      userName: activeUserName
+    });
+    await loadData();
+  };
+
+  const uploadPhysicalQuantityStock = async (items: any[], batchKey: string) => {
+    if (!selectedCompanyId || !selectedAssignmentId) throw new Error("No active assignment selected.");
+    
+    const activeUserId = currentUser?.id || user?.id;
+    const activeUserName = currentUser?.email || currentUser?.name || user?.email || "System Upload";
+
+    await SupabaseDataService.uploadPhysicalQuantityStock({
+       items,
+       companyId: selectedCompanyId,
+       assignmentId: Number(selectedAssignmentId),
+       batchKey,
+       userId: activeUserId || 'unknown',
+       userName: activeUserName
+    });
+    await loadData();
+  };
+
+  const deleteItems = async (itemIds: string[]) => {
+    if (!selectedCompanyId) throw new Error("No active company.");
+    
+    await SupabaseDataService.deleteInventoryItems(itemIds);
+    
+    const updateState = (prev: InventoryItem[]) => prev.filter(item => !itemIds.includes(item.id));
+    setItemMasterState(updateState);
+    setAuditedItemsState(updateState);
+    
+    toast.success(`${itemIds.length} item(s) deleted successfully.`);
+    refreshStatsDebounced();
   };
 
   const fetchGlobalItem = async (sku: string) => selectedCompanyId ? await SupabaseDataService.getGlobalMasterItem(selectedCompanyId, sku) : null;
@@ -649,7 +770,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   return (
     <InventoryContext.Provider
       value={{
-        itemMaster, closingStock: itemMaster.filter(i => i.status === 'pending'), auditedItems, assignments, locations, questions, questionnaireAnswers, closingStockUploaded, selectedLocationFilter, activeSubLocations, pendingSyncCount, isSyncing, setSelectedLocationFilter, setItemMaster, setClosingStock, updateAuditedItem, updateItemRemark, updateLocationAuditStatus, getInventorySummary, getLocationSummary, clearAllData, addLocation, updateLocation, deleteLocation, scanItem, searchItem, addItemToAudit, addSurplusItem, addQuestion, updateQuestion, deleteQuestion, saveQuestionnaireAnswer, getLocationQuestionnaireAnswers, getAssignmentQuestionnaireAnswers, getQuestionsForLocation, getQuestionById, createAssignment, updateAssignment, deleteAssignment, submitAudit, sendFinalizationOtp, finalizeAudit, refreshData: loadData, uploadFile, fetchSubLocations, addSubLocationToDb, fetchGlobalItem
+        itemMaster, closingStock: itemMaster.filter(i => i.status === 'pending'), auditedItems, assignments, locations, questions, questionnaireAnswers, closingStockUploaded, selectedLocationFilter, activeSubLocations, pendingSyncCount, isSyncing, setSelectedLocationFilter, setItemMaster, setClosingStock, updateAuditedItem, updateItemRemark, updateLocationAuditStatus, getInventorySummary, getLocationSummary, clearAllData, addLocation, updateLocation, deleteLocation, scanItem, searchItem, addItemToAudit, addSurplusItem, addBulkSurplusItems, uploadPhysicalQuantityStock, deleteItems, addQuestion, updateQuestion, deleteQuestion, saveQuestionnaireAnswer, getLocationQuestionnaireAnswers, getAssignmentQuestionnaireAnswers, getQuestionsForLocation, getQuestionById, createAssignment, updateAssignment, deleteAssignment, submitAudit, sendFinalizationOtp, finalizeAudit, refreshData: loadData, uploadFile, fetchSubLocations, addSubLocationToDb, fetchGlobalItem
       }}
     >
       {children}
