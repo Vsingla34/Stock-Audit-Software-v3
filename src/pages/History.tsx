@@ -1,3 +1,4 @@
+import { toastError } from "@/lib/handleError";
 import { useEffect, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -77,7 +78,7 @@ const History = () => {
       const data = await SupabaseDataService.getAuditHistory(selectedCompanyId!);
       setReports(data || []);
     } catch (error) {
-      console.error(error);
+      toastError(error, "Failed to load audit history.");
       toast.error("Failed to load history");
     } finally {
       setLoading(false);

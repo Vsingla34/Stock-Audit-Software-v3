@@ -1,9 +1,8 @@
-import { useState } from "react";
-import { Trash2, FileSpreadsheet, Calendar, MapPin, Loader2 } from "lucide-react";
+import { Trash2, FileSpreadsheet, Calendar, MapPin } from "lucide-react";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import SupabaseDataService from "@/services/SupabaseDataService";
-import { toast } from "sonner";
+import { useUndoableAction } from "@/hooks/useUndoableAction";
 import {
   Table,
   TableBody,
@@ -19,24 +18,19 @@ interface UploadHistoryProps {
 }
 
 export function UploadHistory({ history = [], onDelete }: UploadHistoryProps) {
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const { trigger } = useUndoableAction();
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this batch? This will remove all items associated with it.")) return;
-
-    try {
-      setDeletingId(id);
-      await SupabaseDataService.deleteUploadBatch(id);
-      toast.success("Upload batch removed");
-      
-      // Trigger parent refresh
-      onDelete(); 
-    } catch (error: any) {
-      console.error(error);
-      toast.error("Failed to delete batch", { description: error.message });
-    } finally {
-      setDeletingId(null);
-    }
+  const handleDelete = (id: string, batchName: string) => {
+    trigger({
+      message: `Batch "${batchName}" will be permanently deleted.`,
+      delayMs: 5000,
+      successMessage: "Upload batch removed successfully.",
+      errorMessage: "Failed to delete batch. Please try again.",
+      onConfirm: async () => {
+        await SupabaseDataService.deleteUploadBatch(id);
+        onDelete();
+      },
+    });
   };
 
   if (!history || history.length === 0) {
@@ -94,14 +88,9 @@ export function UploadHistory({ history = [], onDelete }: UploadHistoryProps) {
                   variant="ghost"
                   size="sm"
                   className="text-gray-400 hover:text-red-600 hover:bg-red-50"
-                  onClick={() => handleDelete(item.id)}
-                  disabled={deletingId === item.id}
+                  onClick={() => handleDelete(item.id, item.location_name || item.batch_key || "this batch")}
                 >
-                  {deletingId === item.id ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-4 w-4" />
-                  )}
+                  <Trash2 className="h-4 w-4" />
                 </Button>
               </TableCell>
             </TableRow>

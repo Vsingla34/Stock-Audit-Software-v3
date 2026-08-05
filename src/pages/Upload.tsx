@@ -1,3 +1,4 @@
+import { toastError } from "@/lib/handleError";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { FileUploader } from "@/components/upload/FileUploader";
 import { ExampleData } from "@/components/upload/ExampleData";
@@ -54,7 +55,7 @@ const Upload = () => {
 
       setHistory(filtered);
     } catch (error) {
-      console.error("Failed to load history", error);
+      toastError(error, "Failed to load upload history.");
     }
   }, [selectedCompanyId, selectedAssignmentId]);
 

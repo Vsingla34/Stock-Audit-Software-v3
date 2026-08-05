@@ -1,3 +1,4 @@
+import { toastError } from "@/lib/handleError";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -139,7 +140,7 @@ const AdminOverview = () => {
       setAssignmentStats(stats);
 
     } catch (error) {
-      console.error("Error loading admin overview:", error);
+      toastError(error, "Failed to load admin overview. Please refresh.");
     } finally {
       setLoading(false);
     }

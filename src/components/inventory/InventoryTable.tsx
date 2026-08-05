@@ -23,11 +23,14 @@ import { useUserAccess } from "@/hooks/useUserAccess";
 import { useMemo, useCallback, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { InventoryTableSkeleton } from "./InventoryTableSkeleton";
 
 const ROW_LIMIT = 100;
 
 export const InventoryTable = () => {
-  const { itemMaster, auditedItems, locations, updateItemRemark, assignments } = useInventory();
+  const { itemMaster, auditedItems, locations, updateItemRemark, assignments, isLoading } = useInventory();
+
+  if (isLoading) return <InventoryTableSkeleton />;
   const { currentUser } = useUser();
   const { accessibleLocations } = useUserAccess();
   const { selectedLocation } = useLocationFilter();

@@ -24,6 +24,7 @@ import { format, parseISO } from "date-fns";
 import { AlertCircle, TrendingUp, TrendingDown, Minus, Users, Search } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
+import { toastError } from "@/lib/handleError";
 import {
   Table,
   TableBody,
@@ -152,7 +153,7 @@ const Analytics = () => {
         }
 
       } catch (e) {
-        console.error("Failed to fetch history", e);
+        toastError(e, "Failed to load audit history. Please refresh.");
       } finally {
         setLoadingHistory(false);
       }

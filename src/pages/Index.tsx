@@ -1,3 +1,4 @@
+import { toastError } from "@/lib/handleError";
 import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { InventoryOverview } from "@/components/dashboard/InventoryOverview";
@@ -31,7 +32,7 @@ const Index = () => {
           setCompanyName(data.name);
         }
       } catch (err) {
-        console.error("Error fetching company name:", err);
+        toastError(err, "Failed to load company info.");
       }
     };
     fetchCompanyName();

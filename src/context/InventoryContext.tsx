@@ -104,6 +104,7 @@ interface InventoryContextType {
   
   pendingSyncCount: number;
   isSyncing: boolean;
+  isLoading: boolean;
 
   setSelectedLocationFilter: (locationId: string) => void;
   setItemMaster: (
@@ -217,6 +218,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   const { currentUser, user } = useUser();   
   const [questionnaireAnswers, setQuestionnaireAnswers] = useState<QuestionnaireAnswer[]>([]);
@@ -266,7 +268,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const loadData = async () => {
     if (!selectedCompanyId) return;
-    
+    setIsLoading(true);
     try {
       const fetchedAssignments = await SupabaseDataService.getAssignments(selectedCompanyId);
       setAssignments(fetchedAssignments);
@@ -314,6 +316,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setQuestionnaireAnswers(answers || []);
     } catch (error) {
       console.error("Error fetching data:", error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -770,7 +774,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   return (
     <InventoryContext.Provider
       value={{
-        itemMaster, closingStock: itemMaster.filter(i => i.status === 'pending'), auditedItems, assignments, locations, questions, questionnaireAnswers, closingStockUploaded, selectedLocationFilter, activeSubLocations, pendingSyncCount, isSyncing, setSelectedLocationFilter, setItemMaster, setClosingStock, updateAuditedItem, updateItemRemark, updateLocationAuditStatus, getInventorySummary, getLocationSummary, clearAllData, addLocation, updateLocation, deleteLocation, scanItem, searchItem, addItemToAudit, addSurplusItem, addBulkSurplusItems, uploadPhysicalQuantityStock, deleteItems, addQuestion, updateQuestion, deleteQuestion, saveQuestionnaireAnswer, getLocationQuestionnaireAnswers, getAssignmentQuestionnaireAnswers, getQuestionsForLocation, getQuestionById, createAssignment, updateAssignment, deleteAssignment, submitAudit, sendFinalizationOtp, finalizeAudit, refreshData: loadData, uploadFile, fetchSubLocations, addSubLocationToDb, fetchGlobalItem
+        itemMaster, closingStock: itemMaster.filter(i => i.status === 'pending'), auditedItems, assignments, locations, questions, questionnaireAnswers, closingStockUploaded, selectedLocationFilter, activeSubLocations, pendingSyncCount, isSyncing, isLoading, setSelectedLocationFilter, setItemMaster, setClosingStock, updateAuditedItem, updateItemRemark, updateLocationAuditStatus, getInventorySummary, getLocationSummary, clearAllData, addLocation, updateLocation, deleteLocation, scanItem, searchItem, addItemToAudit, addSurplusItem, addBulkSurplusItems, uploadPhysicalQuantityStock, deleteItems, addQuestion, updateQuestion, deleteQuestion, saveQuestionnaireAnswer, getLocationQuestionnaireAnswers, getAssignmentQuestionnaireAnswers, getQuestionsForLocation, getQuestionById, createAssignment, updateAssignment, deleteAssignment, submitAudit, sendFinalizationOtp, finalizeAudit, refreshData: loadData, uploadFile, fetchSubLocations, addSubLocationToDb, fetchGlobalItem
       }}
     >
       {children}

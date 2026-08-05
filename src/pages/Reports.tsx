@@ -20,7 +20,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useNavigate } from "react-router-dom";
 import { Label } from "@/components/ui/label";
-import SupabaseDataService from "@/services/SupabaseDataService"; 
+import SupabaseDataService from "@/services/SupabaseDataService";
+import { useReportFilters } from "@/hooks/useReportFilters";
 
 declare module "jspdf" {
   interface jsPDF {
@@ -51,9 +52,15 @@ const Reports = () => {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [sortOrder, setSortOrder] = useState<string>("default");
+  const {
+    statusFilter,
+    categoryFilter,
+    sortOrder,
+    setStatusFilter,
+    setCategoryFilter,
+    setSortOrder,
+    resetFilters,
+  } = useReportFilters();
 
   const [editingRemark, setEditingRemark] = useState<string | null>(null);
   const [tempRemark, setTempRemark] = useState("");
@@ -1165,6 +1172,16 @@ const Reports = () => {
                         </SelectContent>
                       </Select>
                     </div>
+                  )}
+                  {(statusFilter !== "all" || categoryFilter !== "all" || sortOrder !== "default") && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-gray-500 hover:text-gray-700"
+                      onClick={resetFilters}
+                    >
+                      Reset Filters
+                    </Button>
                   )}
                   <Button className="bg-indigo-600 hover:bg-indigo-700 text-white" onClick={downloadFilteredReport}>
                     <Download className="mr-2 h-4 w-4" />
