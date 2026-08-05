@@ -22,6 +22,7 @@ import { useNavigate } from "react-router-dom";
 import { Label } from "@/components/ui/label";
 import SupabaseDataService from "@/services/SupabaseDataService";
 import { useReportFilters } from "@/hooks/useReportFilters";
+import { AIReportSection } from "@/components/reports/AIReportSection";
 
 declare module "jspdf" {
   interface jsPDF {
@@ -1091,6 +1092,24 @@ const Reports = () => {
                 )}
             </div>
           </div>
+
+          {/* ── AI Generated Report ──────────────────────────────────────── */}
+          <AIReportSection
+            summary={summary}
+            baseTableData={baseTableData}
+            companyName={companyName}
+            locationName={locationName}
+            assignmentDate={
+              currentAssignment?.scheduledDate
+                ? new Date(currentAssignment.scheduledDate).toLocaleDateString("en-GB", {
+                    day: "2-digit", month: "short", year: "numeric",
+                  })
+                : new Date().toLocaleDateString("en-GB", {
+                    day: "2-digit", month: "short", year: "numeric",
+                  })
+            }
+            uniqueCategories={uniqueCategories}
+          />
 
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             <Card className="bg-gradient-to-br from-indigo-50 to-white shadow-sm border-indigo-100">
