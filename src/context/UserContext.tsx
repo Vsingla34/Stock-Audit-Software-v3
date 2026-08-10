@@ -1,3 +1,7 @@
+// Fix 1.7: The cached role in localStorage is now used ONLY for
+// offline UX (instant paint on slow connections). It never gates data access —
+// all data access is enforced by RLS (Phase 1.5) on the server.
+
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Session, User } from "@supabase/supabase-js";
@@ -24,6 +28,8 @@ interface UserContextType {
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
+const CACHE_KEY = "offline_user_profile";
+
 export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
@@ -48,14 +54,14 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
-      
+
       if (session?.user) {
         if (!currentUser || currentUser.id !== session.user.id) {
-           fetchUserProfile(session.user.id);
+          fetchUserProfile(session.user.id);
         }
       } else {
         setCurrentUser(null);
-        localStorage.removeItem('offline_user_profile'); // Clear cache on logout
+        localStorage.removeItem(CACHE_KEY);
         setLoading(false);
       }
     });
@@ -65,15 +71,27 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const fetchUserProfile = async (userId: string) => {
     try {
-      // 🔥 OFFLINE FIX: Instantly load cached profile if available
-      const cachedProfile = localStorage.getItem('offline_user_profile');
-      if (cachedProfile) {
-        const parsed = JSON.parse(cachedProfile);
-        if (parsed.id === userId) {
-          setCurrentUser(parsed);
+      // ── Fix 1.7: Only use the cache for offline scenarios ──────────────
+      // Cache is NEVER the source of truth for permissions.
+      // It's purely a UX convenience to avoid blank screens on slow connections.
+      if (!navigator.onLine) {
+        const cachedProfile = localStorage.getItem(CACHE_KEY);
+        if (cachedProfile) {
+          try {
+            const parsed = JSON.parse(cachedProfile);
+            if (parsed.id === userId) {
+              setCurrentUser(parsed);
+              // Still let setLoading(false) run in finally
+            }
+          } catch {
+            localStorage.removeItem(CACHE_KEY);
+          }
         }
+        // Don't attempt network fetch when offline
+        return;
       }
 
+      // ── Always fetch fresh profile from server when online ─────────────
       const { data, error } = await supabase
         .from("user_profiles")
         .select("id, email, name, role, assigned_companies")
@@ -82,12 +100,20 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
 
       if (error) {
         console.error("Error fetching profile:", error);
-        // If we have no internet and no cache, we just leave it as is
-        if (!cachedProfile) setCurrentUser(null);
+        // Fall back to cache on transient network error, but log it
+        const cachedProfile = localStorage.getItem(CACHE_KEY);
+        if (cachedProfile) {
+          try {
+            const parsed = JSON.parse(cachedProfile);
+            if (parsed.id === userId) setCurrentUser(parsed);
+          } catch {
+            localStorage.removeItem(CACHE_KEY);
+          }
+        }
       } else {
+        // Server is the source of truth — always update state and cache
         setCurrentUser(data as UserProfile);
-        // 🔥 Save to cache for offline use
-        localStorage.setItem('offline_user_profile', JSON.stringify(data));
+        localStorage.setItem(CACHE_KEY, JSON.stringify(data));
       }
     } catch (error) {
       console.error("Unexpected error fetching user profile:", error);
@@ -109,7 +135,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
     setUser(null);
     setSession(null);
     setCurrentUser(null);
-    localStorage.removeItem('offline_user_profile');
+    localStorage.removeItem(CACHE_KEY);
     toast.success("Logged out successfully");
   };
 
@@ -129,7 +155,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
         isAuthenticated: !!user,
         login,
         logout,
-        refreshProfile
+        refreshProfile,
       }}
     >
       {children}

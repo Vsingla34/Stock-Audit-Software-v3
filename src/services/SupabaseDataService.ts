@@ -132,20 +132,32 @@ class SupabaseDataService {
   }
 
   public async uploadFile(file: File, path: string): Promise<string> {
+    // Fix 1.6: Validate file type and size before upload
+    const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      throw new Error("Unsupported file type. Allowed: JPG, PNG, WEBP, PDF");
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      throw new Error("File too large. Maximum size is 10 MB");
+    }
+
     const { error } = await supabase.storage
       .from("audit-attachments")
-      .upload(path, file, { upsert: true });
+      .upload(path, file, { upsert: false }); // upsert:false prevents overwriting others
 
     if (error) {
       console.error("Upload error:", error);
       throw error;
     }
 
-    const { data: publicUrlData } = supabase.storage
+    // Fix 1.6: Return a signed URL (bucket is now private)
+    // Signed URL is valid for 1 hour — regenerate when displaying
+    const { data, error: signErr } = await supabase.storage
       .from("audit-attachments")
-      .getPublicUrl(path);
+      .createSignedUrl(path, 60 * 60);
 
-    return publicUrlData.publicUrl;
+    if (signErr) throw signErr;
+    return data.signedUrl;
   }
 
   public async getAssignments(companyId?: string): Promise<Assignment[]> {

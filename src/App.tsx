@@ -23,6 +23,7 @@ import QuestionnairePage from "./pages/Questionnaire";
 import CompanySelection from "./pages/CompanySelection";
 import AddCompany from "./pages/AddCompany";
 import AssignmentPage from "./pages/Assignment";
+import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
@@ -47,7 +48,7 @@ const ProtectedRoute = ({
   } = useUserAccess();
 
   if (loading) {
-    return <div className="flex h-screen items-center justify-center">Loading...</div>;
+    return <div className="flex h-screen items-center justify-center"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600" /></div>;
   }
 
   if (!isAuthenticated) {
@@ -233,7 +234,8 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
-            </Routes>
+                    <Route path="*" element={<NotFound />} />
+      </Routes>
           </InventoryProvider>
         </CompanyProvider>
       </UserProvider>
