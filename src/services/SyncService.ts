@@ -34,7 +34,7 @@ class SyncService {
       newEntry,
       quantityAdded,
       attemptedAt: new Date().toISOString(),
-      synced: 0 // 🔥 FIX: Saved as 0 instead of 'false' so Dexie can find it!
+      synced: 0,
     });
   }
 
@@ -62,25 +62,22 @@ class SyncService {
         try {
           await SupabaseDataService.secureRecordScan(
             scan.itemId,
-            scan.newEntry, 
+            scan.newEntry,
             scan.quantityAdded
           );
 
-          // 🔥 FIX: Updated as 1 instead of 'true'
-          await offlineDB.pendingScans.update(scan.id!, { synced: 1 });
+          // Fix 2.2: Delete immediately after sync — not at end of loop.
+          // If a crash happens mid-sync, already-synced scans won't replay.
+          await offlineDB.pendingScans.delete(scan.id!);
 
           syncedCount++;
           onProgress?.(syncedCount, pending.length);
 
         } catch (error) {
           console.error('Sync stopped at scan ID:', scan.id, error);
-          break;
+          break; // stop here — don't skip ahead, preserve order
         }
       }
-
-      // Clean up successfully synced records
-      await offlineDB.pendingScans
-        .where('synced').equals(1).delete();
 
     } finally {
       this.isSyncing = false;

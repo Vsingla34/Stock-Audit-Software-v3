@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useState, useMemo } from "react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { getStatusBadge } from "@/lib/statusConfig";
 
 export const InventoryOverview = () => {
   const navigate = useNavigate();
@@ -171,7 +173,13 @@ export const InventoryOverview = () => {
       
       <CardContent>
         {/* Adjusted Grid Layout */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
+        {/* Fix 4.6: skeleton while data loads */}
+        {latestItems.length === 0 && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
+            {[1,2,3,4].map(i => <Skeleton key={i} className="h-24 rounded-xl" />)}
+          </div>
+        )}
+        <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-2 ${latestItems.length === 0 ? "hidden" : ""}`}>
           
           <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
             <div className="flex justify-between items-start mb-2">

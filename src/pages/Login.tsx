@@ -94,7 +94,7 @@ const Login = () => {
           </form>
         </CardContent>
         <CardFooter className="flex justify-center text-xs text-gray-500">
-          Protected by industry standard encryption
+
         </CardFooter>
       </Card>
     </div>

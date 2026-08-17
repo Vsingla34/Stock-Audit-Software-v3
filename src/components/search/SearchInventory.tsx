@@ -37,6 +37,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { SyncStatusBanner } from "@/components/scanner/SyncStatusBanner";
+import SupabaseDataService from "@/services/SupabaseDataService";
 
 const SearchItemRow = React.memo(({ 
     item, 
@@ -230,7 +231,12 @@ export const SearchInventory = () => {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isScanningNewItem, setIsScanningNewItem] = useState(false);
   
-  const [visibleLimit, setVisibleLimit] = useState(20);
+  // Fix 3.1: Server-side pagination state
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [searchResults, setSearchResults] = useState<InventoryItem[]>([]);
+  const SEARCH_LIMIT = 50;
   
   // 🔥 Selection State for Admins
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
@@ -297,7 +303,7 @@ export const SearchInventory = () => {
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedQuery(searchQuery);
-      setVisibleLimit(20); 
+      setOffset(0); // Reset to first page on new query
     }, 500);
     return () => clearTimeout(timer);
   }, [searchQuery]);
@@ -371,28 +377,46 @@ export const SearchInventory = () => {
     return () => clearTimeout(timer);
   }, [newItem.sku, isOnline, lastAutoFilledSku, fetchGlobalItem, selectedCategory]);
 
-  const searchResults = useMemo(() => {
-    if (!debouncedQuery || debouncedQuery.length < 2) return [];
+  // Fix 3.1: Server-side search — called whenever query, assignment, or offset changes
+  useEffect(() => {
+    let cancelled = false;
 
-    const lowerCaseQuery = debouncedQuery.toLowerCase();
-    
-    let results = itemMaster.filter(item => 
-        item.id?.toLowerCase().includes(lowerCaseQuery) ||
-        item.sku?.toLowerCase().includes(lowerCaseQuery) ||
-        item.name?.toLowerCase().includes(lowerCaseQuery) ||
-        item.category?.toLowerCase().includes(lowerCaseQuery)
-    );
+    const runSearch = async () => {
+      if (!debouncedQuery || debouncedQuery.length < 2 || !selectedCompanyId) {
+        setSearchResults([]);
+        setHasMore(false);
+        return;
+      }
 
-    if (activeLocationName) {
-        const cleanActiveLocation = activeLocationName.trim().toLowerCase();
-        results = results.filter(item => {
-            const cleanItemLocation = (item.location || "").trim().toLowerCase();
-            return cleanItemLocation === cleanActiveLocation;
+      setSearchLoading(true);
+      try {
+        const { items, hasMore: more } = await SupabaseDataService.searchInventoryItems({
+          companyId: selectedCompanyId,
+          assignmentId: selectedAssignmentId,
+          query: debouncedQuery,
+          locationId: activeLocationId || null,
+          limit: SEARCH_LIMIT,
+          offset,
         });
-    }
 
-    return results;
-  }, [debouncedQuery, itemMaster, activeLocationName]);
+        if (!cancelled) {
+          if (offset === 0) {
+            setSearchResults(items);
+          } else {
+            setSearchResults(prev => [...prev, ...items]);
+          }
+          setHasMore(more);
+        }
+      } catch (e) {
+        console.error("Search failed:", e);
+      } finally {
+        if (!cancelled) setSearchLoading(false);
+      }
+    };
+
+    runSearch();
+    return () => { cancelled = true; };
+  }, [debouncedQuery, selectedCompanyId, selectedAssignmentId, activeLocationId, offset]);
 
   const dynamicFormFields = useMemo(() => {
     const categoriesMap = new Map<string, string>();
@@ -586,7 +610,7 @@ export const SearchInventory = () => {
   }, []);
 
   const handleSelectAllVisible = useCallback((checked: boolean) => {
-      const visibleIds = searchResults.slice(0, visibleLimit).map(item => item.id);
+      const visibleIds = searchResults.map(item => item.id);
       setSelectedItemIds(prev => {
           const next = new Set(prev);
           if (checked) {
@@ -596,7 +620,7 @@ export const SearchInventory = () => {
           }
           return next;
       });
-  }, [searchResults, visibleLimit]);
+  }, [searchResults]);
 
   const handleBulkDelete = async () => {
       if (!window.confirm(`Are you sure you want to permanently delete ${selectedItemIds.size} item(s)? This action cannot be undone.`)) {
@@ -610,8 +634,8 @@ export const SearchInventory = () => {
       }
   };
 
-  const hasNoResults = debouncedQuery.length >= 2 && searchResults.length === 0;
-  const visibleItems = searchResults.slice(0, visibleLimit);
+  const hasNoResults = debouncedQuery.length >= 2 && searchResults.length === 0 && !searchLoading;
+  const visibleItems = searchResults;
 
   return (
     <div className="flex flex-col gap-4 relative pb-16">
@@ -785,13 +809,25 @@ export const SearchInventory = () => {
                 );
               })}
 
-              {searchResults.length > visibleLimit && (
-                  <div className="p-4 bg-gray-50 text-center border-t border-gray-200">
-                      <p className="text-sm text-gray-500 mb-2">Showing {visibleLimit} of {searchResults.length} results</p>
-                      <Button variant="outline" onClick={() => setVisibleLimit(prev => prev + 20)}>
-                          Load More Results
-                      </Button>
-                  </div>
+              {/* Fix 3.1: Server-side load more */}
+              {hasMore && (
+                <div className="p-4 bg-gray-50 text-center border-t border-gray-200">
+                  <p className="text-sm text-gray-500 mb-2">
+                    Showing {searchResults.length} results
+                  </p>
+                  <Button
+                    variant="outline"
+                    onClick={() => setOffset(prev => prev + SEARCH_LIMIT)}
+                    disabled={searchLoading}
+                  >
+                    {searchLoading ? "Loading..." : "Load More Results"}
+                  </Button>
+                </div>
+              )}
+              {searchLoading && offset === 0 && (
+                <div className="p-8 text-center text-gray-400 text-sm">
+                  Searching...
+                </div>
               )}
             </div>
           ) : hasNoResults ? (

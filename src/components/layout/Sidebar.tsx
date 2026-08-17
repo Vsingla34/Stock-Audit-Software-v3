@@ -68,13 +68,15 @@ export function Sidebar({ isMobile, onClose }: SidebarProps) {
     fetchCompanyName();
   }, [fetchCompanyName]);
 
-  if (location.pathname === "/login") return null;
-  if (!isAuthenticated) return null;
+  // Fix: ALL hooks must be called before any early return (Rules of Hooks).
+  // useMemo was previously after "if (!isAuthenticated) return null" which caused
+  // "Rendered more hooks than during the previous render" when Sidebar is
+  // mounted persistently and auth state changes.
 
   // 1. TOP SECTION (Information & View Items)
   const mainNavigation = useMemo(() => {
     const nav = [{ name: "Dashboard", href: "/", icon: Home }];
-    
+
     if (userRole !== "client") {
       nav.push({ name: "Search", href: "/search", icon: Search });
     }
@@ -90,25 +92,22 @@ export function Sidebar({ isMobile, onClose }: SidebarProps) {
       href: "/questionnaire",
       icon: ListChecks,
     });
-    
+
     nav.push({ name: "My Profile", href: "/profile", icon: UserCircle });
-    
+
     return nav;
   }, [userRole]);
 
   // 2. BOTTOM SECTION (Action Items: Scan, Report, Upload)
   const actionNavigation = useMemo(() => {
-    const nav = [];
+    const nav: any[] = [];
 
-    // Scanner (Primary Action)
     if (["super_admin", "admin", "auditor"].includes(userRole)) {
       nav.push({ name: "Scanner", href: "/scanner", icon: ScanBarcode });
     }
 
-    // Reports (Key Output)
     nav.push({ name: "Reports", href: "/reports", icon: FileSpreadsheet });
 
-    // Upload (Admin Action)
     if (["super_admin", "admin", "auditor"].includes(userRole)) {
       nav.push({ name: "Upload Data", href: "/upload", icon: Upload });
     }
@@ -124,6 +123,10 @@ export function Sidebar({ isMobile, onClose }: SidebarProps) {
   const handleLinkClick = () => {
     if (isMobile && onClose) onClose();
   };
+
+  // Early returns AFTER all hooks (Rules of Hooks compliance)
+  if (location.pathname === "/login") return null;
+  if (!isAuthenticated) return null;
 
   return (
     <>

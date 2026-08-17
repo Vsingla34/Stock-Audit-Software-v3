@@ -3,27 +3,70 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { InventoryProvider } from "./context/InventoryContext";
+import { AppLayout } from "./components/layout/AppLayout";
 import { UserProvider, useUser } from "./context/UserContext";
 import { CompanyProvider } from "./context/CompanyContext";
 import { useUserAccess } from "@/hooks/useUserAccess";
-import Index from "./pages/Index";
+import { lazy, Suspense, useEffect } from "react";
+
+// Fix 3.2: Lazy-load all pages — each becomes a separate JS chunk.
+// Heavy libs (jsPDF, xlsx, recharts, html2canvas) only download
+// when the user actually navigates to the page that needs them.
+//
+// Login stays static — it's the entry point and must load immediately.
 import Login from "./pages/Login";
-import Scanner from "./pages/Scanner";
-import Search from "./pages/Search";
-import Reports from "./pages/Reports";
-import Profile from "./pages/Profile";
-import UploadData from "./pages/Upload";
-import Analytics from "./pages/Analytics";
-import HistoryPage from "./pages/History";
-import UserManagement from "./pages/UserManagement";
-import LocationManagement from "./pages/LocationManagement";
-import AssignmentSelection from "./pages/AssignmentSelection";
-import AdminOverview from "./pages/AdminOverview";
-import QuestionnairePage from "./pages/Questionnaire";
-import CompanySelection from "./pages/CompanySelection";
-import AddCompany from "./pages/AddCompany";
-import AssignmentPage from "./pages/Assignment";
-import NotFound from "./pages/NotFound";
+
+const Index              = lazy(() => import("./pages/Index"));
+const Scanner            = lazy(() => import("./pages/Scanner"));
+const Search             = lazy(() => import("./pages/Search"));
+const Reports            = lazy(() => import("./pages/Reports"));
+const Profile            = lazy(() => import("./pages/Profile"));
+const UploadData         = lazy(() => import("./pages/Upload"));
+const Analytics          = lazy(() => import("./pages/Analytics"));
+const HistoryPage        = lazy(() => import("./pages/History"));
+const UserManagement     = lazy(() => import("./pages/UserManagement"));
+const LocationManagement = lazy(() => import("./pages/LocationManagement"));
+const AssignmentSelection= lazy(() => import("./pages/AssignmentSelection"));
+const AdminOverview      = lazy(() => import("./pages/AdminOverview"));
+const QuestionnairePage  = lazy(() => import("./pages/Questionnaire"));
+const CompanySelection   = lazy(() => import("./pages/CompanySelection"));
+const AddCompany         = lazy(() => import("./pages/AddCompany"));
+const AssignmentPage     = lazy(() => import("./pages/Assignment"));
+const NotFound           = lazy(() => import("./pages/NotFound"));
+
+// PageLoader: full-screen spinner for the very first page load
+const PageLoader = () => (
+  <div className="flex h-screen items-center justify-center">
+    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600" />
+  </div>
+);
+
+// usePreloadPages: silently downloads all page chunks 2 s after initial render.
+// After that, every sidebar navigation is instant — no Suspense triggered.
+function usePreloadPages() {
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      import("./pages/Index");
+      import("./pages/Scanner");
+      import("./pages/Search");
+      import("./pages/Reports");
+      import("./pages/Analytics");
+      import("./pages/Upload");
+      import("./pages/History");
+      import("./pages/Profile");
+      import("./pages/AdminOverview");
+      import("./pages/UserManagement");
+      import("./pages/LocationManagement");
+      import("./pages/Assignment");
+      import("./pages/Questionnaire");
+      import("./pages/CompanySelection");
+      import("./pages/AssignmentSelection");
+      import("./pages/AddCompany");
+      import("./pages/NotFound");
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, []);
+}
 
 const queryClient = new QueryClient();
 
@@ -48,7 +91,7 @@ const ProtectedRoute = ({
   } = useUserAccess();
 
   if (loading) {
-    return <div className="flex h-screen items-center justify-center"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600" /></div>;
+    return <PageLoader />;
   }
 
   if (!isAuthenticated) {
@@ -89,13 +132,21 @@ const ProtectedRoute = ({
   return children;
 };
 
-const App = () => (
+const App = () => {
+  usePreloadPages(); // Silently prefetch all page chunks after initial load
+  return (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <UserProvider>
         <CompanyProvider>
           <InventoryProvider>
             <Toaster />
+            {/* Single persistent AppLayout — sidebar mounts ONCE and never re-mounts.
+                All page-level <AppLayout> wrappers detect this context and become
+                transparent (they just render children). This eliminates sidebar flicker. */}
+            <AppLayout>
+            {/* Outer Suspense — fallback rarely shown since AppLayout has inner Suspense */}
+            <Suspense fallback={<PageLoader />}>
             <Routes>
               {/* Public Routes */}
               <Route path="/login" element={<Login />} />
@@ -234,13 +285,16 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
-                    <Route path="*" element={<NotFound />} />
-      </Routes>
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+            </Suspense>
+            </AppLayout>
           </InventoryProvider>
         </CompanyProvider>
       </UserProvider>
     </TooltipProvider>
   </QueryClientProvider>
-);
+  );
+};
 
 export default App;

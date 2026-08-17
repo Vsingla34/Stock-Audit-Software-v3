@@ -2,7 +2,15 @@ import { useSearchParams } from "react-router-dom";
 import { useCallback } from "react";
 
 export type StatusFilter = "all" | "matched" | "discrepancy" | "pending";
-export type SortOrder = "default" | "asc" | "desc";
+// SortOrder includes all values used in Reports.tsx sort dropdowns
+export type SortOrder =
+  | "default"
+  | "asc"
+  | "desc"
+  | "variance-asc"
+  | "variance-desc"
+  | "val-variance-asc"
+  | "val-variance-desc";
 
 /**
  * Persists Reports page filter/sort state in the URL as search params.

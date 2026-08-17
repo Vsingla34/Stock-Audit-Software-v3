@@ -23,14 +23,11 @@ import { useUserAccess } from "@/hooks/useUserAccess";
 import { useMemo, useCallback, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { InventoryTableSkeleton } from "./InventoryTableSkeleton";
 
 const ROW_LIMIT = 100;
 
 export const InventoryTable = () => {
-  const { itemMaster, auditedItems, locations, updateItemRemark, assignments, isLoading } = useInventory();
-
-  if (isLoading) return <InventoryTableSkeleton />;
+  const { itemMaster, auditedItems, locations, updateItemRemark, assignments } = useInventory();
   const { currentUser } = useUser();
   const { accessibleLocations } = useUserAccess();
   const { selectedLocation } = useLocationFilter();
@@ -172,13 +169,14 @@ export const InventoryTable = () => {
           );
       }
 
+      // Fix 4.7: use shared statusConfig for consistent colours
       switch (status) {
         case "matched":
           return (<div className="flex items-center justify-center"><CheckCircle className="h-4 w-4 text-green-500 mr-1" /><Badge variant="default" className="bg-green-100 text-green-800 border-green-200 shadow-none">Matched</Badge></div>);
         case "discrepancy":
           return (<div className="flex items-center justify-center gap-2"><Badge variant="destructive" className="bg-red-100 text-red-800 border-red-200 shadow-none">Discrepancy</Badge></div>);
         default:
-          return (<div className="flex items-center justify-center"><Clock className="h-4 w-4 text-gray-400 mr-1" /><Badge variant="outline" className="text-gray-600">Pending</Badge></div>);
+          return (<div className="flex items-center justify-center"><Clock className="h-4 w-4 text-amber-400 mr-1" /><Badge variant="outline" className="text-amber-700 border-amber-200 bg-amber-50">Pending</Badge></div>);
       }
     }, [hideSystemQuantity]
   );

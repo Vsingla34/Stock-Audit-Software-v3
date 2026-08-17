@@ -487,13 +487,25 @@ const Reports = () => {
     return columnWidths;
   };
 
+  // Fix 2.6: Prevent CSV formula injection (e.g. =1+1 executing as a formula in Excel)
+  const csvSafe = (value: unknown): string => {
+    const s = value == null ? "" : String(value);
+    const first = s.charAt(0);
+    return (first === "=" || first === "+" || first === "-" || first === "@")
+      ? "'" + s
+      : s;
+  };
+
   const generateCSV = useCallback((data: any[], filename: string) => {
     const headers = Array.from(new Set(data.flatMap((item) => Object.keys(item))));
     let csvContent = headers.join(",") + "\n";
     data.forEach((item) => {
       const row = headers.map((header) => {
-          const value = item[header] !== undefined ? String(item[header]) : "";
-          return value.includes(",") ? `"${value}"` : value;
+          const raw = item[header] !== undefined ? item[header] : "";
+          const value = csvSafe(raw);
+          return value.includes(",") || value.includes('"') || value.includes("\n")
+            ? '"' + value.replace(/"/g, '""') + '"'
+            : value;
         }).join(",");
       csvContent += row + "\n";
     });

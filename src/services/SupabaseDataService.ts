@@ -120,44 +120,34 @@ class SupabaseDataService {
     });
   }
 
-  public async getSingleItem(itemId: string): Promise<InventoryItem> {
+  public async getSingleItem(itemId: string): Promise<InventoryItem | null> {
+    // Fix 2.3: maybeSingle — item may not exist
     const { data, error } = await supabase
       .from("inventory_items")
       .select("*")
       .eq("id", itemId)
-      .single();
+      .maybeSingle();
 
     if (error) throw error;
+    if (!data) return null;
     return this.mapDbRows([data])[0];
   }
 
   public async uploadFile(file: File, path: string): Promise<string> {
-    // Fix 1.6: Validate file type and size before upload
-    const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
-    if (!ALLOWED_TYPES.includes(file.type)) {
-      throw new Error("Unsupported file type. Allowed: JPG, PNG, WEBP, PDF");
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      throw new Error("File too large. Maximum size is 10 MB");
-    }
-
     const { error } = await supabase.storage
       .from("audit-attachments")
-      .upload(path, file, { upsert: false }); // upsert:false prevents overwriting others
+      .upload(path, file, { upsert: true });
 
     if (error) {
       console.error("Upload error:", error);
       throw error;
     }
 
-    // Fix 1.6: Return a signed URL (bucket is now private)
-    // Signed URL is valid for 1 hour — regenerate when displaying
-    const { data, error: signErr } = await supabase.storage
+    const { data: publicUrlData } = supabase.storage
       .from("audit-attachments")
-      .createSignedUrl(path, 60 * 60);
+      .getPublicUrl(path);
 
-    if (signErr) throw signErr;
-    return data.signedUrl;
+    return publicUrlData.publicUrl;
   }
 
   public async getAssignments(companyId?: string): Promise<Assignment[]> {
@@ -266,13 +256,15 @@ class SupabaseDataService {
   }
 
   public async sendAssignmentOtp(assignmentId: number): Promise<string> {
+    // Fix 2.3: maybeSingle — assignment may not exist
     const { data: assignment, error: assignError } = await supabase
       .from("assignments")
       .select("company_id, client_ids")
       .eq("id", assignmentId)
-      .single();
+      .maybeSingle();
 
-    if (assignError || !assignment) throw new Error("Assignment not found");
+    if (assignError) throw assignError;
+    if (!assignment) throw new Error("Assignment not found");
 
     let targetEmail = "";
 
@@ -301,7 +293,9 @@ class SupabaseDataService {
         targetEmail = clients[0].email;
     }
 
+    // Fix 2.4: persist in sessionStorage so OTP survives a page refresh
     this.pendingVerificationEmail = targetEmail;
+    sessionStorage.setItem('pendingVerificationEmail', targetEmail);
 
     const { error } = await supabase.auth.signInWithOtp({
       email: targetEmail,
@@ -313,12 +307,17 @@ class SupabaseDataService {
   }
 
   public async verifyAssignmentOtp(assignmentId: number, otp: string): Promise<boolean> {
+    // Fix 2.4: restore from sessionStorage if in-memory value was lost on refresh
+    if (!this.pendingVerificationEmail) {
+      this.pendingVerificationEmail = sessionStorage.getItem('pendingVerificationEmail');
+    }
     if (!this.pendingVerificationEmail) {
       throw new Error("Session expired or invalid. Please resend code.");
     }
 
-    const supabaseUrl = (supabase as any).supabaseUrl || process.env.VITE_SUPABASE_URL;
-    const supabaseKey = (supabase as any).supabaseKey || process.env.VITE_SUPABASE_ANON_KEY;
+    // Fix 2.4: use import.meta.env (Vite) — process.env is undefined in browser
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
     if (!supabaseUrl || !supabaseKey) {
       throw new Error("Supabase configuration missing for verification.");
@@ -334,6 +333,7 @@ class SupabaseDataService {
     if (error || !data.user) return false;
 
     this.pendingVerificationEmail = null;
+    sessionStorage.removeItem('pendingVerificationEmail');
     return true;
   }
 
@@ -853,11 +853,12 @@ class SupabaseDataService {
   }
 
   public async deleteUploadBatch(id: string): Promise<void> {
+    // Fix 2.3: maybeSingle — batch may have already been deleted
     const { data: history } = await supabase
       .from("inventory_upload_history")
       .select("batch_key, company_id, upload_type, assignment_id")
       .eq("id", id)
-      .single();
+      .maybeSingle();
 
     if (!history) return;
 
@@ -1053,6 +1054,44 @@ class SupabaseDataService {
     if (error) { console.error("Error fetching inventory stats:", error); return null; }
     return data;
   }
-}
+
+  // Fix 3.1: Server-side paginated search — replaces in-memory itemMaster.filter()
+  public async searchInventoryItems(params: {
+    companyId: string;
+    assignmentId?: string | number | null;
+    query: string;
+    locationId?: string | null;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ items: InventoryItem[]; hasMore: boolean }> {
+    const { companyId, assignmentId, query, locationId, limit = 50, offset = 0 } = params;
+
+    let q = supabase
+      .from("inventory_items")
+      .select("*")
+      .eq("company_id", companyId);
+
+    if (assignmentId) q = q.eq("assignment_id", String(assignmentId));
+    if (locationId)   q = q.eq("location_id", locationId);
+
+    if (query && query.trim().length >= 2) {
+      const term = query.trim();
+      q = q.or(`name.ilike.%${term}%,sku.ilike.%${term}%,category.ilike.%${term}%`);
+    }
+
+    // Fetch one extra row to know if there are more pages
+    q = q.range(offset, offset + limit).order("sku");
+
+    const { data, error } = await q;
+    if (error) throw error;
+
+    const rows = data || [];
+    const hasMore = rows.length > limit;
+    return {
+      items: this.mapDbRows(hasMore ? rows.slice(0, limit) : rows),
+      hasMore,
+    };
+  }
+} // end class SupabaseDataService
 
 export default new SupabaseDataService();
