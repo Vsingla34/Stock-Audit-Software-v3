@@ -1,23 +1,15 @@
+// src/components/layout/AppLayout.tsx
+// Updated for dark sidebar design system
+
 import React, { useState, useEffect, createContext, useContext, useCallback } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Menu, ScanBarcode, FileSpreadsheet, Upload, Home } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "react-router-dom";
 import { useUserAccess } from "@/hooks/useUserAccess";
 
-// ─── Persistent Layout Context ────────────────────────────────────────────────
-//
-// When App.tsx mounts ONE persistent <AppLayout> outside of <Routes>,
-// every page's own <AppLayout> detects it is already mounted and becomes
-// transparent (just renders children).  Pages that need showSidebar={false}
-// signal that preference upward through this context — no page file needs
-// to change.
-
 interface AppLayoutControl {
-  /** true when a persistent AppLayout is already mounted above in the tree */
   isMounted: boolean;
-  /** Pages call this to override sidebar visibility for their route */
   setSidebarVisible: (v: boolean) => void;
 }
 
@@ -28,8 +20,6 @@ const AppLayoutContext = createContext<AppLayoutControl>({
 
 export const useAppLayoutControl = () => useContext(AppLayoutContext);
 
-// ─────────────────────────────────────────────────────────────────────────────
-
 interface AppLayoutProps {
   children: React.ReactNode;
   showSidebar?: boolean;
@@ -39,165 +29,160 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   children,
   showSidebar = true,
 }) => {
-  const parentCtx = useContext(AppLayoutContext);
-
-  // Hooks must be called unconditionally
-  const isMobile = useIsMobile();
+  const parentCtx  = useContext(AppLayoutContext);
+  const isMobile   = useIsMobile();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const location = useLocation();
+  const location   = useLocation();
   const { userRole } = useUserAccess();
 
-  const isActive = (path: string) => location.pathname === path;
-  const canScan   = ["super_admin", "admin", "auditor"].includes(userRole);
-  const canUpload = ["super_admin", "admin", "auditor"].includes(userRole);
+  const [controlledSidebar, setControlledSidebar] = useState(showSidebar);
+  const setSidebarVisible = useCallback((v: boolean) => setControlledSidebar(v), []);
 
-  // ── Inner AppLayout (transparent mode) ─────────────────────────────────
-  // If a persistent AppLayout is already above us in the tree, become
-  // transparent: signal sidebar preference and just render children.
+  const isActive   = (path: string) => location.pathname === path;
+  const canScan    = ["super_admin", "admin", "auditor"].includes(userRole);
+  const canUpload  = ["super_admin", "admin", "auditor"].includes(userRole);
+
   useEffect(() => {
     if (parentCtx.isMounted) {
       parentCtx.setSidebarVisible(showSidebar);
-      // Restore default when this page unmounts
       return () => parentCtx.setSidebarVisible(true);
     }
   }, [parentCtx.isMounted, showSidebar]); // eslint-disable-line
 
-  // ── Outer AppLayout state ────────────────────────────────────────────────
-  // controlledSidebar is updated by inner page AppLayouts via context
-  // (e.g. pages that pass showSidebar={false})
-  const [controlledSidebar, setControlledSidebar] = useState(showSidebar);
+  if (parentCtx.isMounted) return <>{children}</>;
 
-  const setSidebarVisible = useCallback((v: boolean) => {
-    setControlledSidebar(v);
-  }, []);
-
-  if (parentCtx.isMounted) {
-    return <>{children}</>;
-  }
-
-  // ── Outer AppLayout (full render) ────────────────────────────────────────
-  // Only reaches here when used as the persistent wrapper in App.tsx.
-  // This is what actually renders the sidebar; it is NEVER unmounted.
-
-  // Pages that should have NO sidebar (login, company/assignment selection, add company).
-  // On these routes the persistent outer AppLayout renders children directly
-  // with no sidebar wrapper — exactly as if AppLayout were not there.
-  const NO_SIDEBAR_PATHS = [
-    "/login",
-    "/company-selection",
-    "/assignment-selection",
-    "/add-company",
-  ];
-  if (NO_SIDEBAR_PATHS.includes(location.pathname)) {
-    return <>{children}</>;
-  }
-  // Inner page AppLayouts become transparent (above) so there's no double sidebar.
+  // No-sidebar routes
+  const NO_SIDEBAR_PATHS = ["/login", "/company-selection", "/assignment-selection", "/add-company"];
+  if (NO_SIDEBAR_PATHS.includes(location.pathname)) return <>{children}</>;
 
   return (
     <AppLayoutContext.Provider value={{ isMounted: true, setSidebarVisible }}>
-      <div className="min-h-screen flex w-full flex-col md:flex-row bg-gray-50">
+      <div className="min-h-screen flex w-full" style={{ backgroundColor: "#F8FAFC" }}>
 
-        {/* MOBILE TOP HEADER */}
-        <div className="md:hidden sticky top-0 z-30 w-full flex items-center justify-between px-4 py-3 bg-indigo-600 text-white shadow-md">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-lg tracking-tight">StockCheck360</span>
+        {/* ── Mobile top header ─────────────────────────────────────── */}
+        <div
+          className="md:hidden sticky top-0 z-30 w-full flex items-center justify-between px-4 py-3 shadow-sm"
+          style={{ backgroundColor: "#0F172A" }}
+        >
+          <div className="flex items-center gap-2.5">
+            <div className="h-7 w-7 rounded-md bg-violet-600 flex items-center justify-center">
+              <span className="text-white text-xs font-bold">SC</span>
+            </div>
+            <span className="text-sm font-semibold text-slate-100">StockCheck360</span>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
+          <button
             onClick={() => setMobileOpen(true)}
-            className="text-white hover:bg-indigo-700 hover:text-white -mr-2"
+            className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
           >
-            <Menu className="h-6 w-6" />
-          </Button>
+            <Menu className="h-5 w-5" />
+          </button>
         </div>
 
-        {/* SIDEBAR */}
+        {/* ── Desktop sidebar ───────────────────────────────────────── */}
         {controlledSidebar && (
           <>
-            {/* Desktop sidebar — sticky, never re-mounts */}
-            <div className="hidden md:block h-screen sticky top-0 overflow-hidden shrink-0 w-64 border-r border-indigo-500 bg-indigo-600">
+            <div
+              className="hidden md:block h-screen sticky top-0 overflow-hidden shrink-0 w-64"
+              style={{ backgroundColor: "#0F172A", borderRight: "1px solid #1E293B" }}
+            >
               <Sidebar />
             </div>
 
             {/* Mobile drawer */}
-            <div
-              className={`fixed inset-0 z-50 transform transition-transform duration-300 ease-in-out md:hidden ${
-                mobileOpen ? "translate-x-0" : "-translate-x-full"
-              }`}
-            >
-              <div className="relative z-50 h-full w-64 shadow-2xl bg-indigo-600">
-                <Sidebar isMobile={true} onClose={() => setMobileOpen(false)} />
-              </div>
+            <>
+              {/* Backdrop */}
               <div
-                className={`fixed inset-0 bg-black/50 z-40 transition-opacity duration-300 ${
-                  mobileOpen ? "opacity-100" : "opacity-0 pointer-events-none"
+                className={`fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden transition-opacity duration-300 ${
+                  mobileOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
                 }`}
                 onClick={() => setMobileOpen(false)}
               />
-            </div>
+              {/* Drawer */}
+              <div
+                className={`fixed inset-y-0 left-0 z-50 w-72 md:hidden transform transition-transform duration-300 ease-out shadow-2xl
+                            ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}
+                style={{ backgroundColor: "#0F172A" }}
+              >
+                <Sidebar isMobile onClose={() => setMobileOpen(false)} />
+              </div>
+            </>
           </>
         )}
 
-        {/* MAIN CONTENT — Suspense here so sidebar is already painted */}
-        <main className="flex-1 w-full max-w-[100vw] overflow-x-hidden p-4 md:p-6 min-h-[calc(100vh-60px)] md:min-h-screen pb-24 md:pb-6">
-          <React.Suspense
-            fallback={
-              <div className="flex items-center justify-center h-64">
-                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600" />
-              </div>
-            }
+        {/* ── Main content ──────────────────────────────────────────── */}
+        <main className="flex-1 w-full min-w-0 overflow-x-hidden">
+          {/* Top bar — desktop only */}
+          <div
+            className="hidden md:flex sticky top-0 z-20 items-center justify-between
+                       px-6 h-14 border-b"
+            style={{ backgroundColor: "#FFFFFF", borderColor: "#E2E8F0" }}
           >
-            {children}
-          </React.Suspense>
+            {/* Breadcrumb area — pages can inject content here via context if needed */}
+            <div className="flex items-center gap-2">
+              <div
+                className="h-1.5 w-1.5 rounded-full"
+                style={{ backgroundColor: "#7C3AED" }}
+              />
+              <span className="text-[13px] font-medium text-slate-500">
+                {location.pathname === "/" ? "Dashboard"
+                  : location.pathname.replace("/", "").replace(/-/g, " ")
+                    .replace(/\b\w/g, (c) => c.toUpperCase())}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div
+                className="h-2 w-2 rounded-full bg-emerald-500"
+                title="Connected"
+              />
+              <span className="text-[11px] text-slate-400">Live</span>
+            </div>
+          </div>
+
+          {/* Page content */}
+          <div className="p-4 md:p-6 pb-24 md:pb-8">
+            <React.Suspense
+              fallback={
+                <div className="flex items-center justify-center h-64">
+                  <div
+                    className="h-8 w-8 rounded-full border-2 border-t-transparent animate-spin"
+                    style={{ borderColor: "#7C3AED", borderTopColor: "transparent" }}
+                  />
+                </div>
+              }
+            >
+              {children}
+            </React.Suspense>
+          </div>
         </main>
 
-        {/* MOBILE BOTTOM NAV */}
+        {/* ── Mobile bottom nav ─────────────────────────────────────── */}
         {isMobile && controlledSidebar && (
-          <div className="fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-gray-200 flex justify-around items-center h-16 pb-safe safe-area-inset-bottom shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-            <Link
-              to="/"
-              className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${
-                isActive("/") ? "text-indigo-600" : "text-gray-500 hover:text-indigo-500"
-              }`}
-            >
-              <Home className="h-5 w-5" />
-              <span className="text-[10px] font-medium">Home</span>
-            </Link>
-
-            {canScan && (
-              <Link
-                to="/scanner"
-                className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${
-                  isActive("/scanner") ? "text-indigo-600" : "text-gray-500 hover:text-indigo-500"
-                }`}
-              >
-                <ScanBarcode className="h-5 w-5" />
-                <span className="text-[10px] font-medium">Scan</span>
-              </Link>
-            )}
-
-            <Link
-              to="/reports"
-              className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${
-                isActive("/reports") ? "text-indigo-600" : "text-gray-500 hover:text-indigo-500"
-              }`}
-            >
-              <FileSpreadsheet className="h-5 w-5" />
-              <span className="text-[10px] font-medium">Reports</span>
-            </Link>
-
-            {canUpload && (
-              <Link
-                to="/upload"
-                className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${
-                  isActive("/upload") ? "text-indigo-600" : "text-gray-500 hover:text-indigo-500"
-                }`}
-              >
-                <Upload className="h-5 w-5" />
-                <span className="text-[10px] font-medium">Upload</span>
-              </Link>
-            )}
+          <div
+            className="fixed bottom-0 left-0 right-0 z-40 flex border-t"
+            style={{ backgroundColor: "#FFFFFF", borderColor: "#E2E8F0", height: "60px" }}
+          >
+            {[
+              { to: "/",        icon: Home,          label: "Home",    show: true },
+              { to: "/scanner", icon: ScanBarcode,   label: "Scan",    show: canScan },
+              { to: "/reports", icon: FileSpreadsheet,label: "Reports", show: true },
+              { to: "/upload",  icon: Upload,        label: "Upload",  show: canUpload },
+            ]
+              .filter((i) => i.show)
+              .map((item) => (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors
+                              ${isActive(item.to)
+                                ? "text-violet-600"
+                                : "text-slate-400 hover:text-slate-700"}`}
+                >
+                  <item.icon
+                    className={`h-5 w-5 ${isActive(item.to) ? "text-violet-600" : "text-slate-400"}`}
+                  />
+                  {item.label}
+                </Link>
+              ))}
           </div>
         )}
       </div>

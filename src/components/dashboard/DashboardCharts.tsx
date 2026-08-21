@@ -1,5 +1,4 @@
 // src/components/dashboard/DashboardCharts.tsx
-// Fix 4.1 — Charts on the main dashboard
 import { useMemo } from "react";
 import {
   PieChart,
@@ -29,8 +28,6 @@ interface DashboardChartsProps {
   items: ChartItem[];
 }
 
-// ── Donut chart: SKU count by status ─────────────────────────────────────────
-
 const StatusDonut = ({ items }: { items: ChartItem[] }) => {
   const data = useMemo(() => {
     const counts = { matched: 0, discrepancy: 0, pending: 0 };
@@ -39,41 +36,42 @@ const StatusDonut = ({ items }: { items: ChartItem[] }) => {
       if (s in counts) counts[s]++;
     });
     return [
-      { name: "Matched",     value: counts.matched,     color: STATUS_CONFIG.matched.chartColor },
-      { name: "Discrepancy", value: counts.discrepancy, color: STATUS_CONFIG.discrepancy.chartColor },
-      { name: "Pending",     value: counts.pending,     color: STATUS_CONFIG.pending.chartColor },
+      { name: "Matched",     value: counts.matched,     color: "#10b981" }, // Emerald 500
+      { name: "Discrepancy", value: counts.discrepancy, color: "#f43f5e" }, // Rose 500
+      { name: "Pending",     value: counts.pending,     color: "#94a3b8" }, // Slate 400
     ].filter((d) => d.value > 0);
   }, [items]);
 
   const total = items.length;
 
   return (
-    <Card className="shadow-sm border-gray-100">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold text-gray-700">
+    <Card className="shadow-sm border border-slate-200 bg-white rounded-xl transition-all duration-300 hover:shadow-md">
+      <CardHeader className="pb-2 border-b border-slate-100">
+        <CardTitle className="text-sm font-semibold text-slate-800">
           SKU Status Breakdown
         </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="pt-4">
         {total === 0 ? (
-          <div className="flex items-center justify-center h-40 text-gray-400 text-sm">
+          <div className="flex items-center justify-center h-40 text-slate-400 text-sm font-medium">
             No items yet
           </div>
         ) : (
-          <div className="relative">
+          <div className="relative group">
             <ResponsiveContainer width="100%" height={180}>
               <PieChart>
                 <Pie
                   data={data}
                   cx="50%"
                   cy="50%"
-                  innerRadius={52}
+                  innerRadius={54}
                   outerRadius={76}
                   paddingAngle={3}
                   dataKey="value"
+                  stroke="none"
                 >
                   {data.map((entry, i) => (
-                    <Cell key={i} fill={entry.color} stroke="none" />
+                    <Cell key={i} fill={entry.color} className="transition-all duration-300 hover:opacity-80 cursor-pointer" />
                   ))}
                 </Pie>
                 <Tooltip
@@ -83,34 +81,36 @@ const StatusDonut = ({ items }: { items: ChartItem[] }) => {
                   ]}
                   contentStyle={{
                     borderRadius: 8,
-                    border: "1px solid #e5e7eb",
+                    border: "1px solid #e2e8f0",
+                    backgroundColor: "#ffffff",
+                    color: "#0f172a",
                     fontSize: 12,
+                    boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)"
                   }}
+                  itemStyle={{ color: "#334155" }}
                 />
               </PieChart>
             </ResponsiveContainer>
-            {/* Centre label */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-2xl font-bold text-gray-900">{total}</span>
-              <span className="text-xs text-gray-500">Total SKUs</span>
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none transition-transform duration-300 group-hover:scale-105">
+              <span className="text-2xl font-black tracking-tight text-slate-900">{total}</span>
+              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">Total SKUs</span>
             </div>
           </div>
         )}
 
-        {/* Legend */}
-        <div className="flex flex-col gap-1.5 mt-2">
+        <div className="flex flex-col gap-2.5 mt-5 pt-4 border-t border-slate-100">
           {data.map((d) => (
-            <div key={d.name} className="flex items-center justify-between text-xs">
-              <span className="flex items-center gap-1.5 text-gray-600">
+            <div key={d.name} className="flex items-center justify-between text-xs group/item cursor-default">
+              <span className="flex items-center gap-2 text-slate-500 font-medium transition-colors group-hover/item:text-slate-800">
                 <span
-                  className="inline-block w-2.5 h-2.5 rounded-full"
+                  className="inline-block w-2.5 h-2.5 rounded-full shadow-sm"
                   style={{ background: d.color }}
                 />
                 {d.name}
               </span>
-              <span className="font-medium text-gray-800">
+              <span className="font-semibold text-slate-800">
                 {d.value}{" "}
-                <span className="text-gray-400 font-normal">
+                <span className="text-slate-400 font-medium ml-1">
                   ({Math.round((d.value / total) * 100)}%)
                 </span>
               </span>
@@ -121,8 +121,6 @@ const StatusDonut = ({ items }: { items: ChartItem[] }) => {
     </Card>
   );
 };
-
-// ── Bar chart: top discrepancies by category ──────────────────────────────────
 
 const CategoryDiscrepancyBar = ({ items }: { items: ChartItem[] }) => {
   const data = useMemo(() => {
@@ -141,66 +139,72 @@ const CategoryDiscrepancyBar = ({ items }: { items: ChartItem[] }) => {
   }, [items]);
 
   return (
-    <Card className="shadow-sm border-gray-100">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold text-gray-700">
+    <Card className="shadow-sm border border-slate-200 bg-white rounded-xl transition-all duration-300 hover:shadow-md">
+      <CardHeader className="pb-2 border-b border-slate-100">
+        <CardTitle className="text-sm font-semibold text-slate-800">
           Category Performance
         </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="pt-5">
         {data.length === 0 ? (
-          <div className="flex items-center justify-center h-40 text-gray-400 text-sm">
+          <div className="flex items-center justify-center h-40 text-slate-400 text-sm font-medium">
             No data yet
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={180}>
             <BarChart
               data={data}
-              margin={{ top: 4, right: 8, left: -20, bottom: 0 }}
+              margin={{ top: 0, right: 8, left: -25, bottom: 0 }}
               barSize={10}
             >
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
               <XAxis
                 dataKey="category"
-                tick={{ fontSize: 10, fill: "#6b7280" }}
+                tick={{ fontSize: 10, fill: "#64748b", fontWeight: 500 }}
                 axisLine={false}
                 tickLine={false}
+                dy={10}
               />
               <YAxis
-                tick={{ fontSize: 10, fill: "#6b7280" }}
+                tick={{ fontSize: 10, fill: "#64748b", fontWeight: 500 }}
                 axisLine={false}
                 tickLine={false}
                 allowDecimals={false}
+                dx={-10}
               />
               <Tooltip
+                cursor={{ fill: '#f1f5f9', opacity: 0.4 }}
                 contentStyle={{
                   borderRadius: 8,
-                  border: "1px solid #e5e7eb",
+                  border: "1px solid #e2e8f0",
+                  backgroundColor: "#ffffff",
+                  color: "#0f172a",
                   fontSize: 12,
+                  boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)"
                 }}
               />
               <Bar
                 dataKey="matched"
                 name="Matched"
-                fill={STATUS_CONFIG.matched.chartColor}
+                fill="#10b981"
                 radius={[4, 4, 0, 0]}
               />
               <Bar
                 dataKey="discrepancy"
                 name="Discrepancy"
-                fill={STATUS_CONFIG.discrepancy.chartColor}
+                fill="#f43f5e"
                 radius={[4, 4, 0, 0]}
               />
             </BarChart>
           </ResponsiveContainer>
         )}
-        <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
-          <span className="flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block" />
+        <div className="flex items-center gap-5 mt-5 pt-4 border-t border-slate-100 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+          <span className="flex items-center gap-2 cursor-default">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
             Matched
           </span>
-          <span className="flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" />
+          <span className="flex items-center gap-2 cursor-default">
+            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block" />
             Discrepancy
           </span>
         </div>
@@ -208,8 +212,6 @@ const CategoryDiscrepancyBar = ({ items }: { items: ChartItem[] }) => {
     </Card>
   );
 };
-
-// ── Exported combined component ───────────────────────────────────────────────
 
 export const DashboardCharts = ({ items }: DashboardChartsProps) => (
   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

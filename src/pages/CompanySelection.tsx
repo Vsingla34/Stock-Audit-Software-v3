@@ -1,3 +1,4 @@
+// src/pages/CompanySelection.tsx
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -15,19 +16,20 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import {
-  Building2,
   ArrowRight,
   PlusCircle,
   CheckCircle2,
   Briefcase,
   LogOut,
-  Settings 
+  Settings,
+  Building2
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useCompany } from "@/context/CompanyContext";
 import { useUser } from "@/context/UserContext"; 
 import { CompanyForm } from "@/components/company/CompanyForm"; 
+import logo from "../../public/logo.png";
 
 interface Company {
   id: string;
@@ -39,7 +41,7 @@ interface Company {
 const CompanySelection = () => {
   const navigate = useNavigate();
   const { setSelectedCompanyId } = useCompany();
-  const { logout } = useUser(); 
+  const { logout, currentUser } = useUser(); 
 
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
@@ -121,135 +123,194 @@ const CompanySelection = () => {
 
   const isSuperAdmin = userRole === "super_admin";
 
+  // ── Helper to get first letter for Company Avatar ──
+  const getInitials = (name: string) => {
+    return name.charAt(0).toUpperCase();
+  };
+
+  // ── Empty State for Non-Admins ──────────────────────────────────────────────
   if (!loading && companies.length === 0 && !isSuperAdmin) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4">
-        <div className="absolute top-4 right-4">
-          <Button variant="ghost" onClick={handleLogout} className="text-gray-500">
-            <LogOut className="h-4 w-4 mr-2" /> Log out
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center">
+        {/* Top Navigation Bar */}
+        <div className="w-full px-6 py-4 flex justify-between items-center bg-white border-b border-slate-200">
+          <div className="flex items-center gap-3">
+            <img src={logo} alt="StockCheck360" className="h-6 w-auto object-contain mix-blend-multiply" />
+            <span className="text-[14px] font-bold text-slate-900 tracking-tight">StockCheck360</span>
+          </div>
+          <Button variant="ghost" onClick={handleLogout} className="text-slate-500 hover:text-rose-600 hover:bg-rose-50 text-[12px] font-bold uppercase tracking-widest transition-all h-8 px-3">
+            <LogOut className="h-3.5 w-3.5 mr-2" /> Log out
           </Button>
         </div>
 
-        <div className="mb-8 flex items-center gap-2">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-200">
-            <CheckCircle2 className="h-6 w-6" />
-          </div>
-          <span className="text-3xl font-bold text-gray-900 tracking-tight">StockCheck360</span>
-        </div>
-        <Card className="max-w-md w-full border-gray-200 shadow-xl">
-          <CardHeader>
-            <div className="flex justify-center mb-4">
-              <div className="p-3 bg-gray-100 rounded-full">
-                <Briefcase className="h-8 w-8 text-gray-400" />
+        {/* Centered Empty Content */}
+        <div className="flex-1 flex items-center justify-center p-4 w-full">
+          <Card className="max-w-md w-full border border-slate-200 shadow-xl bg-white rounded-2xl p-4">
+            <CardHeader>
+              <div className="flex justify-center mb-5">
+                <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl">
+                  <Briefcase className="h-8 w-8 text-slate-400" />
+                </div>
               </div>
-            </div>
-            <CardTitle className="text-center text-xl text-gray-900">
-              No Companies Available
-            </CardTitle>
-            <CardDescription className="text-center mt-2 text-gray-500">
-              You have not been assigned to any companies. Please contact the Super Administrator to get access.
-            </CardDescription>
-          </CardHeader>
-        </Card>
+              <CardTitle className="text-center text-2xl font-black text-slate-900 tracking-tight">
+                No Workspaces
+              </CardTitle>
+              <CardDescription className="text-center mt-3 text-[14px] font-medium text-slate-500 leading-relaxed">
+                You have not been assigned to any companies. Please contact your system administrator to request access.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        </div>
       </div>
     );
   }
 
+  // ── Main List Layout UI ───────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-gray-50 p-4 md:p-8">
-      <div className="max-w-6xl mx-auto space-y-8">
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center">
+      
+      {/* ── 1. Top Navigation Bar ── */}
+      <div className="w-full px-4 md:px-8 py-4 flex justify-between items-center bg-white border-b border-slate-200 shadow-sm sticky top-0 z-10">
+        <div className="flex items-center gap-3">
+          <img src={logo} alt="StockCheck360" className="h-6 w-auto object-contain mix-blend-multiply" />
+          <div className="h-4 w-px bg-slate-200 hidden sm:block" />
+          <span className="text-[12px] font-bold text-slate-500 uppercase tracking-widest hidden sm:block">Portal</span>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <div className="hidden md:flex items-center gap-2 mr-2">
+            <div className="h-8 w-8 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center">
+              <span className="text-blue-600 font-bold text-[12px]">{currentUser?.name?.charAt(0) || "U"}</span>
+            </div>
+            <span className="text-[13px] font-bold text-slate-700">{currentUser?.name}</span>
+          </div>
+          
+          <Button 
+            variant="ghost" 
+            onClick={handleLogout}
+            className="text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg h-8 px-3 text-[11px] font-bold uppercase tracking-widest transition-all"
+          >
+            <LogOut className="h-3.5 w-3.5 md:mr-2" />
+            <span className="hidden md:inline">Log out</span>
+          </Button>
+        </div>
+      </div>
+
+      {/* ── 2. Centered Main Content Area ── */}
+      <div className="w-full max-w-4xl px-4 py-10 md:py-16">
         
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-gray-200">
-          <div className="space-y-1">
-            <h2 className="text-3xl font-bold tracking-tight text-gray-900">Select Company</h2>
-            <p className="text-gray-500 text-lg">
-              Choose a workspace to proceed to assignment selection.
+        {/* Header & Actions */}
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6 mb-8">
+          <div>
+            <h1 className="text-3xl md:text-4xl font-black tracking-tight text-slate-900">Workspaces</h1>
+            <p className="text-slate-500 text-[14px] font-medium mt-2">
+              Select a company to access its audit assignments.
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
-             {isSuperAdmin && (
-                <>
-                  <Button 
-                    variant="outline"
-                    onClick={() => navigate("/add-company")}
-                    className="bg-white hover:bg-gray-50 text-gray-700 border-gray-200 shadow-sm transition-all"
-                  >
-                    <Settings className="mr-2 h-4 w-4" />
-                    Manage Companies
-                  </Button>
-                  
-                  <Button 
-                    onClick={() => setIsAddDialogOpen(true)}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-all"
-                  >
-                    <PlusCircle className="mr-2 h-4 w-4" />
-                    Add Company
-                  </Button>
-                </>
-              )}
-
-             <Button 
-               variant="ghost" 
-               onClick={handleLogout}
-               className="text-gray-500 hover:text-red-600 hover:bg-red-50"
-             >
-               <LogOut className="h-4 w-4 mr-2" />
-               Log out
-             </Button>
-          </div>
+          {isSuperAdmin && (
+            <div className="flex items-center gap-3">
+              <Button 
+                variant="outline"
+                onClick={() => navigate("/add-company")}
+                className="bg-white hover:bg-slate-50 text-slate-700 hover:text-blue-700 border-slate-200 shadow-sm rounded-lg h-10 text-[13px] font-bold transition-all active:scale-[0.98]"
+              >
+                <Settings className="mr-2 h-4 w-4 text-slate-400" />
+                Manage
+              </Button>
+              
+              <Button 
+                onClick={() => setIsAddDialogOpen(true)}
+                className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm rounded-lg h-10 text-[13px] font-bold tracking-wide transition-all active:scale-[0.98]"
+              >
+                <PlusCircle className="mr-2 h-4 w-4" />
+                Add New
+              </Button>
+            </div>
+          )}
         </div>
 
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {companies.map((company) => (
-            <Card
-              key={company.id}
-              className="group cursor-pointer border-gray-200 shadow-sm hover:shadow-md transition-all duration-300 hover:-translate-y-1 hover:border-indigo-200 bg-white"
-              onClick={() => handleCompanySelect(company.id)}
-            >
-              <CardHeader className="p-6">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="p-3 bg-indigo-50 rounded-xl group-hover:bg-indigo-100 transition-colors border border-indigo-100">
-                      <Building2 className="h-6 w-6 text-indigo-600" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-lg font-semibold text-gray-900 group-hover:text-indigo-700 transition-colors">
-                        {company.name}
-                      </CardTitle>
-                      <CardDescription className="mt-1 text-gray-500 line-clamp-1">
-                        {company.address || "No address provided"}
-                      </CardDescription>
-                    </div>
-                  </div>
-                  <div className="p-1 rounded-full text-gray-300 group-hover:text-indigo-600 group-hover:bg-indigo-50 transition-all">
-                    <ArrowRight className="h-5 w-5" />
+        {/* ── 3. List Container ── */}
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+          
+          {loading && (
+            <div className="divide-y divide-slate-100">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="flex items-center gap-4 p-5 animate-pulse">
+                  <div className="h-12 w-12 rounded-xl bg-slate-100 shrink-0" />
+                  <div className="space-y-2 flex-1">
+                    <div className="h-4 bg-slate-100 rounded w-1/4" />
+                    <div className="h-3 bg-slate-100 rounded w-1/2" />
                   </div>
                 </div>
-              </CardHeader>
-            </Card>
-          ))}
+              ))}
+            </div>
+          )}
+
+          {!loading && companies.length > 0 && (
+            <div className="divide-y divide-slate-100">
+              {companies.map((company) => (
+                <div
+                  key={company.id}
+                  onClick={() => handleCompanySelect(company.id)}
+                  className="group flex items-center justify-between p-5 hover:bg-blue-50/50 transition-colors duration-200 cursor-pointer"
+                >
+                  <div className="flex items-center gap-5 min-w-0">
+                    
+                    {/* Dynamic Company Avatar */}
+                    <div className="h-12 w-12 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center shrink-0 group-hover:bg-blue-100 group-hover:border-blue-200 transition-colors duration-200">
+                      <span className="text-lg font-black text-slate-400 group-hover:text-blue-600 transition-colors">
+                        {getInitials(company.name)}
+                      </span>
+                    </div>
+
+                    {/* Text Details */}
+                    <div className="min-w-0">
+                      <h3 className="text-[16px] font-bold text-slate-900 tracking-tight group-hover:text-blue-700 transition-colors duration-200 truncate">
+                        {company.name}
+                      </h3>
+                      <div className="flex items-center gap-1.5 mt-1 text-slate-500">
+                        <Building2 className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                        <p className="text-[13px] font-medium truncate">
+                          {company.address || "No address details provided"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Action Indicator */}
+                  <div className="pl-4 shrink-0">
+                    <div className="flex items-center justify-center h-8 w-8 rounded-full bg-white border border-slate-200 text-slate-300 group-hover:bg-blue-600 group-hover:border-blue-600 group-hover:text-white transition-all duration-300 shadow-sm group-hover:shadow-md">
+                      <ArrowRight className="h-4 w-4 transform group-hover:translate-x-0.5 transition-transform" />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-          <DialogContent className="sm:max-w-[600px]">
-            <DialogHeader>
-              <DialogTitle className="text-gray-900">Add New Company</DialogTitle>
-              <DialogDescription className="text-gray-500">
-                Enter the details below to create a new company workspace.
-              </DialogDescription>
-            </DialogHeader>
-            
-            <div className="py-4">
-              <CompanyForm 
-                onSuccess={handleCompanyCreated}
-                onCancel={() => setIsAddDialogOpen(false)}
-              />
-            </div>
-          </DialogContent>
-        </Dialog>
-
       </div>
+
+      {/* ── Dialog for Adding Company ── */}
+      <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+        <DialogContent className="sm:max-w-[600px] p-0 overflow-hidden border-slate-200 rounded-[24px]">
+          <DialogHeader className="p-6 pb-0">
+            <DialogTitle className="text-2xl font-black text-slate-900 tracking-tight">Add New Workspace</DialogTitle>
+            <DialogDescription className="text-[14px] font-medium text-slate-500 mt-1">
+              Enter the company details below to create a new environment.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="p-6 pt-4 bg-slate-50 border-t border-slate-100 mt-4">
+            <CompanyForm 
+              onSuccess={handleCompanyCreated}
+              onCancel={() => setIsAddDialogOpen(false)}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 };
