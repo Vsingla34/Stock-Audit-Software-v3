@@ -45,10 +45,14 @@ const Upload = () => {
     try {
       const data = await SupabaseDataService.getUploadHistory(selectedCompanyId);
       
+      // Bug fix: assignment_id comes back from Supabase as a number
+      // (bigint), while selectedAssignmentId from CompanyContext is a
+      // string. Strict === silently filtered out every closing_stock
+      // upload since 152 === "152" is false in JS. String() both sides.
       const filtered = data.filter(item => {
         if (item.upload_type === 'item_master') return true;
         if (item.upload_type === 'closing_stock') {
-           return item.assignment_id === selectedAssignmentId;
+           return String(item.assignment_id) === String(selectedAssignmentId);
         }
         return true; 
       });

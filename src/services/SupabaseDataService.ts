@@ -458,12 +458,11 @@ class SupabaseDataService {
 
     for (let i = 0; i < items.length; i += CHUNK_SIZE) {
       const chunk = items.slice(i, i + CHUNK_SIZE);
-      const dbItems = chunk.map(item => ({
+      const payload = chunk.map(item => ({
         sku: item.sku,
         name: item.name || "Unnamed Item",
         category: item.category,
         location: item.location,
-        company_id: companyId,
         assignment_id: null,
         system_quantity: parseFloat(item.systemQuantity as any) || 0,
         physical_quantity: parseFloat(item.physical_quantity as any) || 0,
@@ -474,9 +473,15 @@ class SupabaseDataService {
         custom_attributes: item.customAttributes || {},
       }));
 
-      const { error } = await supabase
-        .from("inventory_items")
-        .upsert(dbItems as any, { onConflict: 'company_id, assignment_id, sku' as any });
+      // Build 01 extension: routed through bulk_upsert_inventory_items RPC
+      // instead of a raw .upsert() — this suppresses per-row audit_log
+      // writes for the whole chunk and logs one proportional summary row
+      // instead. Same visible behaviour, no write amplification at scale.
+      const { error } = await (supabase.rpc as any)("bulk_upsert_inventory_items", {
+        p_items: payload,
+        p_company_id: companyId,
+        p_batch_key: chunk[0]?.uploadBatchKey || null,
+      });
 
       if (error) throw error;
     }
@@ -489,12 +494,11 @@ class SupabaseDataService {
 
     for (let i = 0; i < items.length; i += CHUNK_SIZE) {
       const chunk = items.slice(i, i + CHUNK_SIZE);
-      const dbItems = chunk.map(item => ({
+      const payload = chunk.map(item => ({
         sku: item.sku,
         name: item.name || "Unnamed Item",
         category: item.category || "-",
         location: item.location,
-        company_id: companyId,
         assignment_id: assignmentIdInt,
         system_quantity: parseFloat(item.systemQuantity as any) || 0,
         physical_quantity: 0,
@@ -503,9 +507,14 @@ class SupabaseDataService {
         custom_attributes: item.customAttributes || {},
       }));
 
-      const { error } = await supabase
-        .from("inventory_items")
-        .upsert(dbItems as any, { onConflict: 'company_id, assignment_id, sku' as any });
+      // Build 01 extension: see setItemMaster above — same RPC, same
+      // write-amplification protection. This is the path that matters
+      // most for Build 02, since Tally closing-stock imports land here.
+      const { error } = await (supabase.rpc as any)("bulk_upsert_inventory_items", {
+        p_items: payload,
+        p_company_id: companyId,
+        p_batch_key: chunk[0]?.uploadBatchKey || null,
+      });
 
       if (error) throw error;
     }
@@ -1066,15 +1075,25 @@ class SupabaseDataService {
   }): Promise<{ items: InventoryItem[]; hasMore: boolean }> {
     const { companyId, assignmentId, query, locationId, limit = 50, offset = 0 } = params;
 
+    // Bug fix: a text query represents explicit user intent to find a
+    // specific item by name/SKU/category. It must never be silently
+    // narrowed by location — Supabase-js ANDs .eq() and .or() together,
+    // so "ITEM1004" + a stale/mismatched locationId returned zero rows
+    // even though the SKU matched exactly. Location is only a valid
+    // filter when the user is browsing (no search text yet).
+    const hasQuery = !!query && query.trim().length >= 2;
+
     let q = supabase
       .from("inventory_items")
       .select("*")
       .eq("company_id", companyId);
 
     if (assignmentId) q = q.eq("assignment_id", String(assignmentId));
-    if (locationId)   q = q.eq("location_id", locationId);
 
-    if (query && query.trim().length >= 2) {
+    // Only scope by location when there's no active text search
+    if (locationId && !hasQuery) q = q.eq("location_id", locationId);
+
+    if (hasQuery) {
       const term = query.trim();
       q = q.or(`name.ilike.%${term}%,sku.ilike.%${term}%,category.ilike.%${term}%`);
     }
@@ -1092,6 +1111,76 @@ class SupabaseDataService {
       hasMore,
     };
   }
+
+  // Build 01: Immutable audit trail reader
+  public async getAuditLog(params: {
+    companyId: string;
+    assignmentId?: string | null;
+    entityType?: string;
+    entityId?: string;
+    actorId?: string;
+    action?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ rows: AuditLogRow[]; total: number }> {
+    const {
+      companyId, assignmentId, entityType, entityId,
+      actorId, action, from, to, limit = 50, offset = 0,
+    } = params;
+
+    let q = supabase
+      .from("audit_log")
+      .select("*", { count: "exact" })
+      .eq("company_id", companyId)
+      .order("occurred_at", { ascending: false });
+
+    if (assignmentId) q = q.eq("assignment_id", assignmentId);
+    if (entityType)   q = q.eq("entity_type", entityType);
+    if (entityId)     q = q.eq("entity_id", entityId);
+    if (actorId)      q = q.eq("actor_id", actorId);
+    if (action)       q = q.eq("action", action);
+    if (from)         q = q.gte("occurred_at", from);
+    if (to)           q = q.lte("occurred_at", to);
+
+    q = q.range(offset, offset + limit - 1);
+
+    const { data, error, count } = await q;
+    if (error) throw error;
+
+    return { rows: (data as unknown as AuditLogRow[]) || [], total: count || 0 };
+  }
+
+  // Convenience wrapper for the inline "History" popover on a single item
+  public async getItemAuditLog(itemId: string, companyId: string): Promise<AuditLogRow[]> {
+    const { rows } = await this.getAuditLog({
+      companyId,
+      entityType: "inventory_items",
+      entityId: itemId,
+      limit: 20,
+    });
+    return rows;
+  }
 } // end class SupabaseDataService
+
+// Build 01: Audit log row shape. Add `as any` at call sites if types.ts
+// hasn't been regenerated yet via the Supabase CLI (see Build 00 notes) —
+// this interface is what getAuditLog() casts the raw response into either way.
+export interface AuditLogRow {
+  id: number;
+  occurred_at: string;
+  actor_id: string | null;
+  actor_email: string | null;
+  actor_role: string | null;
+  company_id: string | null;
+  assignment_id: string | null;
+  entity_type: string;
+  entity_id: string;
+  action: "insert" | "update" | "delete";
+  before: Record<string, any> | null;
+  after: Record<string, any> | null;
+  changed_fields: string[] | null;
+}
 
 export default new SupabaseDataService();

@@ -20,6 +20,7 @@ import {
 import { format } from "date-fns";
 import { useUser } from "@/context/UserContext";
 import { useUserAccess } from "@/hooks/useUserAccess";
+import { ItemHistoryPopover } from "@/components/audit/ItemHistoryPopover";
 import { useMemo, useCallback, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -259,7 +260,12 @@ export const InventoryTable = () => {
 
                 return (
                   <TableRow key={`${item.id}-${item.location}-${index}`} className={getRowClassName(item.status, item.systemQuantity, physicalQty)}>
-                    <TableCell className="font-medium text-xs">{item.sku}</TableCell>
+                    <TableCell className="font-medium text-xs">
+                      <div className="flex items-center gap-1">
+                        <ItemHistoryPopover itemId={item.id} itemName={item.name} />
+                        {item.sku}
+                      </div>
+                    </TableCell>
                     <TableCell className="max-w-[200px] truncate text-sm" title={item.name}>{item.name}</TableCell>
                     <TableCell><Badge variant="outline" className="text-[10px]">{item.category || "-"}</Badge></TableCell>
 
