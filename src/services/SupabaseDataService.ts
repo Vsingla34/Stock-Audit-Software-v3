@@ -1161,7 +1161,7 @@ class SupabaseDataService {
       limit: 20,
     });
     return rows;
-  }
+  }   
 } // end class SupabaseDataService
 
 // Build 01: Audit log row shape. Add `as any` at call sites if types.ts
