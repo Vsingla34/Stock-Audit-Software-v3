@@ -24,6 +24,7 @@ import { ItemHistoryPopover } from "@/components/audit/ItemHistoryPopover";
 import { useMemo, useCallback, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ExportPhysicalCountSheet } from "./ExportPhysicalCountSheet";
 
 const ROW_LIMIT = 100;
 
@@ -215,6 +216,7 @@ export const InventoryTable = () => {
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input type="text" placeholder="Search items..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9" />
         </div>
+        <ExportPhysicalCountSheet locationFilter={currentLocationObj?.name} />
       </div>
 
       <div className="rounded-md border bg-white overflow-x-auto"> 

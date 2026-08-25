@@ -1,137 +1,254 @@
-import { useMemo } from "react";
-import { useInventory, Assignment } from "@/context/InventoryContext";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Check, X, User } from "lucide-react";
-import { format } from "date-fns";
-import { useUser } from "@/context/UserContext";
-import { useUserAccess } from "@/hooks/useUserAccess";
+// src/components/dashboard/RecentActivity.tsx
+//
+// Built on Build 01's immutable audit_log — same data source as before,
+// but now with infinite scroll instead of a click-through "Load More"
+// button. A fixed-height scrollable container with an IntersectionObserver
+// sentinel at the bottom auto-fetches the next page as you scroll near it,
+// so it behaves like a continuous feed of ALL logged changes while still
+// only rendering/fetching what's actually needed (no unbounded list, no
+// loading the whole audit_log table into memory).
+
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useCompany } from "@/context/CompanyContext";
-import { useLocationFilter } from "@/hooks/useLocationFilter";
-import { ScrollArea } from "@/components/ui/scroll-area"; 
+import SupabaseDataService, { AuditLogRow } from "@/services/SupabaseDataService";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { formatDistanceToNow } from "date-fns";
+import {
+  User, ArrowRight, PackageCheck, Loader2, History,
+} from "lucide-react";
 
-export const RecentActivity = () => {
-  const { auditedItems, locations, assignments } = useInventory();
-  const { currentUser } = useUser();
-  const { accessibleLocations } = useUserAccess();
-  const { selectedCompanyId, selectedAssignmentId } = useCompany();
-  const { selectedLocation } = useLocationFilter();
+const PAGE_SIZE = 20;
 
-  const userAccessibleLocations = accessibleLocations();
-  const accessibleLocationNames = useMemo(() => userAccessibleLocations.map((loc) => loc.name), [userAccessibleLocations]);
-  const locationByName = useMemo(() => {
-    const map = new Map<string, (typeof locations)[number]>();
-    locations.forEach((loc) => { map.set(loc.name, loc); });
-    return map;
-  }, [locations]);
+// ── Field label + formatting ──────────────────────────────────────────────
 
-  const userSpecificActivity = useMemo(() => {
-    if (!currentUser?.id) return { items: [], myTotalScans: 0 };
+const FIELD_LABELS: Record<string, string> = {
+  physical_quantity: "Physical Qty",
+  system_quantity:   "System Qty",
+  status:            "Status",
+};
 
-    let assignmentLocationName: string | null = null;
-    if (selectedAssignmentId) {
-       const ass = assignments.find((a: Assignment) => a.id === Number(selectedAssignmentId));
-       if (ass) {
-          const loc = locations.find(l => l.id === ass.locationId);
-          if (loc) assignmentLocationName = loc.name;
-       }
-    }
+// Only used for the "status" field's value — physical/system qty numbers
+// stay in the default neutral colour, matching the same red/green/amber
+// convention used everywhere else in the app (statusConfig.ts).
+const STATUS_VALUE_COLOR: Record<string, string> = {
+  discrepancy: "text-red-600",
+  matched:     "text-emerald-600",
+  pending:     "text-amber-600",
+};
 
-    const filteredItems = auditedItems.filter((item) => {
-      if (!item.status || item.status === "pending") return false;
-      if (assignmentLocationName && item.location !== assignmentLocationName) return false;
-      if (selectedAssignmentId && item.assignmentId && item.assignmentId !== Number(selectedAssignmentId)) return false;
-      const itemLocation = locationByName.get(item.location);
-      if (!itemLocation) return false;
-      if (selectedCompanyId && itemLocation.companyId !== selectedCompanyId) return false;
-      const hasAccess = currentUser?.role === "admin" || accessibleLocationNames.includes(item.location);
-      if (!hasAccess) return false;
-      if (selectedLocation && selectedLocation !== "all") {
-        const locationObj = locations.find((loc) => loc.id === selectedLocation);
-        return item.location === locationObj?.name;
-      }
-      return item.auditorEntries?.some(entry => entry.auditorId === currentUser.id);
-    });
+const ActionDot = ({ action }: { action: string }) => {
+  const color: Record<string, string> = {
+    insert: "bg-emerald-500",
+    update: "bg-amber-500",
+    delete: "bg-red-500",
+  };
+  return <span className={`h-2 w-2 rounded-full shrink-0 ${color[action] || color.update}`} />;
+};
 
-    let personalTotal = 0;
-    const personalEvents: any[] = [];
-    filteredItems.forEach(item => {
-        const userEntries = item.auditorEntries?.filter(e => e.auditorId === currentUser.id) || [];
-        userEntries.forEach(entry => {
-            personalTotal += (Number(entry.quantityFound) || 0);
-            personalEvents.push({
-                id: item.id, sku: item.sku, name: item.name, location: item.location,
-                subLocation: entry.subLocation || "General", scannedQuantity: entry.quantityFound,
-                timestamp: entry.auditedAt, status: item.status 
-            });
-        });
-    });
+// ── Single row ───────────────────────────────────────────────────────────
 
-    const sortedEvents = personalEvents.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 15);
-    return { items: sortedEvents, myTotalScans: personalTotal };
-  }, [auditedItems, locationByName, selectedCompanyId, currentUser, selectedLocation, accessibleLocationNames, locations, selectedAssignmentId, assignments]);
+const ActivityRow = ({ row }: { row: AuditLogRow }) => {
+  const itemName =
+    row.after?.name || row.before?.name || row.after?.sku || row.before?.sku || "Item";
+  const itemSku = row.after?.sku || row.before?.sku;
+
+  const relevantFields = (row.changed_fields || []).filter(
+    (f) => f === "physical_quantity" || f === "system_quantity" || f === "status"
+  );
 
   return (
-    <Card className="shadow-sm border border-slate-200 bg-white rounded-2xl h-full flex flex-col overflow-hidden hover:shadow-md transition-shadow">
-      
-      <CardHeader className="pb-3 border-b border-slate-100 bg-slate-50 shrink-0">
-        <div className="flex items-center justify-between">
-            <CardTitle className="text-slate-800 text-[12px] font-bold uppercase tracking-widest">My Recent Activity</CardTitle>
-            <div className="flex items-center gap-2 bg-white border border-blue-200 text-blue-700 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest shadow-sm">
-                <User className="h-3 w-3" />
-                <span>Scans: {userSpecificActivity.myTotalScans.toLocaleString()}</span>
-            </div>
+    <div className="flex items-start gap-3 py-3 border-b border-slate-50 last:border-0">
+      <div className="mt-1.5"><ActionDot action={row.action} /></div>
+
+      <div className="h-7 w-7 rounded-full bg-violet-50 flex items-center justify-center shrink-0">
+        <PackageCheck className="h-3.5 w-3.5 text-violet-500" />
+      </div>
+
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[13px] font-medium text-slate-800 truncate">
+            {itemName}
+            {itemSku && <span className="text-slate-400 font-normal"> · {itemSku}</span>}
+          </p>
+          <span className="text-[10px] text-slate-400 shrink-0">
+            {formatDistanceToNow(new Date(row.occurred_at), { addSuffix: true })}
+          </span>
         </div>
-      </CardHeader>
-      
-      {/* min-h-0 and flex-1 are crucial for letting ScrollArea take over the remaining height */}
-      <CardContent className="p-0 flex-1 min-h-0 overflow-hidden">
-        {userSpecificActivity.items.length === 0 ? (
-            <div className="text-center text-slate-500 h-full flex flex-col items-center justify-center">
-                <div className="p-4 bg-slate-100 rounded-full mb-3 border border-slate-200">
-                  <User className="h-6 w-6 text-slate-400" />
-                </div>
-                <p className="text-[13px] font-semibold tracking-wide">No scan activity yet.</p>
-            </div>
-        ) : (
-            <ScrollArea className="h-full w-full">
-              <div className="space-y-0">
-                  {userSpecificActivity.items.map((event, index) => (
-                  <div
-                      key={`${event.id}-${event.timestamp}-${index}`}
-                      className="flex items-start gap-4 p-4 border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors group cursor-default"
+
+        {relevantFields.length > 0 && (
+          <div className="mt-1 space-y-0.5">
+            {relevantFields.map((f) => {
+              const beforeVal = row.before?.[f] ?? "—";
+              const afterVal  = row.after?.[f] ?? "—";
+              const beforeColor = f === "status" ? STATUS_VALUE_COLOR[beforeVal] : undefined;
+              const afterColor  = f === "status" ? STATUS_VALUE_COLOR[afterVal]  : undefined;
+
+              return (
+                <div key={f} className="flex items-center gap-1.5 text-[11px]">
+                  <span className="text-slate-400">{FIELD_LABELS[f] || f}</span>
+                  <span
+                    className={`line-through decoration-red-300 ${beforeColor || "text-slate-500"}`}
                   >
-                      <div className="mt-0.5 shrink-0 transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-3">
-                      {event.status === "matched" ? (
-                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 border border-emerald-100">
-                          <Check className="h-4 w-4 text-emerald-600" />
-                          </div>
-                      ) : (
-                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-50 border border-rose-100">
-                          <X className="h-4 w-4 text-rose-600" />
-                          </div>
-                      )}
-                      </div>
+                    {beforeVal}
+                  </span>
+                  <ArrowRight className="h-3 w-3 text-slate-300" />
+                  <span className={`font-medium ${afterColor || "text-slate-800"}`}>
+                    {afterVal}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
-                      <div className="flex-1 min-w-0">
-                      <p className="font-bold text-slate-900 text-[13px] tracking-tight truncate group-hover:text-blue-700 transition-colors">{event.name || "Unnamed Item"}</p>
-                      <div className="flex items-center gap-2 mt-1.5">
-                          <span className="text-[11px] font-medium text-slate-500 truncate">{event.sku}</span>
-                          <span className="text-[9px] font-bold uppercase tracking-widest bg-white border border-slate-200 text-slate-600 px-2 py-0.5 rounded-md shadow-sm">{event.subLocation}</span>
-                      </div>
-                      </div>
+        <div className="flex items-center gap-1 mt-1">
+          <User className="h-2.5 w-2.5 text-slate-300" />
+          <span className="text-[10px] text-slate-400 truncate">
+            {row.actor_email || "System"}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+};
 
-                      <div className="text-right flex-shrink-0 ml-2">
-                      <p className={`font-black text-[15px] tracking-tight ${event.status === "matched" ? "text-emerald-600" : "text-rose-600"}`}>
-                          +{event.scannedQuantity}
-                      </p>
-                      <p className="text-[10px] font-bold text-slate-400 whitespace-nowrap mt-1 uppercase tracking-widest group-hover:text-blue-500 transition-colors">
-                          {event.timestamp ? format(new Date(event.timestamp), "HH:mm") : "Just now"}
-                      </p>
-                      </div>
-                  </div>
-                  ))}
+// ── Main component ──────────────────────────────────────────────────────────
+
+export const RecentActivity = () => {
+  const { selectedCompanyId, selectedAssignmentId } = useCompany();
+
+  const [rows, setRows]           = useState<AuditLogRow[]>([]);
+  const [total, setTotal]         = useState(0);
+  const [offset, setOffset]       = useState(0);
+  const [loading, setLoading]     = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  // Guards against the observer firing a second fetch while one is
+  // already in flight (e.g. fast scrolling past the sentinel repeatedly).
+  const fetchingRef = useRef(false);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const fetchPage = useCallback(async (nextOffset: number, replace: boolean) => {
+    if (!selectedCompanyId) return;
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
+
+    if (replace) setLoading(true); else setLoadingMore(true);
+
+    try {
+      const { rows: newRows, total: newTotal } = await (SupabaseDataService as any).getAuditLog({
+        companyId: selectedCompanyId,
+        assignmentId: selectedAssignmentId || undefined,
+        entityType: "inventory_items",
+        limit: PAGE_SIZE,
+        offset: nextOffset,
+      });
+      setRows((prev) => (replace ? newRows : [...prev, ...newRows]));
+      setTotal(newTotal);
+      setOffset(nextOffset);
+    } catch (e) {
+      console.error("Failed to load activity log:", e);
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+      fetchingRef.current = false;
+    }
+  }, [selectedCompanyId, selectedAssignmentId]);
+
+  // Reset and reload from the top whenever company/assignment changes.
+  useEffect(() => {
+    setRows([]);
+    setOffset(0);
+    fetchPage(0, true);
+  }, [selectedCompanyId, selectedAssignmentId]); // eslint-disable-line
+
+  const hasMore = rows.length < total;
+
+  // Infinite scroll: watch a 1px sentinel at the bottom of the list.
+  // When it enters the viewport of the scroll container, fetch the next
+  // page. root is scoped to the scrollable div itself (not the whole
+  // page), so this only fires from scrolling within the activity box.
+  useEffect(() => {
+    if (!sentinelRef.current || !scrollContainerRef.current) return;
+    if (loading) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !fetchingRef.current) {
+          fetchPage(offset + PAGE_SIZE, false);
+        }
+      },
+      {
+        root: scrollContainerRef.current,
+        rootMargin: "100px", // start fetching slightly before it's visible
+        threshold: 0,
+      }
+    );
+
+    observer.observe(sentinelRef.current);
+    return () => observer.disconnect();
+  }, [offset, hasMore, loading, fetchPage]);
+
+  return (
+    <Card className="border-slate-200 shadow-sm">
+      <CardHeader className="pb-3 flex flex-row items-center justify-between">
+        <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+          <History className="h-4 w-4 text-violet-500" />
+          Recent Activity
+        </CardTitle>
+        {total > 0 && (
+          <span className="text-[11px] text-slate-400">
+            Showing {rows.length} of {total}
+          </span>
+        )}
+      </CardHeader>
+
+      <CardContent className="pt-0">
+        {loading ? (
+          <div className="space-y-3">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="flex items-center gap-3">
+                <Skeleton className="h-7 w-7 rounded-full" />
+                <div className="flex-1 space-y-1.5">
+                  <Skeleton className="h-3 w-3/4" />
+                  <Skeleton className="h-2.5 w-1/2" />
+                </div>
               </div>
-            </ScrollArea>
+            ))}
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="text-center py-8 text-[13px] text-slate-400">
+            No activity recorded yet.
+          </div>
+        ) : (
+          // Fixed-height scrollable container — this is what gives the
+          // "scrollbar thing" behaviour: the box itself scrolls
+          // independently of the page, and the sentinel at the bottom
+          // triggers loading the next page automatically.
+          <div
+            ref={scrollContainerRef}
+            className="max-h-[320px] overflow-y-auto pr-1 -mr-1"
+          >
+            {rows.map((r) => <ActivityRow key={r.id} row={r} />)}
+
+            {/* Sentinel — invisible, just a trigger for the observer */}
+            <div ref={sentinelRef} className="h-px" />
+
+            {loadingMore && (
+              <div className="flex items-center justify-center py-3 text-[12px] text-slate-400 gap-1.5">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Loading more…
+              </div>
+            )}
+
+            {!hasMore && rows.length > 0 && (
+              <div className="text-center py-3 text-[11px] text-slate-300">
+                — End of activity log —
+              </div>
+            )}
+          </div>
         )}
       </CardContent>
     </Card>

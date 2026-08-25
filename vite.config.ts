@@ -1,7 +1,12 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
-import { componentTagger } from "lovable-tagger";
+// Fix: lovable-tagger removed. It imports tailwindcss/resolveConfig.js,
+// which only exists in Tailwind v3 — this project is on Tailwind v4 (or
+// a version where that file moved/was removed), so the dev server crashed
+// on startup with ERR_MODULE_NOT_FOUND. lovable-tagger was only useful
+// inside Lovable.dev's own editor anyway; it's dead weight now that
+// development happens in VS Code / Cursor.
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -11,8 +16,7 @@ export default defineConfig(({ mode }) => ({
   },
   plugins: [
     react(),
-    mode === "development" && componentTagger(),
-  ].filter(Boolean),
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

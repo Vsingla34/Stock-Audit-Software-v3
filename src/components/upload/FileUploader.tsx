@@ -10,7 +10,10 @@ import {
   processPhysicalQtyData
 } from "./utils/csvUtils";
 import { Button } from "@/components/ui/button";
-import { Loader2, AlertCircle, MapPin, Lock, CheckCircle2, PackagePlus, FileSpreadsheet } from "lucide-react"; 
+import { Loader2, AlertCircle, MapPin, Lock, CheckCircle2, PackagePlus, FileSpreadsheet, FileCode2, X, AlertTriangle } from "lucide-react"; 
+import { parseTallyStockSummary, readTallyFile, TallyParseResult } from "./utils/tallyUtils";
+import { TallyGodownMapper } from "./TallyGodownMapper";
+import { TallyImportReview } from "./TallyImportReview";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useCompany } from "@/context/CompanyContext";
 import SupabaseDataService from "@/services/SupabaseDataService";
@@ -50,6 +53,21 @@ export const FileUploader = ({
   const [closingStockFile, setClosingStockFile] = useState<File | null>(null);
   const [surplusFile, setSurplusFile] = useState<File | null>(null);
   const [physicalQtyFile, setPhysicalQtyFile] = useState<File | null>(null); 
+
+  // Build 02 Phase A — Tally XML import state
+  const [tallyFile, setTallyFile] = useState<File | null>(null);
+  const [tallyParseResult, setTallyParseResult] = useState<TallyParseResult | null>(null);
+  const [isTallyParsing, setIsTallyParsing] = useState(false);
+  const [showGodownMapper, setShowGodownMapper] = useState(false);
+  const [tallyParseError, setTallyParseError] = useState<string | null>(null);
+
+  // Reconciliation review step — inserted between godown mapping and the
+  // actual write, so unmatched Item Master entries surface before anything
+  // is committed, not buried in a toast afterward.
+  const [pendingGodownMapping, setPendingGodownMapping] = useState<Record<string, string> | null>(null);
+  const [showReview, setShowReview] = useState(false);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [existingMasterForReview, setExistingMasterForReview] = useState<any[]>([]);
 
   const { setItemMaster, setClosingStock, addBulkSurplusItems, uploadPhysicalQuantityStock, locations, itemMaster, assignments, closingStockUploaded, refreshData } = useInventory();
   const { selectedCompanyId, selectedAssignmentId: contextAssignmentId } = useCompany();
@@ -112,6 +130,164 @@ export const FileUploader = ({
       return;
     }
     setFile(file);
+  };
+
+  // Build 02 Phase A — Tally XML file selected: parse immediately (client-side,
+  // synchronous, no network needed) so we can show item/godown counts right away.
+  const handleTallyFileChange = async (file: File | null) => {
+    setTallyParseError(null);
+    setTallyParseResult(null);
+    setTallyFile(file);
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith('.xml')) {
+      toast.error("Please upload the Tally export as an XML file.");
+      setTallyFile(null);
+      return;
+    }
+
+    setIsTallyParsing(true);
+    try {
+      const rawText = await readTallyFile(file);
+      const result = parseTallyStockSummary(rawText);
+      setTallyParseResult(result);
+      if (result.warnings.length > 0) {
+        result.warnings.forEach((w) => toast.warning(w, { duration: 6000 }));
+      }
+    } catch (err: any) {
+      setTallyParseError(err.message || "Could not parse this Tally export.");
+      setTallyFile(null);
+    } finally {
+      setIsTallyParsing(false);
+    }
+  };
+
+  // Step 1: godown mapping confirmed -> fetch current Item Master and open
+  // the reconciliation review (New / Updated / Unmatched) before writing
+  // anything. This is what surfaces items that exist in Item Master today
+  // but aren't mentioned in this Tally file, so nothing goes stale silently.
+  const handleGodownMapped = async (godownMapping: Record<string, string>) => {
+    if (!selectedCompanyId || !tallyParseResult) return;
+    if (!selectedAssignmentId) {
+      toast.error("Select an active assignment before importing Tally closing stock.");
+      return;
+    }
+
+    setShowGodownMapper(false);
+    setPendingGodownMapping(godownMapping);
+    setShowReview(true);
+    setReviewLoading(true);
+
+    try {
+      const master = await SupabaseDataService.getItemMaster(selectedCompanyId);
+      setExistingMasterForReview(master);
+    } catch (e: any) {
+      toast.error("Could not load current Item Master for comparison", { description: e.message });
+      setExistingMasterForReview([]);
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  // Step 2: admin clicked "Proceed with Import" in the review dialog.
+  // Push into Item Master (so Tally can serve as the single source for both
+  // master + closing stock, since it already carries name/category/qty)
+  // then into Closing Stock for the currently selected assignment — reusing
+  // the exact same service calls and batch-history logging as the manual
+  // CSV flows above.
+  const performTallyImport = async () => {
+    const godownMapping = pendingGodownMapping;
+    if (!selectedCompanyId || !tallyParseResult || !godownMapping) return;
+
+    setIsProcessing(true);
+
+    try {
+      const masterBatchKey = generateBatchKey();
+      const stockBatchKey = generateBatchKey();
+
+      // 1. Upsert into Item Master — Tally already has name/category/qty,
+      //    so this doubles as the item-master feed with no separate file.
+      const masterItems = tallyParseResult.items.map((item) => ({
+        sku: item.sku,
+        name: item.name,
+        category: item.category,
+        location: '',
+        systemQuantity: item.systemQuantity,
+        physicalQuantity: null,
+        status: 'pending' as const,
+        customAttributes: item.customAttributes,
+        uploadBatchKey: masterBatchKey,
+      }));
+
+      await SupabaseDataService.setItemMaster(masterItems as any, selectedCompanyId);
+      await SupabaseDataService.logUploadBatch({
+        batchKey: masterBatchKey,
+        companyId: selectedCompanyId,
+        locationId: null,
+        locationName: "Master Data (Tally)",
+        uploadType: "item_master",
+        totalItems: masterItems.length,
+      });
+
+      // 2. Upsert into Closing Stock for the active assignment, using the
+      //    mapped location name for each item's godown.
+      const stockItems = tallyParseResult.items.map((item) => {
+        const mappedLocationId = godownMapping[item.location];
+        const mappedLocation = locations.find((l) => l.id === mappedLocationId);
+        return {
+          sku: item.sku,
+          name: item.name,
+          category: item.category,
+          location: mappedLocation?.name || item.location,
+          systemQuantity: item.systemQuantity,
+          customAttributes: item.customAttributes,
+          uploadBatchKey: stockBatchKey,
+        };
+      });
+
+      await SupabaseDataService.setClosingStock(
+        stockItems as any,
+        selectedCompanyId,
+        selectedAssignmentId
+      );
+
+      const primaryLocationId = Object.values(godownMapping)[0];
+      await SupabaseDataService.logUploadBatch({
+        batchKey: stockBatchKey,
+        companyId: selectedCompanyId,
+        locationId: tallyParseResult.godowns.length === 1 ? primaryLocationId : null,
+        locationName: tallyParseResult.godowns.length === 1
+          ? (locations.find(l => l.id === primaryLocationId)?.name || "Unknown")
+          : `Multiple (${tallyParseResult.godowns.length} godowns)`,
+        uploadType: "tally_import",
+        totalItems: stockItems.length,
+        assignmentId: parseInt(selectedAssignmentId),
+      });
+
+      await refreshData();
+      toast.success(
+        `Tally import complete — ${stockItems.length} items synced to Item Master and Closing Stock.`
+      );
+
+      setTallyFile(null);
+      setTallyParseResult(null);
+      setPendingGodownMapping(null);
+      setShowReview(false);
+      setExistingMasterForReview([]);
+      if (onUploadComplete) onUploadComplete();
+
+    } catch (error: any) {
+      console.error("Tally import error:", error);
+      toast.error("Tally Import Failed", { description: error.message, duration: 6000 });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const cancelTallyReview = () => {
+    setShowReview(false);
+    setPendingGodownMapping(null);
+    setExistingMasterForReview([]);
   };
 
   const handleImport = async (type: 'master' | 'stock' | 'surplus' | 'physical') => {
@@ -436,6 +612,76 @@ export const FileUploader = ({
           />
         )}
 
+        {/* Build 02 Phase A — Tally XML Import.
+            Requires both item-master and closing-stock upload permission,
+            since a single Tally export feeds both, and an active assignment
+            to attach the closing stock to. */}
+        {canUploadItemMaster && canUploadClosingStock && isAssignmentActive && (
+          <div className="relative">
+            <div className="rounded-lg border border-gray-200 shadow-sm bg-white p-6 space-y-4">
+              <div className="flex items-center gap-2 text-gray-900 font-semibold">
+                <FileCode2 className="h-5 w-5 text-indigo-600" />
+                Tally Import (XML)
+              </div>
+              <p className="text-sm text-gray-500 -mt-2">
+                Import Stock Summary directly from Tally — feeds both Item Master
+                and Closing Stock for {locations.find(l => l.id === targetLocationId)?.name || 'the selected assignment'} in one step.
+              </p>
+
+              <div className="flex items-center gap-2">
+                <input
+                  id="tally-file-input"
+                  type="file"
+                  accept=".xml"
+                  onChange={(e) => handleTallyFileChange(e.target.files?.[0] || null)}
+                  disabled={isProcessing || isTallyParsing}
+                  className="flex-1 text-sm file:text-indigo-600 file:font-medium file:bg-indigo-50 file:border-0 file:rounded-md file:px-2 file:mr-4 file:py-1.5 hover:file:bg-indigo-100 cursor-pointer border border-gray-200 rounded-md"
+                />
+                {tallyFile && !isTallyParsing && (
+                  <Button
+                    variant="ghost" size="icon" type="button"
+                    onClick={() => { setTallyFile(null); setTallyParseResult(null); setTallyParseError(null); }}
+                    className="h-9 w-9 text-gray-500 hover:text-red-600 hover:bg-red-50"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+
+              {isTallyParsing && (
+                <div className="flex items-center gap-2 text-sm text-indigo-600">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Parsing Tally export…
+                </div>
+              )}
+
+              {tallyParseError && (
+                <div className="flex items-start gap-2 p-2.5 bg-red-50 border border-red-100 rounded-md text-xs text-red-700">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  {tallyParseError}
+                </div>
+              )}
+
+              {tallyParseResult && tallyParseResult.items.length > 0 && (
+                <>
+                  <div className="text-sm text-indigo-700 bg-indigo-50 p-2.5 rounded-md border border-indigo-100">
+                    <span className="font-semibold">{tallyParseResult.items.length} items</span> found
+                    across <span className="font-semibold">{tallyParseResult.godowns.length} godown(s)</span>.
+                  </div>
+                  <Button
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
+                    onClick={() => setShowGodownMapper(true)}
+                    disabled={isProcessing}
+                  >
+                    <MapPin className="mr-2 h-4 w-4" />
+                    Map Godowns &amp; Import
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
       </div>
 
       {isProcessing && (
@@ -445,6 +691,29 @@ export const FileUploader = ({
               Processing and validating data... This may take a moment for large files.
            </AlertDescription>
         </Alert>
+      )}
+
+      {tallyParseResult && (
+        <TallyGodownMapper
+          open={showGodownMapper}
+          godowns={tallyParseResult.godowns}
+          companyId={selectedCompanyId}
+          locations={locations}
+          onCancel={() => setShowGodownMapper(false)}
+          onConfirm={handleGodownMapped}
+        />
+      )}
+
+      {tallyParseResult && (
+        <TallyImportReview
+          open={showReview}
+          loading={reviewLoading}
+          importing={isProcessing}
+          tallyItems={tallyParseResult.items}
+          existingMaster={existingMasterForReview}
+          onCancel={cancelTallyReview}
+          onProceed={performTallyImport}
+        />
       )}
     </div>
   );

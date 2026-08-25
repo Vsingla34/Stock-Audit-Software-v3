@@ -1,4 +1,12 @@
-
+// src/components/upload/utils/tallyUtils.ts
+// Build 02 Phase A — Tally XML import.
+//
+// Mirrors the signature of processClosingStockData in csvUtils.ts so it
+// drops into the existing upload pipeline unchanged. Handles Tally's
+// quirky quantity formats, encoding issues, and unescaped XML entities
+// that a naive parser would choke on.
+//
+// npm install fast-xml-parser
 
 import { XMLParser } from "fast-xml-parser";
 
@@ -15,7 +23,7 @@ export interface TallyParsedItem {
     system_value?: number;
     uom?: string;
   };
-}   
+}
 
 export interface TallyParseResult {
   items: TallyParsedItem[];
@@ -161,8 +169,65 @@ export function parseTallyStockSummary(xmlText: string): TallyParseResult {
     warnings.push("No stock items were found in this file.");
   }
 
+  // Merge duplicate SKUs — this app keys inventory_items uniquely on
+  // (company_id, assignment_id, sku), so if "Show Godown-wise details"
+  // produced the same item split across multiple godowns, the raw items
+  // above would silently overwrite each other on upsert. Sum quantities
+  // instead and flag it, so nothing is lost without the user knowing.
+  const bySku = new Map<string, TallyParsedItem>();
+  const mergedSkus = new Set<string>();
+
+  for (const item of items) {
+    const existing = bySku.get(item.sku);
+    if (existing) {
+      mergedSkus.add(item.sku);
+      existing.systemQuantity += item.systemQuantity;
+      // Keep the first godown as the "primary" location for this SKU —
+      // splitting one SKU across multiple locations within a single
+      // assignment isn't representable in the current schema.
+    } else {
+      bySku.set(item.sku, { ...item });
+    }
+  }
+
+  if (mergedSkus.size > 0) {
+    const examples = Array.from(mergedSkus).slice(0, 5).join(", ");
+    warnings.push(
+      `${mergedSkus.size} item(s) appeared in multiple godowns and were ` +
+      `merged (quantities summed): ${examples}${mergedSkus.size > 5 ? "…" : ""}. ` +
+      `Only the first godown was kept as the item's location.`
+    );
+  }
+
+  // Clamp negative NET quantities to 0. Tally can legitimately report a
+  // negative closing balance (over-sold stock, in-transit adjustments),
+  // but inventory_items.system_quantity has a database-level non-negative
+  // constraint (Phase 2 data integrity). Since this runs as one bulk
+  // INSERT, a single negative row would fail the ENTIRE batch — clamp and
+  // warn here instead, so a data-quality issue in Tally doesn't block
+  // every other item from importing. This runs AFTER the godown merge
+  // above, so a -3 at one godown + 5 at another (net +2) is correctly
+  // left alone — only a genuinely negative final total gets clamped.
+  const negativeSkus: string[] = [];
+  bySku.forEach((item) => {
+    if (item.systemQuantity < 0) {
+      negativeSkus.push(`${item.sku} (${item.systemQuantity})`);
+      item.systemQuantity = 0;
+    }
+  });
+
+  if (negativeSkus.length > 0) {
+    const examples = negativeSkus.slice(0, 5).join(", ");
+    warnings.push(
+      `${negativeSkus.length} item(s) had a negative closing balance in Tally and were ` +
+      `set to 0 (your database doesn't allow negative stock): ${examples}` +
+      `${negativeSkus.length > 5 ? "…" : ""}. Verify these in Tally — a negative balance ` +
+      `usually means a data entry issue upstream.`
+    );
+  }
+
   return {
-    items,
+    items: Array.from(bySku.values()),
     godowns: Array.from(godownSet).sort(),
     warnings,
   };
