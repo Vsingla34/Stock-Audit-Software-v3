@@ -1162,6 +1162,44 @@ class SupabaseDataService {
     });
     return rows;
   }   
+
+  // Build 04: translates a VALIDATED QueryFilter (already passed through
+  // QueryFilterSchema.parse on the client) into a call to the
+  // query_inventory_by_filter RPC. This function never sees raw model
+  // output — only a filter that has already survived Zod validation.
+  public async queryByFilter(
+    filter: import("@/lib/queryFilter").QueryFilter,
+    companyId: string,
+    assignmentId?: number | null
+  ): Promise<InventoryItem[]> {
+    const { data, error } = await (supabase.rpc as any)("query_inventory_by_filter", {
+      p_company_id: companyId,
+      p_assignment_id: assignmentId ?? null,
+      p_search: filter.search ?? null,
+      p_categories: filter.categories ?? null,
+      p_location_id: filter.locationId ?? null,
+      p_sub_location: filter.subLocation ?? null,
+      p_status: filter.status ?? null,
+      p_variance_op: filter.variance?.op ?? null,
+      p_variance_value: filter.variance?.value ?? null,
+      p_variance_value2: filter.variance?.value2 ?? null,
+      p_variance_unit: filter.variance?.unit ?? null,
+      p_qty_field: filter.quantity?.field ?? null,
+      p_qty_op: filter.quantity?.op ?? null,
+      p_qty_value: filter.quantity?.value ?? null,
+      p_qty_value2: filter.quantity?.value2 ?? null,
+      p_audited_by: filter.auditedBy ?? null,
+      p_audited_from: filter.auditedBetween?.from ?? null,
+      p_audited_to: filter.auditedBetween?.to ?? null,
+      p_sort_field: filter.sort?.field ?? null,
+      p_sort_dir: filter.sort?.dir ?? "desc",
+      p_limit: filter.limit ?? 100,
+    });
+
+    if (error) throw error;
+    return this.mapDbRows((data as any[]) || []);
+  }
+
 } // end class SupabaseDataService
 
 // Build 01: Audit log row shape. Add `as any` at call sites if types.ts

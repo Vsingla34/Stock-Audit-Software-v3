@@ -256,7 +256,19 @@ export const processClosingStockData = (
 };
 
 
-export const processPhysicalQtyData = (rows: CSVRow[]) => {
+export interface PhysicalQtyRow {
+  sku: string;
+  physicalQuantity: number;
+  // Fix: these were previously parsed and immediately discarded, even
+  // though ExportPhysicalCountSheet's exported template includes them.
+  // Needed now so a brand-new row someone adds to the sheet can be
+  // created with real metadata instead of a bare SKU + quantity.
+  name?: string;
+  category?: string;
+  location?: string;
+}
+
+export const processPhysicalQtyData = (rows: CSVRow[]): PhysicalQtyRow[] => {
   const duplicates: string[] = [];
   const seenSkus = new Map<string, number>();
 
@@ -274,7 +286,13 @@ export const processPhysicalQtyData = (rows: CSVRow[]) => {
     const physicalQuantity = parseFloat(qtyStr);
     if (isNaN(physicalQuantity)) throw new Error(`Row ${index + 2}: invalid physical quantity for SKU ${sku}`);
 
-    return { sku, physicalQuantity };
+    return {
+      sku,
+      physicalQuantity,
+      name: (row['name'] || '').trim() || undefined,
+      category: (row['category'] || '').trim() || undefined,
+      location: (row['location'] || '').trim() || undefined,
+    };
   });
 
   if (duplicates.length > 0) {

@@ -14,6 +14,8 @@ import { Loader2, AlertCircle, MapPin, Lock, CheckCircle2, PackagePlus, FileSpre
 import { parseTallyStockSummary, readTallyFile, TallyParseResult } from "./utils/tallyUtils";
 import { TallyGodownMapper } from "./TallyGodownMapper";
 import { TallyImportReview } from "./TallyImportReview";
+import { PhysicalQtyNewItemsReview } from "./PhysicalQtyNewItemsReview";
+import type { PhysicalQtyRow } from "./utils/csvUtils";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useCompany } from "@/context/CompanyContext";
 import SupabaseDataService from "@/services/SupabaseDataService";
@@ -60,6 +62,17 @@ export const FileUploader = ({
   const [isTallyParsing, setIsTallyParsing] = useState(false);
   const [showGodownMapper, setShowGodownMapper] = useState(false);
   const [tallyParseError, setTallyParseError] = useState<string | null>(null);
+
+  // Physical Qty Sheet — new items review state. Instead of hard-rejecting
+  // the whole upload when a SKU doesn't match, pause and ask.
+  const [showPhysicalReview, setShowPhysicalReview] = useState(false);
+  const [physicalReviewImporting, setPhysicalReviewImporting] = useState(false);
+  const [pendingPhysicalUpload, setPendingPhysicalUpload] = useState<{
+    allRows: PhysicalQtyRow[];
+    matchedRows: PhysicalQtyRow[];
+    newRows: PhysicalQtyRow[];
+    batchKey: string;
+  } | null>(null);
 
   // Reconciliation review step — inserted between godown mapping and the
   // actual write, so unmatched Item Master entries surface before anything
@@ -160,6 +173,61 @@ export const FileUploader = ({
     } finally {
       setIsTallyParsing(false);
     }
+  };
+
+  // Physical Qty Sheet review — completes the upload that was paused when
+  // new SKUs were found. approvedNewSkus is only passed when the admin
+  // chose "Add New & Continue"; skipping sends only the matched rows.
+  const finalizePhysicalUpload = async (mode: "create" | "skip") => {
+    if (!pendingPhysicalUpload || !selectedCompanyId || !selectedAssignmentId) return;
+    const { allRows, matchedRows, newRows, batchKey } = pendingPhysicalUpload;
+
+    setPhysicalReviewImporting(true);
+    try {
+      if (mode === "create") {
+        const approvedNewSkus = new Set(newRows.map(r => r.sku));
+        await uploadPhysicalQuantityStock(allRows, batchKey, approvedNewSkus);
+      } else {
+        // Skip: only send the rows that already exist, leave new ones out
+        // entirely — no approval set needed since nothing unmatched remains.
+        await uploadPhysicalQuantityStock(matchedRows, batchKey);
+      }
+
+      const totalApplied = mode === "create" ? allRows.length : matchedRows.length;
+
+      await SupabaseDataService.logUploadBatch({
+        batchKey,
+        companyId: selectedCompanyId,
+        locationId: targetLocationId,
+        locationName: locations.find(l => l.id === targetLocationId)?.name || "Unknown",
+        uploadType: "physical_quantity",
+        totalItems: totalApplied,
+        assignmentId: parseInt(selectedAssignmentId),
+      });
+
+      toast.success(
+        mode === "create"
+          ? `${totalApplied} items updated — ${newRows.length} created as new.`
+          : `${totalApplied} items updated. ${newRows.length} new SKU(s) were skipped.`
+      );
+
+      setPhysicalQtyFile(null);
+      setShowPhysicalReview(false);
+      setPendingPhysicalUpload(null);
+      await refreshData();
+      if (onUploadComplete) onUploadComplete();
+
+    } catch (error: any) {
+      console.error("Physical qty finalize error:", error);
+      toast.error("Upload Failed", { description: error.message, duration: 6000 });
+    } finally {
+      setPhysicalReviewImporting(false);
+    }
+  };
+
+  const cancelPhysicalReview = () => {
+    setShowPhysicalReview(false);
+    setPendingPhysicalUpload(null);
   };
 
   // Step 1: godown mapping confirmed -> fetch current Item Master and open
@@ -404,7 +472,28 @@ export const FileUploader = ({
           if (!selectedAssignmentId) throw new Error("Please select an assignment first");
 
           const processedPhysical = processPhysicalQtyData(rawRows);
-          
+
+          // Diff against this assignment's current closing stock BEFORE
+          // writing anything, so unmatched SKUs surface as a choice
+          // ("add these as new items?") instead of failing the whole
+          // upload the way it used to.
+          const currentMaster = await SupabaseDataService.getItemMaster(
+            selectedCompanyId, parseInt(selectedAssignmentId)
+          );
+          const existingSkuSet = new Set(currentMaster.map(i => i.sku.trim()));
+
+          const matchedRows = processedPhysical.filter(r => existingSkuSet.has(r.sku.trim()));
+          const newRows     = processedPhysical.filter(r => !existingSkuSet.has(r.sku.trim()));
+
+          if (newRows.length > 0) {
+            // Pause here — the actual write happens from the review
+            // dialog's confirm/skip handlers, not this branch. The outer
+            // finally block below still resets isProcessing for us.
+            setPendingPhysicalUpload({ allRows: processedPhysical, matchedRows, newRows, batchKey });
+            setShowPhysicalReview(true);
+            return;
+          }
+
           await uploadPhysicalQuantityStock(processedPhysical, batchKey);
 
           await SupabaseDataService.logUploadBatch({
@@ -713,6 +802,18 @@ export const FileUploader = ({
           existingMaster={existingMasterForReview}
           onCancel={cancelTallyReview}
           onProceed={performTallyImport}
+        />
+      )}
+
+      {pendingPhysicalUpload && (
+        <PhysicalQtyNewItemsReview
+          open={showPhysicalReview}
+          newItems={pendingPhysicalUpload.newRows}
+          matchedCount={pendingPhysicalUpload.matchedRows.length}
+          importing={physicalReviewImporting}
+          onCancel={cancelPhysicalReview}
+          onConfirmCreate={() => finalizePhysicalUpload("create")}
+          onSkipNew={() => finalizePhysicalUpload("skip")}
         />
       )}
     </div>

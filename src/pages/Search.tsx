@@ -6,9 +6,10 @@ import { useCompany } from "@/context/CompanyContext";
 import { useInventory } from "@/context/InventoryContext";
 import { MapPin, LayoutGrid } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { NLQueryPalette } from "@/components/search/NLQueryPalette";
 
 const Search = () => {
-  const { selectedAssignmentId } = useCompany();
+  const { selectedAssignmentId, selectedCompanyId } = useCompany();
   const { assignments } = useInventory();
   
   const currentAssignment = assignments.find(a => a.id === selectedAssignmentId);
@@ -31,6 +32,7 @@ const Search = () => {
               Find, audit, and reconcile items manually in real-time.
             </p>
           </div>
+          <NLQueryPalette companyId={selectedCompanyId} assignmentId={selectedAssignmentId} />
         </div>
         
         <div className="flex flex-col xl:grid xl:grid-cols-3 gap-8 relative">

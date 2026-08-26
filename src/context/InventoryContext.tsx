@@ -173,7 +173,8 @@ interface InventoryContextType {
 
   uploadPhysicalQuantityStock: (
     items: any[], 
-    batchKey: string
+    batchKey: string,
+    approvedNewSkus?: Set<string>
   ) => Promise<void>;
 
   deleteItems: (itemIds: string[]) => Promise<void>;
@@ -705,7 +706,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     await loadData();
   };
 
-  const uploadPhysicalQuantityStock = async (items: any[], batchKey: string) => {
+  const uploadPhysicalQuantityStock = async (items: any[], batchKey: string, approvedNewSkus?: Set<string>) => {
     if (!selectedCompanyId || !selectedAssignmentId) throw new Error("No active assignment selected.");
     
     const activeUserId = currentUser?.id || user?.id;
@@ -717,7 +718,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
        assignmentId: Number(selectedAssignmentId),
        batchKey,
        userId: activeUserId || 'unknown',
-       userName: activeUserName
+       userName: activeUserName,
+       approvedNewSkus,
     });
     await loadData();
   };
