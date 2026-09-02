@@ -15,11 +15,18 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
 import { toastError } from "@/lib/handleError";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { CountQualityCard } from "@/components/analytics/CountQualityCard";
 
 const Analytics = () => {
   const { auditedItems, itemMaster, assignments, locations } = useInventory();
   const { selectedAssignmentId, selectedCompanyId } = useCompany();
   const { currentUser } = useUser();
+  // Build 05: Count Quality card is admin/super_admin only — an auditor
+  // should not see peers flagged.
+  const isAdminUser = currentUser?.role === "admin" || currentUser?.role === "super_admin";
+  const currentAssignmentForQuality = assignments.find(
+    (a) => String(a.id) === String(selectedAssignmentId)
+  );
   const [mounted, setMounted] = useState(false);
   
   const [previousReport, setPreviousReport] = useState<any>(null);
@@ -428,6 +435,14 @@ const Analytics = () => {
               </ResponsiveContainer>
             </CardContent>
           </Card>
+
+          {/* Build 05: Count Quality — admin/super_admin only */}
+          {isAdminUser && (
+            <CountQualityCard
+              assignmentId={selectedAssignmentId}
+              showSystemQuantity={currentAssignmentForQuality?.showSystemQuantity !== false}
+            />
+          )}
 
           {/* Auditor Leaderboard Bar Chart */}
           <Card className={`rounded-[24px] border-slate-200 shadow-sm hover:shadow-lg hover:border-slate-300 transition-all duration-500 bg-white animate-stagger delay-200 ${mounted ? 'opacity-100' : ''}`}>

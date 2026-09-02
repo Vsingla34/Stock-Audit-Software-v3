@@ -521,18 +521,22 @@ class SupabaseDataService {
   }
 
   public async uploadPhysicalQuantityStock(params: {
-    items: { sku: string; physicalQuantity: number }[];
+    items: { sku: string; physicalQuantity: number; name?: string; category?: string; location?: string }[];
     companyId: string;
     assignmentId: number;
     batchKey: string;
     userId: string;
     userName: string;
+    // Fix: SKUs the caller has explicitly confirmed should be CREATED as
+    // new items, after being shown to the admin via PhysicalQtyNewItemsReview.
+    // Any SKU not found in the assignment AND not in this set still throws
+    // the original hard validation error — nothing gets silently created.
+    approvedNewSkus?: Set<string>;
   }) {
-    const { items, assignmentId, batchKey, userId, userName } = params;
+    const { items, companyId, assignmentId, batchKey, userId, userName, approvedNewSkus } = params;
 
     const { data: existingItems, error: fetchErr } = await supabase
       .from('inventory_items')
-      // 🔥 FIX: Added name, category, and location to satisfy NOT NULL constraints during upsert
       .select('id, sku, name, category, location, physical_quantity, system_quantity, auditor_entries, company_id, assignment_id')
       .eq('assignment_id', assignmentId);
 
@@ -541,13 +545,49 @@ class SupabaseDataService {
     const existingMap = new Map(existingItems?.map(i => [i.sku, i]) || []);
     const missingSkus: string[] = [];
 
-    const updates = items.map(upd => {
+    // Rows going to the bulk_upsert_inventory_items RPC — same payload
+    // shape whether the row is a merge-into-existing update or a brand
+    // new insert, since the RPC's ON CONFLICT handles both uniformly.
+    const payloadRows: any[] = [];
+
+    for (const upd of items) {
       const existing = existingMap.get(upd.sku);
+
       if (!existing) {
-        missingSkus.push(upd.sku);
-        return null;
+        if (!approvedNewSkus?.has(upd.sku)) {
+          missingSkus.push(upd.sku);
+          continue;
+        }
+
+        // Approved new item: nothing to merge into, no prior system
+        // quantity was ever set for it in this assignment.
+        const newEntry = {
+          auditorId: userId || 'unknown',
+          auditorName: userName || 'System',
+          quantityFound: upd.physicalQuantity,
+          auditedAt: new Date().toISOString(),
+          subLocation: `systemUpload:${upd.physicalQuantity}`,
+          batchKey,
+        };
+
+        payloadRows.push({
+          sku: upd.sku,
+          name: upd.name || upd.sku,
+          category: upd.category || 'Uncategorised',
+          location: upd.location || 'Unassigned',
+          assignment_id: assignmentId,
+          system_quantity: 0,
+          physical_quantity: upd.physicalQuantity,
+          status: upd.physicalQuantity === 0 ? 'matched' : 'discrepancy',
+          auditor_entries: [newEntry],
+          upload_batch_key: batchKey,
+        });
+        continue;
       }
 
+      // Existing item: same accumulate-on-top-of-existing behaviour as
+      // before — the sheet's quantity is a delta added to whatever
+      // physical_quantity already existed, not a hard overwrite.
       let entries = existing.auditor_entries;
       if (typeof entries === 'string') entries = JSON.parse(entries);
       if (!Array.isArray(entries)) entries = [];
@@ -558,38 +598,44 @@ class SupabaseDataService {
         quantityFound: upd.physicalQuantity,
         auditedAt: new Date().toISOString(),
         subLocation: `systemUpload:${upd.physicalQuantity}`,
-        batchKey: batchKey 
+        batchKey,
       };
-
       entries.push(newEntry);
 
       const newQty = (parseFloat(existing.physical_quantity) || 0) + upd.physicalQuantity;
       const sysQty = parseFloat(existing.system_quantity) || 0;
 
-      return {
-        id: existing.id,
-        company_id: existing.company_id,
-        assignment_id: existing.assignment_id,
+      payloadRows.push({
         sku: existing.sku,
-        name: existing.name,             // 🔥 FIX: Pass existing name back
-        category: existing.category,     // 🔥 FIX: Pass existing category back
-        location: existing.location,     // 🔥 FIX: Pass existing location back
+        name: existing.name,
+        category: existing.category,
+        location: existing.location,
+        assignment_id: assignmentId,
         system_quantity: existing.system_quantity,
         physical_quantity: newQty,
         status: newQty === sysQty ? 'matched' : 'discrepancy',
         auditor_entries: entries,
-        last_audited: new Date().toISOString()
-      };
-    }).filter(Boolean);
-
-    if (missingSkus.length > 0) {
-      throw new Error(`Validation Failed: ${missingSkus.length} SKUs from your sheet were not found in this Assignment's Closing Stock.\nExample SKUs: ${missingSkus.slice(0,3).join(', ')}.\nEnsure the SKUs perfectly match.`);
+        upload_batch_key: batchKey,
+      });
     }
 
+    if (missingSkus.length > 0) {
+      throw new Error(`Validation Failed: ${missingSkus.length} SKUs from your sheet were not found in this Assignment's Closing Stock.\nExample SKUs: ${missingSkus.slice(0,3).join(', ')}.\nEnsure the SKUs perfectly match, or confirm them as new items when prompted.`);
+    }
+
+    if (payloadRows.length === 0) return;
+
+    // Routed through the Build 01 bulk RPC instead of a raw .upsert() —
+    // handles insert-or-update uniformly for the mixed existing+new batch,
+    // and logs ONE audit summary row instead of one per item.
     const CHUNK_SIZE = 500;
-    for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
-      const chunk = updates.slice(i, i + CHUNK_SIZE);
-      const { error } = await supabase.from('inventory_items').upsert(chunk as any);
+    for (let i = 0; i < payloadRows.length; i += CHUNK_SIZE) {
+      const chunk = payloadRows.slice(i, i + CHUNK_SIZE);
+      const { error } = await (supabase.rpc as any)("bulk_upsert_inventory_items", {
+        p_items: chunk,
+        p_company_id: companyId,
+        p_batch_key: batchKey,
+      });
       if (error) throw error;
     }
   }
@@ -1162,7 +1208,6 @@ class SupabaseDataService {
     });
     return rows;
   }   
-
   // Build 04: translates a VALIDATED QueryFilter (already passed through
   // QueryFilterSchema.parse on the client) into a call to the
   // query_inventory_by_filter RPC. This function never sees raw model
@@ -1200,7 +1245,35 @@ class SupabaseDataService {
     return this.mapDbRows((data as any[]) || []);
   }
 
+
+  // Build 05: raw per-auditor scan metrics for count anomaly detection.
+  // This method ONLY fetches numbers — it makes no judgment about
+  // whether any of them are anomalous. See src/lib/anomalyDetection.ts
+  // for the threshold logic, which runs entirely client-side against
+  // this data.
+  public async getCountQuality(assignmentId: number): Promise<CountQualityRow[]> {
+    const { data, error } = await (supabase.rpc as any)("get_count_quality", {
+      p_assignment_id: assignmentId,
+    });
+    if (error) throw error;
+    return (data as CountQualityRow[]) || [];
+  }
+
 } // end class SupabaseDataService
+
+// Build 05: shape returned by get_count_quality(). One row per auditor
+// who has scanned anything in this assignment.
+export interface CountQualityRow {
+  auditor_id: string;
+  auditor_name: string;
+  entry_count: number;
+  distinct_items: number;
+  active_minutes: number;
+  entries_per_minute: number;
+  round_share: number;
+  exact_match_share: number;
+  final_hour_share: number;
+}
 
 // Build 01: Audit log row shape. Add `as any` at call sites if types.ts
 // hasn't been regenerated yet via the Supabase CLI (see Build 00 notes) —
