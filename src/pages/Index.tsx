@@ -94,27 +94,27 @@ const AuditorDashboard = ({ assignmentId }: { assignmentId: string | null }) => 
   );
 
   return (
-    <div className="grid grid-cols-3 gap-3">
-      <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-center">
-        <div className="text-2xl font-bold text-blue-800">{stats.total}</div>
-        <div className="text-xs text-blue-600 mt-0.5">Total SKUs</div>
+    <div className="grid grid-cols-3 gap-1.5 md:gap-3">
+      <div className="bg-blue-50 border border-blue-100 rounded-lg md:rounded-xl p-2 md:p-3 text-center">
+        <div className="text-base md:text-2xl font-bold text-blue-800">{stats.total}</div>
+        <div className="text-[9px] md:text-xs text-blue-600 mt-0.5">Total SKUs</div>
       </div>
-      <div className="bg-green-50 border border-green-100 rounded-xl p-3 text-center">
-        <div className="text-2xl font-bold text-green-800">{stats.scanned}</div>
-        <div className="text-xs text-green-600 mt-0.5">Scanned</div>
+      <div className="bg-green-50 border border-green-100 rounded-lg md:rounded-xl p-2 md:p-3 text-center">
+        <div className="text-base md:text-2xl font-bold text-green-800">{stats.scanned}</div>
+        <div className="text-[9px] md:text-xs text-green-600 mt-0.5">Scanned</div>
       </div>
-      <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-center">
-        <div className="text-2xl font-bold text-amber-800">{stats.pending}</div>
-        <div className="text-xs text-amber-600 mt-0.5">Remaining</div>
+      <div className="bg-amber-50 border border-amber-100 rounded-lg md:rounded-xl p-2 md:p-3 text-center">
+        <div className="text-base md:text-2xl font-bold text-amber-800">{stats.pending}</div>
+        <div className="text-[9px] md:text-xs text-amber-600 mt-0.5">Remaining</div>
       </div>
 
       {/* Progress bar */}
       <div className="col-span-3">
-        <div className="flex justify-between text-xs text-gray-500 mb-1">
+        <div className="flex justify-between text-[10px] md:text-xs text-gray-500 mb-1">
           <span>Your progress today</span>
           <span className="font-semibold text-violet-600">{stats.pct}%</span>
         </div>
-        <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+        <div className="h-1.5 md:h-2.5 bg-gray-100 rounded-full overflow-hidden">
           <div
             className="h-full bg-gradient-primary rounded-full transition-all duration-700"
             style={{ width: `${stats.pct}%` }}
@@ -144,17 +144,17 @@ const AdminStatsRow = () => {
   }, [assignments, locations, selectedCompanyId]);
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 md:gap-3">
       {[
         { label: "Active Audits",   value: stats.active,    icon: <ScanBarcode className="h-4 w-4" />, color: "violet" },
         { label: "Awaiting Review", value: stats.submitted,  icon: <Clock className="h-4 w-4" />,       color: "amber"  },
         { label: "Finalized",       value: stats.finalized,  icon: <CheckCircle2 className="h-4 w-4" />, color: "green" },
         { label: "Locations",       value: stats.locations,  icon: <MapPin className="h-4 w-4" />,       color: "blue"  },
       ].map((s) => (
-        <div key={s.label} className={`bg-${s.color}-50 border border-${s.color}-100 rounded-xl p-3`}>
-          <div className={`text-${s.color}-500 mb-1`}>{s.icon}</div>
-          <div className={`text-2xl font-bold text-${s.color}-800`}>{s.value}</div>
-          <div className={`text-xs text-${s.color}-600 mt-0.5`}>{s.label}</div>
+        <div key={s.label} className={`bg-${s.color}-50 border border-${s.color}-100 rounded-lg md:rounded-xl p-2 md:p-3`}>
+          <div className={`text-${s.color}-500 mb-0.5 md:mb-1 [&>svg]:h-3.5 [&>svg]:w-3.5 md:[&>svg]:h-4 md:[&>svg]:w-4`}>{s.icon}</div>
+          <div className={`text-base md:text-2xl font-bold text-${s.color}-800`}>{s.value}</div>
+          <div className={`text-[9px] md:text-xs text-${s.color}-600 mt-0.5 leading-tight`}>{s.label}</div>
         </div>
       ))}
     </div>
@@ -276,25 +276,25 @@ const Index = () => {
 
   return (
     <AppLayout>
-      <div className="space-y-6 w-full max-w-full overflow-x-hidden">
+      <div className="space-y-3 md:space-y-6 w-full max-w-full overflow-x-hidden">
 
         {/* ── Header ── */}
         <div className="flex flex-col md:flex-row justify-between items-start gap-3">
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-900">
+              <h1 className="text-lg md:text-3xl font-bold tracking-tight text-gray-900 leading-tight">
                 Welcome, <span className="text-violet-600">{currentUser?.name || "User"}</span>
               </h1>
               <RoleBadge role={role} />
             </div>
-            <p className="text-base text-muted-foreground">Dashboard</p>
+            <p className="text-[11px] md:text-base text-muted-foreground">Dashboard</p>
           </div>
           <div className="text-left md:text-right">
             {companyName && (
-              <h2 className="text-xl font-bold text-gray-900">{companyName}</h2>
+              <h2 className="text-sm md:text-xl font-bold text-gray-900">{companyName}</h2>
             )}
             {selectedAssignmentId && (
-              <p className="text-sm text-gray-500 mt-0.5">
+              <p className="text-[11px] md:text-sm text-gray-500 mt-0.5">
                 Assignment <span className="text-violet-600 font-semibold">#{selectedAssignmentId}</span>
               </p>
             )}
@@ -306,8 +306,8 @@ const Index = () => {
 
         {/* ── 4.2: Role-specific section ── */}
         {isAuditorUser && (
-          <div className="space-y-3">
-            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
+          <div className="space-y-1.5 md:space-y-3">
+            <h2 className="text-[10px] md:text-sm font-semibold text-gray-500 uppercase tracking-wide">
               Your Progress
             </h2>
             <AuditorDashboard assignmentId={selectedAssignmentId} />
@@ -315,8 +315,8 @@ const Index = () => {
         )}
 
         {isAdminUser && (
-          <div className="space-y-3">
-            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
+          <div className="space-y-1.5 md:space-y-3">
+            <h2 className="text-[10px] md:text-sm font-semibold text-gray-500 uppercase tracking-wide">
               Organisation Overview
             </h2>
             <AdminStatsRow />
@@ -324,8 +324,8 @@ const Index = () => {
         )}
 
         {isClientUser_ && (
-          <div className="space-y-3">
-            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
+          <div className="space-y-1.5 md:space-y-3">
+            <h2 className="text-[10px] md:text-sm font-semibold text-gray-500 uppercase tracking-wide">
               Your Audit Status
             </h2>
             <ClientDashboard />
@@ -337,11 +337,11 @@ const Index = () => {
 
         {/* ── 4.1: Charts + 4.3: Exception tile ── */}
         {hasData ? (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5 md:gap-4">
             <div className="lg:col-span-2">
               <DashboardCharts items={currentItems} />
             </div>
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2.5 md:gap-4">
               <ExceptionTile />
             </div>
           </div>
@@ -376,20 +376,20 @@ const Index = () => {
 
         {/* ── Main grid: Recent Activity + Quick Actions ── */}
         {!isClientUser_ && (
-          <div className="grid gap-6 grid-cols-1 lg:grid-cols-2">
+          <div className="grid gap-3 md:gap-6 grid-cols-1 lg:grid-cols-2">
             <div className="min-h-[300px]">
               <RecentActivity />
             </div>
 
-            <div className="space-y-4">
-              <h2 className="text-lg font-semibold text-gray-900">Quick Actions</h2>
+            <div className="space-y-2 md:space-y-4">
+              <h2 className="text-[11px] md:text-lg font-bold md:font-semibold text-gray-500 md:text-gray-900 uppercase md:normal-case tracking-wide md:tracking-normal">Quick Actions</h2>
 
               {isLoading ? <QuickActionSkeleton /> : (
-                <div className="grid gap-3 grid-cols-2">
+                <div className="grid gap-2 md:gap-3 grid-cols-2">
 
                   {/* Scan — auditors + admins */}
                   {canPerformAudits() && (
-                    <Button asChild className="h-24 flex flex-col bg-gradient-primary text-white shadow-glow-sm hover:shadow-glow hover:-translate-y-0.5 transition-all duration-200">
+                    <Button asChild className="h-16 md:h-24 flex flex-col bg-gradient-primary text-white shadow-glow-sm hover:shadow-glow hover:-translate-y-0.5 transition-all duration-200 text-[11px] md:text-sm">
                       <Link to="/scanner">
                         <Barcode className="h-6 w-6 mb-1.5" />
                         Scan Items
@@ -463,7 +463,7 @@ const Index = () => {
         {/* ── Client quick actions ── */}
         {isClientUser_ && (
           <div className="grid gap-3 grid-cols-2 sm:grid-cols-3">
-            <Button asChild className="h-24 flex flex-col bg-gradient-primary text-white shadow-glow-sm hover:shadow-glow hover:-translate-y-0.5 transition-all duration-200">
+            <Button asChild className="h-16 md:h-24 flex flex-col bg-gradient-primary text-white shadow-glow-sm hover:shadow-glow hover:-translate-y-0.5 transition-all duration-200 text-[11px] md:text-sm">
               <Link to="/reports">
                 <FileSpreadsheet className="h-6 w-6 mb-1.5" />
                 View Reports

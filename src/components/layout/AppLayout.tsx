@@ -9,6 +9,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { Menu, ScanBarcode, FileSpreadsheet, Upload, Home } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useUserAccess } from "@/hooks/useUserAccess";
+import logo from "../../../public/logo.png";
 
 interface AppLayoutControl {
   isMounted: boolean;
@@ -61,18 +62,20 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
 
   return (
     <AppLayoutContext.Provider value={{ isMounted: true, setSidebarVisible }}>
-      <div className="min-h-screen flex w-full bg-space-50">
+      <div className="min-h-screen flex flex-col md:flex-row w-full bg-space-50">
+        {/* FIX: was "flex w-full" (defaults to flex-row). On mobile the
+            header became a row-sibling of page content, and flexbox's
+            default align-items:stretch made the header stretch to match
+            content's full height, covering everything. flex-col fixes
+            mobile stacking; md:flex-row keeps the desktop sidebar layout. */}
 
         {/* ── Mobile top header ─────────────────────────────────────── */}
         <div
           className="md:hidden sticky top-0 z-30 w-full flex items-center justify-between px-4 py-3 shadow-md"
           style={{ background: "linear-gradient(135deg, #0D0D20 0%, #060612 100%)" }}
         >
-          <div className="flex items-center gap-2.5">
-            <div className="h-7 w-7 rounded-lg bg-gradient-primary flex items-center justify-center shadow-glow-sm">
-              <span className="text-white text-xs font-bold">SC</span>
-            </div>
-            <span className="text-sm font-semibold text-space-100">StockCheck360</span>
+          <div className="bg-white rounded-lg px-2 py-1.5 flex items-center shadow-glow-sm">
+            <img src={logo} alt="StockCheck360" className="h-5 w-auto object-contain" />
           </div>
           <button
             onClick={() => setMobileOpen(true)}
@@ -123,7 +126,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           </div>
 
           {/* Page content */}
-          <div className="p-4 md:p-6 pb-24 md:pb-8">
+          <div className="p-3 md:p-6 pb-24 md:pb-8">
             <React.Suspense
               fallback={
                 <div className="flex items-center justify-center h-64">

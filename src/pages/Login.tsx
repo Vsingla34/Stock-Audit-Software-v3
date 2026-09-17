@@ -3,7 +3,7 @@
 // overlaps the headline, instead of fixed-pixel positions that assumed
 // a viewport height the actual screen didn't have.
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useUser } from "@/context/UserContext";
 import { useNavigate } from "react-router-dom";
 import { Input } from "@/components/ui/input";
@@ -30,6 +30,41 @@ const StatCard = ({
     </div>
   </div>
 );
+
+// ── Typewriter effect ────────────────────────────────────────────────────
+// Lightweight, no dependency — types out text once on mount, then leaves a
+// slow blinking cursor. Re-runs if `text` changes (harmless here since it
+// never does, but keeps the hook correct).
+const TypewriterText = ({ text, speed = 55 }: { text: string; speed?: number }) => {
+  const [displayed, setDisplayed] = useState("");
+  const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    setDisplayed("");
+    setDone(false);
+    let i = 0;
+    const interval = setInterval(() => {
+      i += 1;
+      setDisplayed(text.slice(0, i));
+      if (i >= text.length) {
+        clearInterval(interval);
+        setDone(true);
+      }
+    }, speed);
+    return () => clearInterval(interval);
+  }, [text, speed]);
+
+  return (
+    <span>
+      {displayed}
+      <span
+        className={`inline-block w-[2px] h-[1em] ml-0.5 align-middle bg-violet-600 ${
+          done ? "animate-pulse" : "opacity-100"
+        }`}
+      />
+    </span>
+  );
+};
 
 const Login = () => {
   const [email, setEmail]         = useState("");
@@ -253,7 +288,7 @@ const Login = () => {
 
           <div className="mb-8">
             <h2 className="text-[28px] font-bold text-space-900 tracking-tight leading-tight">
-              Welcome back
+              <TypewriterText text="Welcome back" />
             </h2>
             <p className="text-space-500 text-sm mt-2">
               Sign in to your account to continue

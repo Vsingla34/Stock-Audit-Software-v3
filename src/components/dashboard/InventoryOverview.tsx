@@ -17,10 +17,10 @@ const AutoScaledNumber = ({ value, prefix = "", className = "" }: { value: numbe
   const len = str.length;
   
   // Step down font size based on character count
-  let sizeClass = "text-3xl";
-  if (len >= 15) sizeClass = "text-lg"; 
-  else if (len >= 12) sizeClass = "text-xl";
-  else if (len >= 9) sizeClass = "text-2xl";
+  let sizeClass = "text-lg md:text-3xl";
+  if (len >= 15) sizeClass = "text-sm md:text-lg"; 
+  else if (len >= 12) sizeClass = "text-base md:text-xl";
+  else if (len >= 9) sizeClass = "text-lg md:text-2xl";
 
   return (
     <div 
@@ -134,51 +134,51 @@ export const InventoryOverview = () => {
       
       <CardContent className="p-0">
         {latestItems.length === 0 && (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            {[1,2,3,4].map(i => <Skeleton key={i} className="h-28 rounded-xl bg-white border border-slate-200 shadow-sm" />)}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4">
+            {[1,2,3,4].map(i => <Skeleton key={i} className="h-20 md:h-28 rounded-xl bg-white border border-slate-200 shadow-sm" />)}
           </div>
         )}
-        <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 ${latestItems.length === 0 ? "hidden" : ""}`}>
+        <div className={`grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4 ${latestItems.length === 0 ? "hidden" : ""}`}>
           
-          <div className="p-5 bg-white rounded-xl border border-slate-200 shadow-sm hover:border-slate-300 hover:shadow-md transition-all duration-300 group overflow-hidden">
-            <div className="flex justify-between items-start mb-4">
-              <span className="text-slate-500 text-[11px] font-bold uppercase tracking-widest truncate pr-2">Total Stock</span>
-              <div className="p-2 bg-blue-50 rounded-lg group-hover:scale-110 transition-transform duration-300 border border-blue-100 shrink-0">
-                <Boxes className="h-4 w-4 text-blue-600" />
+          <div className="p-2.5 md:p-5 bg-white rounded-lg md:rounded-xl border border-slate-200 shadow-sm hover:border-slate-300 hover:shadow-md transition-all duration-300 group overflow-hidden">
+            <div className="flex justify-between items-start mb-1.5 md:mb-4">
+              <span className="text-slate-500 text-[9px] md:text-[11px] font-bold uppercase tracking-widest truncate pr-2">Total Stock</span>
+              <div className="p-1.5 md:p-2 bg-blue-50 rounded-md md:rounded-lg group-hover:scale-110 transition-transform duration-300 border border-blue-100 shrink-0">
+                <Boxes className="h-3 w-3 md:h-4 md:w-4 text-blue-600" />
               </div>
             </div>
             <AutoScaledNumber value={stats.totalStock} className="text-slate-900 group-hover:text-blue-700 transition-colors" />
-            <div className="text-[11px] font-medium text-slate-500 mt-2 truncate">Total items in system</div>
+            <div className="text-[9px] md:text-[11px] font-medium text-slate-500 mt-1 md:mt-2 truncate">Total items in system</div>
           </div>
 
-          <div className="p-5 bg-white rounded-xl border border-slate-200 shadow-sm hover:border-slate-300 hover:shadow-md transition-all duration-300 group relative overflow-hidden">
+          <div className="p-2.5 md:p-5 bg-white rounded-lg md:rounded-xl border border-slate-200 shadow-sm hover:border-slate-300 hover:shadow-md transition-all duration-300 group relative overflow-hidden">
             <div className="absolute inset-0 bg-gradient-to-t from-blue-50/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-            <div className="flex justify-between items-start mb-4 relative z-10">
-              <span className="text-slate-500 text-[11px] font-bold uppercase tracking-widest truncate pr-2">Quantity Found</span>
-              <div className="p-2 bg-blue-50 rounded-lg border border-blue-100 group-hover:scale-110 group-hover:-rotate-3 transition-transform duration-300 shrink-0">
-                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-blue-600"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+            <div className="flex justify-between items-start mb-1.5 md:mb-4 relative z-10">
+              <span className="text-slate-500 text-[9px] md:text-[11px] font-bold uppercase tracking-widest truncate pr-2">Quantity Found</span>
+              <div className="p-1.5 md:p-2 bg-blue-50 rounded-md md:rounded-lg border border-blue-100 group-hover:scale-110 group-hover:-rotate-3 transition-transform duration-300 shrink-0">
+                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3 md:w-4 md:h-4 text-blue-600"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
               </div>
             </div>
             <AutoScaledNumber value={stats.auditedStock} className="text-slate-900 relative z-10" />
-            <div className="text-[11px] font-bold text-blue-600 mt-2 relative z-10 truncate">{stats.progressPercentage}% of total stock</div>
+            <div className="text-[9px] md:text-[11px] font-bold text-blue-600 mt-1 md:mt-2 relative z-10 truncate">{stats.progressPercentage}% of total stock</div>
           </div>
 
-          <div className="p-5 bg-white rounded-xl border border-slate-200 shadow-sm hover:border-slate-300 hover:shadow-md transition-all duration-300 group overflow-hidden">
-            <div className="flex justify-between items-start mb-4">
-              <span className="text-slate-500 text-[11px] font-bold uppercase tracking-widest truncate pr-2">Matched Qty</span>
-              <div className="p-2 bg-emerald-50 rounded-lg border border-emerald-100 group-hover:scale-110 transition-transform duration-300 shrink-0">
-                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+          <div className="p-2.5 md:p-5 bg-white rounded-lg md:rounded-xl border border-slate-200 shadow-sm hover:border-slate-300 hover:shadow-md transition-all duration-300 group overflow-hidden">
+            <div className="flex justify-between items-start mb-1.5 md:mb-4">
+              <span className="text-slate-500 text-[9px] md:text-[11px] font-bold uppercase tracking-widest truncate pr-2">Matched Qty</span>
+              <div className="p-1.5 md:p-2 bg-emerald-50 rounded-md md:rounded-lg border border-emerald-100 group-hover:scale-110 transition-transform duration-300 shrink-0">
+                <CheckCircle2 className="h-3 w-3 md:h-4 md:w-4 text-emerald-600" />
               </div>
             </div>
             <AutoScaledNumber value={stats.matchedStock} className="text-slate-900 group-hover:text-emerald-700 transition-colors" />
-            <div className="text-[11px] font-medium text-slate-500 mt-2 truncate">Quantity fully matched</div>
+            <div className="text-[9px] md:text-[11px] font-medium text-slate-500 mt-1 md:mt-2 truncate">Quantity fully matched</div>
           </div>
 
-          <div className="p-5 bg-white rounded-xl border border-slate-200 shadow-sm hover:border-slate-300 hover:shadow-md transition-all duration-300 group overflow-hidden">
-            <div className="flex justify-between items-start mb-4">
-              <span className="text-slate-500 text-[11px] font-bold uppercase tracking-widest truncate pr-2">Net Variance</span>
-              <div className="p-2 bg-rose-50 rounded-lg border border-rose-100 group-hover:scale-110 transition-transform duration-300 shrink-0">
-                <AlertCircle className="h-4 w-4 text-rose-600" />
+          <div className="p-2.5 md:p-5 bg-white rounded-lg md:rounded-xl border border-slate-200 shadow-sm hover:border-slate-300 hover:shadow-md transition-all duration-300 group overflow-hidden">
+            <div className="flex justify-between items-start mb-1.5 md:mb-4">
+              <span className="text-slate-500 text-[9px] md:text-[11px] font-bold uppercase tracking-widest truncate pr-2">Net Variance</span>
+              <div className="p-1.5 md:p-2 bg-rose-50 rounded-md md:rounded-lg border border-rose-100 group-hover:scale-110 transition-transform duration-300 shrink-0">
+                <AlertCircle className="h-3 w-3 md:h-4 md:w-4 text-rose-600" />
               </div>
             </div>
             <AutoScaledNumber 
@@ -186,16 +186,16 @@ export const InventoryOverview = () => {
                prefix={stats.discrepancyStock > 0 ? "+" : ""}
                className={`${stats.discrepancyStock < 0 ? 'text-amber-600' : stats.discrepancyStock > 0 ? 'text-rose-600' : 'text-slate-900'}`} 
             />
-            <div className="text-[11px] font-medium text-slate-500 mt-2 truncate">Physical vs System Qty</div>
+            <div className="text-[9px] md:text-[11px] font-medium text-slate-500 mt-1 md:mt-2 truncate">Physical vs System Qty</div>
           </div>
         </div>
 
-        <div className="mt-8">
+        <div className="mt-3 md:mt-8">
           <div className="flex justify-between text-[11px] mb-2 font-bold">
             <span className="text-slate-500 uppercase tracking-widest truncate">Audit Progress (by Volume)</span>
             <span className="text-blue-600 shrink-0 pl-2">{stats.progressPercentage}%</span>
           </div>
-          <div className="h-2 bg-slate-100 rounded-full overflow-hidden shadow-inner">
+          <div className="h-1.5 md:h-2 bg-slate-100 rounded-full overflow-hidden shadow-inner">
             <div 
               className="h-full bg-blue-600 transition-all duration-1000 ease-out rounded-full"
               style={{ width: `${Math.min(stats.progressPercentage, 100)}%` }}
