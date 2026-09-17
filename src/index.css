@@ -3,89 +3,86 @@
 @tailwind utilities;
 
 /* ============================================================
-   StockCheck360 — Design System
-   Vibe: Clean & Corporate (Linear / Notion)
-   Palette: Deep Slate sidebar + Violet accent
+   StockCheck360 — Design System v2
+   Vibe: Electric Violet + Deep Space — bold, not boring
    ============================================================ */
 
 @layer base {
   :root {
     /* ── Core palette ── */
-    --violet-50:  249 246 254;
-    --violet-100: 237 233 254;
-    --violet-200: 221 214 254;
-    --violet-500: 139 92  246;
-    --violet-600: 124 58  237;
-    --violet-700: 109 40  217;
-    --violet-900: 46  16  101;
+    --violet-500: 131 56  255;
+    --violet-600: 110 31  235;   /* primary */
+    --violet-700: 90  23  196;
+    --magenta-500: 230 61 176;
+    --magenta-600: 208 33 154;
 
-    /* ── Semantic colours ── */
-    --color-primary:       124 58  237;   /* violet-600 */
-    --color-primary-hover: 109 40  217;   /* violet-700 */
-    --color-primary-light: 237 233 254;   /* violet-100 */
+    --color-primary:       110 31  235;
+    --color-primary-hover: 90  23  196;
+    --color-primary-light: 235 227 255;
 
     /* ── Surface & background ── */
-    --color-bg:        248 250 252;   /* slate-50  */
+    --color-bg:        247 247 251;   /* space-50, cool not warm */
     --color-surface:   255 255 255;
-    --color-surface-2: 248 250 252;   /* slate-50 cards */
+    --color-surface-2: 247 247 251;
 
     /* ── Borders ── */
-    --color-border:       226 232 240;  /* slate-200 */
-    --color-border-heavy: 203 213 225;  /* slate-300 */
+    --color-border:       216 216 230;  /* space-200 */
+    --color-border-heavy: 171 171 199;  /* space-300 */
 
     /* ── Text ── */
-    --color-text-primary:   15  23  42;   /* slate-900 */
-    --color-text-secondary: 100 116 139;  /* slate-500 */
-    --color-text-muted:     148 163 184;  /* slate-400 */
+    --color-text-primary:   13  13  32;   /* space-900 */
+    --color-text-secondary: 84  84  122;  /* space-500 */
+    --color-text-muted:     123 123 158;  /* space-400 */
 
     /* ── Status ── */
-    --color-success:  5   150 105;   /* emerald-600 */
-    --color-warning:  217 119  6;    /* amber-600   */
-    --color-danger:   220  38  38;   /* red-600     */
-    --color-info:     37  99  235;   /* blue-600    */
+    --color-success:  5   150 105;
+    --color-warning:  217 119  6;
+    --color-danger:   220  38  38;
+    --color-info:     37  99  235;
 
-    /* ── Sidebar ── */
-    --sidebar-bg:          15  23  42;   /* slate-900  */
-    --sidebar-surface:     30  41  59;   /* slate-800  */
-    --sidebar-border:      51  65  85;   /* slate-700  */
-    --sidebar-text:       148 163 184;   /* slate-400  */
-    --sidebar-text-hover:  226 232 240;  /* slate-200  */
-    --sidebar-active-bg:   124  58 237;  /* violet-600 */
+    /* ── Sidebar — deep space, not flat slate ── */
+    --sidebar-bg:          6   6   18;   /* space-950 */
+    --sidebar-surface:     13  13  32;   /* space-900 */
+    --sidebar-border:      42  42  69;   /* space-700 */
+    --sidebar-text:        123 123 158;
+    --sidebar-text-hover:  216 216 230;
+    --sidebar-active-bg:   110 31  235;
     --sidebar-active-text: 255 255 255;
 
     /* ── Shadow ── */
     --shadow-xs:  0 1px 2px 0 rgb(0 0 0 / 0.04);
-    --shadow-sm:  0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.04);
-    --shadow-md:  0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.04);
-    --shadow-lg:  0 10px 15px -3px rgb(0 0 0 / 0.06), 0 4px 6px -4px rgb(0 0 0 / 0.04);
+    --shadow-sm:  0 1px 3px 0 rgb(0 0 0 / 0.08), 0 1px 2px -1px rgb(0 0 0 / 0.06);
+    --shadow-md:  0 4px 6px -1px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.06);
+    --shadow-lg:  0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.06);
+    --shadow-glow: 0 0 24px rgb(131 56 255 / 0.45), 0 4px 12px rgb(0 0 0 / 0.25);
 
     /* ── Radius ── */
-    --radius-sm:  6px;
-    --radius-md:  10px;
-    --radius-lg:  14px;
-    --radius-xl:  18px;
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 20px;
 
     /* shadcn compat */
-    --background:         0 0% 98%;
-    --foreground:         222.2 84% 4.9%;
+    --background:         240 33% 98%;
+    --foreground:         248 71% 8%;
     --card:               0 0% 100%;
-    --card-foreground:    222.2 84% 4.9%;
+    --card-foreground:    248 71% 8%;
     --popover:            0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary:            262 83.3% 57.8%;
+    --popover-foreground: 248 71% 8%;
+    --primary:            265 84% 52%;
     --primary-foreground: 0 0% 100%;
-    --secondary:          210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted:              210 40% 96.1%;
-    --muted-foreground:   215.4 16.3% 46.9%;
-    --accent:             210 40% 96.1%;
-    --accent-foreground:  222.2 47.4% 11.2%;
+    --secondary:          240 30% 96%;
+    --secondary-foreground: 248 40% 15%;
+    --muted:              240 30% 96%;
+    --muted-foreground:   248 15% 45%;
+    --accent:             240 30% 96%;
+    --accent-foreground:  248 40% 15%;
     --destructive:        0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
-    --border:             214.3 31.8% 91.4%;
-    --input:              214.3 31.8% 91.4%;
-    --ring:               262 83.3% 57.8%;
-    --radius:             0.625rem;
+    --border:             240 25% 88%;
+    --input:              240 25% 88%;
+    --ring:               265 84% 52%;
+    --radius:             0.75rem;
   }
 }
 
@@ -101,8 +98,8 @@
   }
 
   h1, h2, h3, h4, h5, h6 {
-    letter-spacing: -0.025em;
-    font-weight: 600;
+    letter-spacing: -0.02em;
+    font-weight: 650;
     color: rgb(var(--color-text-primary));
   }
 }
@@ -119,77 +116,75 @@
 /* ── Utility classes ────────────────────────────────────────── */
 @layer components {
 
-  /* Cards */
   .card-base {
-    @apply bg-white rounded-[10px] border border-slate-200 shadow-[var(--shadow-sm)];
+    @apply bg-white rounded-[14px] border border-space-200/70 shadow-[var(--shadow-sm)];
   }
 
-  /* Stat tiles */
+  .card-glow {
+    @apply bg-white rounded-[14px] border border-violet-100 shadow-[var(--shadow-glow)];
+  }
+
   .stat-tile {
     @apply card-base p-5 flex flex-col gap-1.5;
   }
   .stat-tile-value {
-    @apply text-3xl font-bold tracking-tight text-slate-900;
+    @apply text-3xl font-bold tracking-tight text-space-900;
   }
   .stat-tile-label {
-    @apply text-xs font-medium text-slate-500 uppercase tracking-wide;
+    @apply text-xs font-medium text-space-500 uppercase tracking-wide;
   }
 
-  /* Page header */
-  .page-header {
-    @apply mb-6 flex flex-col gap-1;
-  }
-  .page-title {
-    @apply text-2xl font-bold tracking-tight text-slate-900;
-  }
-  .page-subtitle {
-    @apply text-sm text-slate-500;
-  }
+  .page-header { @apply mb-6 flex flex-col gap-1; }
+  .page-title { @apply text-2xl font-bold tracking-tight text-space-900; }
+  .page-subtitle { @apply text-sm text-space-500; }
 
-  /* Section label */
   .section-label {
-    @apply text-[11px] font-semibold uppercase tracking-widest text-slate-400 mb-3;
+    @apply text-[11px] font-bold uppercase tracking-widest text-space-400 mb-3 flex items-center gap-1.5;
+  }
+  .section-label::before {
+    content: '';
+    @apply w-3 h-[2px] rounded-full bg-gradient-to-r from-violet-500 to-magenta-500;
   }
 
-  /* Badge variants */
   .badge-matched     { @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-50  text-emerald-700  border border-emerald-100; }
   .badge-discrepancy { @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-50     text-red-700     border border-red-100;     }
   .badge-pending     { @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50   text-amber-700   border border-amber-100;   }
 
-  /* Primary button override */
   .btn-primary {
-    @apply bg-violet-600 hover:bg-violet-700 text-white font-medium rounded-[8px]
-           shadow-[0_1px_2px_rgba(0,0,0,0.1)] transition-all duration-150
+    @apply bg-gradient-primary text-white font-semibold rounded-[10px]
+           shadow-glow-sm transition-all duration-200 hover:shadow-glow hover:-translate-y-0.5
            focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2;
   }
 
-  /* Ghost nav item */
   .nav-item {
-    @apply flex items-center gap-3 px-3 py-2 rounded-[8px] text-sm font-medium
-           transition-all duration-150 cursor-pointer;
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-sm font-medium
+           transition-all duration-200 cursor-pointer;
   }
   .nav-item-default {
-    @apply text-slate-400 hover:bg-slate-800 hover:text-slate-200;
+    @apply text-space-400 hover:bg-white/5 hover:text-space-100;
   }
   .nav-item-active {
-    @apply bg-violet-600 text-white shadow-[0_2px_8px_rgba(124,58,237,0.35)];
+    @apply bg-gradient-primary text-white shadow-glow-sm;
   }
 
-  /* Table */
   .data-table th {
-    @apply px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider
-           text-slate-500 bg-slate-50 border-b border-slate-100;
+    @apply px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider
+           text-space-500 bg-space-50 border-b border-space-100;
   }
   .data-table td {
-    @apply px-4 py-3 text-sm text-slate-700 border-b border-slate-50;
+    @apply px-4 py-3 text-sm text-space-700 border-b border-space-50;
   }
   .data-table tr:last-child td { @apply border-b-0; }
-  .data-table tr:hover td { @apply bg-slate-50/60; }
+  .data-table tr:hover td { @apply bg-violet-50/40; }
 
-  /* Input override */
   .input-clean {
-    @apply border-slate-200 bg-white focus:border-violet-400 focus:ring-violet-400
-           rounded-[8px] text-sm placeholder:text-slate-400;
+    @apply border-space-200 bg-white focus:border-violet-400 focus:ring-violet-400
+           rounded-[10px] text-sm placeholder:text-space-400;
+  }
+
+  /* Glass card — for use over gradient/dark backgrounds */
+  .glass-card {
+    @apply backdrop-blur-xl bg-white/[0.07] border border-white/[0.12] rounded-[16px];
   }
 }
 
@@ -198,14 +193,30 @@
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.animate-fade-in-up {
-  animation: fade-in-up 0.25s ease-out both;
-}
+.animate-fade-in-up { animation: fade-in-up 0.3s ease-out both; }
 
 @keyframes slide-in-left {
   from { opacity: 0; transform: translateX(-12px); }
   to   { opacity: 1; transform: translateX(0); }
 }
-.animate-slide-in-left {
-  animation: slide-in-left 0.2s ease-out both;
+.animate-slide-in-left { animation: slide-in-left 0.2s ease-out both; }
+
+/* Shimmer sweep — used on loading skeletons for a premium feel */
+.shimmer {
+  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(131,56,255,0.08) 50%, rgba(255,255,255,0) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 2.5s linear infinite;
+}
+
+/* ── Autofill override ─────────────────────────────────────────────────────
+   Chrome/Edge force a pale blue/yellow background on autofilled inputs
+   (email/password fields remembered by the browser) that ignores normal
+   background-color. This was making the login form's inputs look tinted
+   and inconsistent with the rest of the white card. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px white inset !important;
+  -webkit-text-fill-color: rgb(13 13 32) !important;
+  transition: background-color 5000s ease-in-out 0s;
 }

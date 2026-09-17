@@ -47,7 +47,7 @@ const QuickActionSkeleton = () => (
 const RoleBadge = ({ role }: { role: string }) => {
   const config: Record<string, string> = {
     super_admin: "bg-purple-100 text-purple-800 border-purple-200",
-    admin:       "bg-indigo-100 text-indigo-800 border-indigo-200",
+    admin:       "bg-violet-100 text-violet-800 border-violet-200",
     auditor:     "bg-blue-100  text-blue-800  border-blue-200",
     client:      "bg-green-100 text-green-800 border-green-200",
   };
@@ -112,11 +112,11 @@ const AuditorDashboard = ({ assignmentId }: { assignmentId: string | null }) => 
       <div className="col-span-3">
         <div className="flex justify-between text-xs text-gray-500 mb-1">
           <span>Your progress today</span>
-          <span className="font-semibold text-indigo-600">{stats.pct}%</span>
+          <span className="font-semibold text-violet-600">{stats.pct}%</span>
         </div>
         <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
           <div
-            className="h-full bg-indigo-500 rounded-full transition-all duration-700"
+            className="h-full bg-gradient-primary rounded-full transition-all duration-700"
             style={{ width: `${stats.pct}%` }}
           />
         </div>
@@ -146,7 +146,7 @@ const AdminStatsRow = () => {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
       {[
-        { label: "Active Audits",   value: stats.active,    icon: <ScanBarcode className="h-4 w-4" />, color: "indigo" },
+        { label: "Active Audits",   value: stats.active,    icon: <ScanBarcode className="h-4 w-4" />, color: "violet" },
         { label: "Awaiting Review", value: stats.submitted,  icon: <Clock className="h-4 w-4" />,       color: "amber"  },
         { label: "Finalized",       value: stats.finalized,  icon: <CheckCircle2 className="h-4 w-4" />, color: "green" },
         { label: "Locations",       value: stats.locations,  icon: <MapPin className="h-4 w-4" />,       color: "blue"  },
@@ -179,7 +179,7 @@ const ClientDashboard = () => {
   );
 
   const statusLabel: Record<string, { label: string; cls: string }> = {
-    active:    { label: "In Progress", cls: "bg-indigo-100 text-indigo-700 border-indigo-200" },
+    active:    { label: "In Progress", cls: "bg-violet-100 text-violet-700 border-violet-200" },
     submitted: { label: "Awaiting Your Sign-off", cls: "bg-amber-100 text-amber-700 border-amber-200" },
     finalized: { label: "Finalized", cls: "bg-green-100 text-green-700 border-green-200" },
     pending:   { label: "Not Started", cls: "bg-gray-100 text-gray-600 border-gray-200" },
@@ -205,7 +205,7 @@ const ClientDashboard = () => {
           </div>
         );
       })}
-      <Link to="/reports" className="block text-center text-xs text-indigo-600 hover:underline pt-1">
+      <Link to="/reports" className="block text-center text-xs text-violet-600 hover:underline pt-1">
         View all reports →
       </Link>
     </div>
@@ -215,8 +215,8 @@ const ClientDashboard = () => {
 // ── 4.6: Empty state ──────────────────────────────────────────────────────────
 const EmptyDashboardState = () => (
   <div className="flex flex-col items-center justify-center py-16 text-center gap-4">
-    <div className="p-5 bg-indigo-50 rounded-full">
-      <BarChart3 className="h-10 w-10 text-indigo-400" />
+    <div className="p-5 bg-violet-50 rounded-full">
+      <BarChart3 className="h-10 w-10 text-violet-400" />
     </div>
     <div>
       <p className="font-semibold text-gray-700 text-lg">No data yet</p>
@@ -225,7 +225,7 @@ const EmptyDashboardState = () => (
       </p>
     </div>
     <div className="flex gap-3 flex-wrap justify-center">
-      <Button asChild size="sm" className="bg-indigo-600 hover:bg-indigo-700 text-white">
+      <Button asChild size="sm" className="bg-gradient-primary text-white shadow-glow-sm hover:shadow-glow transition-all duration-200">
         <Link to="/upload"><Upload className="h-4 w-4 mr-1.5" />Upload Stock</Link>
       </Button>
       <Button asChild size="sm" variant="outline">
@@ -283,7 +283,7 @@ const Index = () => {
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-900">
-                Welcome, <span className="text-indigo-600">{currentUser?.name || "User"}</span>
+                Welcome, <span className="text-violet-600">{currentUser?.name || "User"}</span>
               </h1>
               <RoleBadge role={role} />
             </div>
@@ -295,7 +295,7 @@ const Index = () => {
             )}
             {selectedAssignmentId && (
               <p className="text-sm text-gray-500 mt-0.5">
-                Assignment <span className="text-indigo-600 font-semibold">#{selectedAssignmentId}</span>
+                Assignment <span className="text-violet-600 font-semibold">#{selectedAssignmentId}</span>
               </p>
             )}
           </div>
@@ -389,7 +389,7 @@ const Index = () => {
 
                   {/* Scan — auditors + admins */}
                   {canPerformAudits() && (
-                    <Button asChild className="h-24 flex flex-col bg-indigo-600 hover:bg-indigo-700 text-white shadow-md">
+                    <Button asChild className="h-24 flex flex-col bg-gradient-primary text-white shadow-glow-sm hover:shadow-glow hover:-translate-y-0.5 transition-all duration-200">
                       <Link to="/scanner">
                         <Barcode className="h-6 w-6 mb-1.5" />
                         Scan Items
@@ -399,9 +399,9 @@ const Index = () => {
 
                   {/* Search */}
                   {!isClientUser_ && (
-                    <Button asChild variant="outline" className="h-24 flex flex-col hover:bg-indigo-50 hover:text-indigo-700 shadow-sm">
+                    <Button asChild variant="outline" className="h-24 flex flex-col hover:bg-violet-50 hover:text-violet-700 hover:shadow-md hover:-translate-y-0.5 shadow-sm transition-all duration-200">
                       <Link to="/search">
-                        <Search className="h-6 w-6 mb-1.5 text-indigo-500" />
+                        <Search className="h-6 w-6 mb-1.5 text-violet-500" />
                         Search
                       </Link>
                     </Button>
@@ -409,9 +409,9 @@ const Index = () => {
 
                   {/* Upload — admins only */}
                   {canUploadData() && (
-                    <Button asChild variant="outline" className="h-24 flex flex-col hover:bg-indigo-50 hover:text-indigo-700 shadow-sm">
+                    <Button asChild variant="outline" className="h-24 flex flex-col hover:bg-violet-50 hover:text-violet-700 hover:shadow-md hover:-translate-y-0.5 shadow-sm transition-all duration-200">
                       <Link to="/upload">
-                        <Upload className="h-6 w-6 mb-1.5 text-indigo-500" />
+                        <Upload className="h-6 w-6 mb-1.5 text-violet-500" />
                         Upload Data
                       </Link>
                     </Button>
@@ -419,9 +419,9 @@ const Index = () => {
 
                   {/* Questionnaires */}
                   {canPerformAudits() && (
-                    <Button asChild variant="outline" className="h-24 flex flex-col hover:bg-indigo-50 hover:text-indigo-700 shadow-sm">
+                    <Button asChild variant="outline" className="h-24 flex flex-col hover:bg-violet-50 hover:text-violet-700 hover:shadow-md hover:-translate-y-0.5 shadow-sm transition-all duration-200">
                       <Link to="/questionnaire">
-                        <ClipboardList className="h-6 w-6 mb-1.5 text-indigo-500" />
+                        <ClipboardList className="h-6 w-6 mb-1.5 text-violet-500" />
                         Questionnaire
                       </Link>
                     </Button>
@@ -429,9 +429,9 @@ const Index = () => {
 
                   {/* Analytics — admins only */}
                   {isAdminUser && (
-                    <Button asChild variant="outline" className="h-24 flex flex-col hover:bg-indigo-50 hover:text-indigo-700 shadow-sm">
+                    <Button asChild variant="outline" className="h-24 flex flex-col hover:bg-violet-50 hover:text-violet-700 hover:shadow-md hover:-translate-y-0.5 shadow-sm transition-all duration-200">
                       <Link to="/analytics">
-                        <BarChart3 className="h-6 w-6 mb-1.5 text-indigo-500" />
+                        <BarChart3 className="h-6 w-6 mb-1.5 text-violet-500" />
                         Analytics
                       </Link>
                     </Button>
@@ -439,18 +439,18 @@ const Index = () => {
 
                   {/* Users — super admin */}
                   {isSuperAdmin() && (
-                    <Button asChild variant="outline" className="h-24 flex flex-col hover:bg-indigo-50 hover:text-indigo-700 shadow-sm">
+                    <Button asChild variant="outline" className="h-24 flex flex-col hover:bg-violet-50 hover:text-violet-700 hover:shadow-md hover:-translate-y-0.5 shadow-sm transition-all duration-200">
                       <Link to="/users">
-                        <Users className="h-6 w-6 mb-1.5 text-indigo-500" />
+                        <Users className="h-6 w-6 mb-1.5 text-violet-500" />
                         Manage Users
                       </Link>
                     </Button>
                   )}
 
                   {/* Reports — always visible */}
-                  <Button asChild variant="outline" className="h-24 flex flex-col hover:bg-indigo-50 hover:text-indigo-700 shadow-sm">
+                  <Button asChild variant="outline" className="h-24 flex flex-col hover:bg-violet-50 hover:text-violet-700 hover:shadow-md hover:-translate-y-0.5 shadow-sm transition-all duration-200">
                     <Link to="/reports">
-                      <FileSpreadsheet className="h-6 w-6 mb-1.5 text-indigo-500" />
+                      <FileSpreadsheet className="h-6 w-6 mb-1.5 text-violet-500" />
                       Reports
                     </Link>
                   </Button>
@@ -463,21 +463,21 @@ const Index = () => {
         {/* ── Client quick actions ── */}
         {isClientUser_ && (
           <div className="grid gap-3 grid-cols-2 sm:grid-cols-3">
-            <Button asChild className="h-24 flex flex-col bg-indigo-600 hover:bg-indigo-700 text-white shadow-md">
+            <Button asChild className="h-24 flex flex-col bg-gradient-primary text-white shadow-glow-sm hover:shadow-glow hover:-translate-y-0.5 transition-all duration-200">
               <Link to="/reports">
                 <FileSpreadsheet className="h-6 w-6 mb-1.5" />
                 View Reports
               </Link>
             </Button>
-            <Button asChild variant="outline" className="h-24 flex flex-col hover:bg-indigo-50 hover:text-indigo-700 shadow-sm">
+            <Button asChild variant="outline" className="h-24 flex flex-col hover:bg-violet-50 hover:text-violet-700 hover:shadow-md hover:-translate-y-0.5 shadow-sm transition-all duration-200">
               <Link to="/questionnaire">
-                <ClipboardList className="h-6 w-6 mb-1.5 text-indigo-500" />
+                <ClipboardList className="h-6 w-6 mb-1.5 text-violet-500" />
                 Questionnaires
               </Link>
             </Button>
-            <Button asChild variant="outline" className="h-24 flex flex-col hover:bg-indigo-50 hover:text-indigo-700 shadow-sm">
+            <Button asChild variant="outline" className="h-24 flex flex-col hover:bg-violet-50 hover:text-violet-700 hover:shadow-md hover:-translate-y-0.5 shadow-sm transition-all duration-200">
               <Link to="/analytics">
-                <BarChart3 className="h-6 w-6 mb-1.5 text-indigo-500" />
+                <BarChart3 className="h-6 w-6 mb-1.5 text-violet-500" />
                 Analytics
               </Link>
             </Button>

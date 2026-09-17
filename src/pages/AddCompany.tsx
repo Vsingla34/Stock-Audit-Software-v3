@@ -1,3 +1,8 @@
+// src/pages/AddCompany.tsx — Redesign v2: technical console language
+// (monospace ID chips, status pulse dots, left accent bars) matching
+// CompanySelection and AssignmentSelection. All business logic — the
+// careful foreign-key-ordered cascade delete especially — is untouched.
+
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom"; 
 import { Button } from "@/components/ui/button";
@@ -5,13 +10,10 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Save, Building2, Edit, Trash, Plus, ArrowLeft, LogOut } from "lucide-react"; 
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
 import { useUserAccess } from "@/hooks/useUserAccess"; 
 import { useUser } from "@/context/UserContext"; 
 
@@ -21,6 +23,27 @@ interface Company {
   address: string | null;
   is_active: boolean;
   created_at: string;
+}
+
+// Same muted palette function as CompanySelection, so a company's color
+// identity stays consistent whether you're picking it or managing it.
+const AVATAR_PALETTE = [
+  { bg: "#F5F1FF", text: "#6E1FEB", ring: "#E3D6FF" },
+  { bg: "#EEF6FF", text: "#1D6FE0", ring: "#CFE6FF" },
+  { bg: "#FDF3E8", text: "#B4650F", ring: "#F5DEC0" },
+  { bg: "#ECFAF3", text: "#0F8F5C", ring: "#C9F0DE" },
+  { bg: "#FCF0F8", text: "#B01D89", ring: "#F4D3EA" },
+  { bg: "#F0F2FE", text: "#4338CA", ring: "#DADEFB" },
+];
+function paletteFor(name: string) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
+}
+function getInitials(name: string) {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[1][0]).toUpperCase();
 }
 
 const AddCompany = () => {
@@ -226,10 +249,10 @@ const AddCompany = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+      <div className="flex items-center justify-center min-h-screen bg-space-50">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Loading companies...</p>
+          <div className="h-9 w-9 rounded-full border-[3px] border-violet-200 border-t-violet-600 animate-spin mx-auto mb-4" />
+          <p className="text-space-400 text-[13px] font-medium">Loading companies…</p>
         </div>
       </div>
     );
@@ -237,31 +260,33 @@ const AddCompany = () => {
 
   // Standalone Layout (No AppLayout/Sidebar)
   return (
-    <div className="min-h-screen bg-gray-50 p-4 md:p-8">
+    <div className="min-h-screen bg-space-50 p-4 md:p-8">
       <div className="max-w-6xl mx-auto space-y-8">
         
         {/* Header Section with Back Button */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-gray-200">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-space-200">
           <div className="space-y-1">
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2 mb-1">
                <Button 
                  variant="ghost" 
                  size="sm" 
-                 className="p-0 h-auto hover:bg-transparent text-gray-500 hover:text-indigo-600"
+                 className="p-0 h-auto hover:bg-transparent text-space-400 hover:text-violet-600"
                  onClick={() => navigate("/company-selection")}
                >
                  <ArrowLeft className="h-4 w-4 mr-1" />
                  Back to Selection
                </Button>
             </div>
-            <h1 className="text-3xl font-bold tracking-tight text-gray-900">Company Management</h1>
-            <p className="text-gray-500 text-lg">Manage companies and their information</p>
+            <p className="section-label">Admin console</p>
+            <h1 className="text-3xl font-bold tracking-tight text-space-900">Company Management</h1>
+            <p className="text-space-500 text-[14px] font-medium">Manage companies and their information</p>
           </div>
 
           <div className="flex items-center gap-3">
              <Button 
                 onClick={openAddDialog} 
-                className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-all"
+                className="text-white shadow-glow-sm hover:shadow-glow hover:-translate-y-0.5 transition-all duration-200"
+                style={{ background: "linear-gradient(135deg, #8338FF 0%, #6E1FEB 60%, #D0219A 100%)" }}
              >
                 <Plus className="mr-2 h-4 w-4" />
                 Add Company
@@ -270,7 +295,7 @@ const AddCompany = () => {
              <Button 
                variant="ghost" 
                onClick={handleLogout}
-               className="text-gray-500 hover:text-red-600 hover:bg-red-50"
+               className="text-space-500 hover:text-rose-600 hover:bg-rose-50"
              >
                <LogOut className="h-4 w-4 mr-2" />
                Log out
@@ -278,98 +303,141 @@ const AddCompany = () => {
           </div>
         </div>
 
-        <Card className="shadow-sm border-gray-200">
-          <CardHeader className="bg-gray-50/50 border-b border-gray-100">
-            <CardTitle className="flex items-center gap-2 text-gray-900">
-              <Building2 className="h-5 w-5 text-indigo-600" />
-              Companies ({companies.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {companies.length === 0 ? (
-              <div className="text-center py-12 text-gray-500">
-                <Building2 className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                <p>No companies found. Create your first company to get started.</p>
+        {/* ── Technical console table ── */}
+        <div className="rounded-xl border border-space-200 bg-white overflow-hidden">
+          <div className="flex items-center gap-2 px-5 py-3.5 bg-space-50 border-b border-space-200">
+            <Building2 className="h-4 w-4 text-violet-500" />
+            <span className="text-[13px] font-bold text-space-800">Companies</span>
+            <span className="text-[11px] font-mono font-medium px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 ml-1">
+              {companies.length}
+            </span>
+          </div>
+
+          {companies.length === 0 ? (
+            <div className="text-center py-16 text-space-400">
+              <Building2 className="h-10 w-10 mx-auto mb-4 opacity-20" />
+              <p className="text-[13px] font-medium">No companies found. Create your first company to get started.</p>
+            </div>
+          ) : (
+            <>
+              {/* Column header row */}
+              <div className="hidden md:grid grid-cols-[1fr_1fr_auto_auto_auto] gap-4 px-5 py-2.5 bg-space-50/60 border-b border-space-200">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-space-400 font-mono">Company</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-space-400 font-mono">Address</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-space-400 font-mono w-20">Status</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-space-400 font-mono w-24">Created</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-space-400 font-mono w-16 text-right">Actions</span>
               </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-gray-50 hover:bg-gray-50">
-                    <TableHead className="font-semibold text-gray-700">Company Name</TableHead>
-                    <TableHead className="font-semibold text-gray-700">Address</TableHead>
-                    <TableHead className="font-semibold text-gray-700">Status</TableHead>
-                    <TableHead className="font-semibold text-gray-700">Created</TableHead>
-                    <TableHead className="text-right font-semibold text-gray-700">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {companies.map((company) => (
-                    <TableRow key={company.id} className="hover:bg-gray-50/50 transition-colors border-gray-100">
-                      <TableCell className="font-medium text-gray-900">{company.name}</TableCell>
-                      <TableCell className="text-gray-600">{company.address || "—"}</TableCell>
-                      <TableCell>
-                        <Badge 
-                          variant="outline" 
-                          className={company.is_active 
-                            ? "bg-green-50 text-green-700 border-green-200" 
-                            : "bg-gray-100 text-gray-600 border-gray-200"}
+
+              <div className="divide-y divide-space-100">
+                {companies.map((company) => {
+                  const p = paletteFor(company.name);
+                  const shortId = company.id.replace(/-/g, "").slice(0, 8);
+                  return (
+                    <div
+                      key={company.id}
+                      className="group relative grid grid-cols-1 md:grid-cols-[1fr_1fr_auto_auto_auto] items-center gap-2 md:gap-4 px-5 py-3.5 transition-colors duration-150 hover:bg-violet-50/30"
+                    >
+                      {/* Left accent bar */}
+                      <div
+                        className="absolute left-0 top-0 bottom-0 w-[3px] transition-all duration-200 group-hover:w-1"
+                        style={{ backgroundColor: company.is_active ? p.ring : "#E2E8F0" }}
+                      />
+
+                      {/* Company + system ID */}
+                      <div className="flex items-center gap-3 min-w-0 pl-2">
+                        <div
+                          className="h-9 w-9 rounded-lg flex items-center justify-center shrink-0"
+                          style={{ backgroundColor: p.bg, border: `1px solid ${p.ring}` }}
                         >
+                          <span className="text-[11px] font-bold font-mono" style={{ color: p.text }}>
+                            {getInitials(company.name)}
+                          </span>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[14px] font-bold text-space-900 tracking-tight truncate">{company.name}</p>
+                          <span className="text-[10px] font-mono text-space-400">#{shortId}</span>
+                        </div>
+                      </div>
+
+                      {/* Address */}
+                      <p className="text-[13px] text-space-500 truncate pl-11 md:pl-0">
+                        {company.address || "—"}
+                      </p>
+
+                      {/* Status — pulse dot for active, static for inactive */}
+                      <div className="flex items-center gap-1.5 pl-11 md:pl-0">
+                        {company.is_active ? (
+                          <span className="relative flex h-1.5 w-1.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+                          </span>
+                        ) : (
+                          <span className="inline-flex rounded-full h-1.5 w-1.5 bg-space-300" />
+                        )}
+                        <span className={`text-[10px] font-mono font-semibold uppercase tracking-wide ${company.is_active ? "text-emerald-600" : "text-space-400"}`}>
                           {company.is_active ? "Active" : "Inactive"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-gray-600">{new Date(company.created_at).toLocaleDateString()}</TableCell>
-                      <TableCell className="text-right space-x-2">
+                        </span>
+                      </div>
+
+                      {/* Created date */}
+                      <p className="text-[12px] text-space-400 font-mono pl-11 md:pl-0">
+                        {new Date(company.created_at).toLocaleDateString()}
+                      </p>
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-1 pl-11 md:pl-0 md:justify-end">
                         <Button 
                           variant="ghost" 
                           size="icon" 
                           onClick={() => openEditDialog(company)}
-                          className="hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+                          className="h-8 w-8 hover:bg-violet-50 hover:text-violet-600 transition-colors"
                         >
-                          <Edit className="h-4 w-4" />
+                          <Edit className="h-3.5 w-3.5" />
                         </Button>
                         <Button 
                           variant="ghost" 
                           size="icon" 
                           onClick={() => openDeleteDialog(company)}
-                          className="hover:bg-red-50 hover:text-red-600 transition-colors"
+                          className="h-8 w-8 hover:bg-red-50 hover:text-red-600 transition-colors"
                         >
-                          <Trash className="h-4 w-4 text-gray-400" />
+                          <Trash className="h-3.5 w-3.5 text-space-400" />
                         </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
 
         {/* Add Company Dialog */}
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
-              <DialogTitle className="text-gray-900">Add New Company</DialogTitle>
-              <DialogDescription className="text-gray-500">Enter the company details below.</DialogDescription>
+              <DialogTitle className="text-space-900">Add New Company</DialogTitle>
+              <DialogDescription className="text-space-500">Enter the company details below.</DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="space-y-2">
-                <Label htmlFor="add-name" className="text-gray-700">Company Name *</Label>
+                <Label htmlFor="add-name" className="text-space-700">Company Name *</Label>
                 <Input
                   id="add-name"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   placeholder="Enter company name"
-                  className="focus-visible:ring-indigo-600"
+                  className="focus-visible:ring-violet-500 border-space-200"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="add-address" className="text-gray-700">Address</Label>
+                <Label htmlFor="add-address" className="text-space-700">Address</Label>
                 <Textarea
                   id="add-address"
                   value={formData.address}
                   onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                   placeholder="Enter company address"
-                  className="focus-visible:ring-indigo-600"
+                  className="focus-visible:ring-violet-500 border-space-200"
                 />
               </div>
               <div className="flex items-center space-x-2">
@@ -377,14 +445,18 @@ const AddCompany = () => {
                   id="add-active"
                   checked={formData.is_active}
                   onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
-                  className="data-[state=checked]:bg-indigo-600"
+                  className="data-[state=checked]:bg-violet-600"
                 />
-                <Label htmlFor="add-active" className="text-gray-700 font-normal">Active</Label>
+                <Label htmlFor="add-active" className="text-space-700 font-normal">Active</Label>
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} className="border-gray-200 text-gray-700">Cancel</Button>
-              <Button onClick={handleAddCompany} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} className="border-space-200 text-space-700">Cancel</Button>
+              <Button
+                onClick={handleAddCompany}
+                className="text-white shadow-glow-sm"
+                style={{ background: "linear-gradient(135deg, #8338FF 0%, #6E1FEB 60%, #D0219A 100%)" }}
+              >
                 <Save className="mr-2 h-4 w-4" />
                 Add Company
               </Button>
@@ -396,26 +468,26 @@ const AddCompany = () => {
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
-              <DialogTitle className="text-gray-900">Edit Company</DialogTitle>
-              <DialogDescription className="text-gray-500">Update the company details below.</DialogDescription>
+              <DialogTitle className="text-space-900">Edit Company</DialogTitle>
+              <DialogDescription className="text-space-500">Update the company details below.</DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="space-y-2">
-                <Label htmlFor="edit-name" className="text-gray-700">Company Name *</Label>
+                <Label htmlFor="edit-name" className="text-space-700">Company Name *</Label>
                 <Input
                   id="edit-name"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="focus-visible:ring-indigo-600"
+                  className="focus-visible:ring-violet-500 border-space-200"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-address" className="text-gray-700">Address</Label>
+                <Label htmlFor="edit-address" className="text-space-700">Address</Label>
                 <Textarea
                   id="edit-address"
                   value={formData.address}
                   onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                  className="focus-visible:ring-indigo-600"
+                  className="focus-visible:ring-violet-500 border-space-200"
                 />
               </div>
               <div className="flex items-center space-x-2">
@@ -423,14 +495,18 @@ const AddCompany = () => {
                   id="edit-active"
                   checked={formData.is_active}
                   onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
-                  className="data-[state=checked]:bg-indigo-600"
+                  className="data-[state=checked]:bg-violet-600"
                 />
-                <Label htmlFor="edit-active" className="text-gray-700 font-normal">Active</Label>
+                <Label htmlFor="edit-active" className="text-space-700 font-normal">Active</Label>
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} className="border-gray-200 text-gray-700">Cancel</Button>
-              <Button onClick={handleEditCompany} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} className="border-space-200 text-space-700">Cancel</Button>
+              <Button
+                onClick={handleEditCompany}
+                className="text-white shadow-glow-sm"
+                style={{ background: "linear-gradient(135deg, #8338FF 0%, #6E1FEB 60%, #D0219A 100%)" }}
+              >
                 <Save className="mr-2 h-4 w-4" />
                 Update Company
               </Button>
@@ -443,7 +519,7 @@ const AddCompany = () => {
           <DialogContent>
             <DialogHeader>
               <DialogTitle className="text-red-600">Delete Company</DialogTitle>
-              <DialogDescription className="text-gray-500">
+              <DialogDescription className="text-space-500">
                 Are you sure you want to delete "{selectedCompany?.name}"? 
                 {userRole === "super_admin" 
                   ? " This will PERMANENTLY DELETE all locations, inventory items, and audit data associated with this company."
@@ -451,7 +527,7 @@ const AddCompany = () => {
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} className="border-gray-200 text-gray-700">Cancel</Button>
+              <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} className="border-space-200 text-space-700">Cancel</Button>
               <Button variant="destructive" onClick={handleDeleteCompany} className="bg-red-600 hover:bg-red-700 text-white">
                 {userRole === "super_admin" ? "Force Delete" : "Delete"}
               </Button>

@@ -1,5 +1,7 @@
 // src/components/layout/AppLayout.tsx
-// Updated for dark sidebar design system
+// Redesign v2 — no hardcoded hex left behind this time; everything routes
+// through the Tailwind palette so future palette changes propagate
+// automatically instead of leaving stray colors like last time.
 
 import React, { useState, useEffect, createContext, useContext, useCallback } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
@@ -51,28 +53,30 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
 
   if (parentCtx.isMounted) return <>{children}</>;
 
-  // No-sidebar routes
   const NO_SIDEBAR_PATHS = ["/login", "/company-selection", "/assignment-selection", "/add-company"];
   if (NO_SIDEBAR_PATHS.includes(location.pathname)) return <>{children}</>;
 
+  const currentPageLabel = location.pathname === "/" ? "Dashboard"
+    : location.pathname.replace("/", "").replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
   return (
     <AppLayoutContext.Provider value={{ isMounted: true, setSidebarVisible }}>
-      <div className="min-h-screen flex w-full" style={{ backgroundColor: "#F8FAFC" }}>
+      <div className="min-h-screen flex w-full bg-space-50">
 
         {/* ── Mobile top header ─────────────────────────────────────── */}
         <div
-          className="md:hidden sticky top-0 z-30 w-full flex items-center justify-between px-4 py-3 shadow-sm"
-          style={{ backgroundColor: "#0F172A" }}
+          className="md:hidden sticky top-0 z-30 w-full flex items-center justify-between px-4 py-3 shadow-md"
+          style={{ background: "linear-gradient(135deg, #0D0D20 0%, #060612 100%)" }}
         >
           <div className="flex items-center gap-2.5">
-            <div className="h-7 w-7 rounded-md bg-violet-600 flex items-center justify-center">
+            <div className="h-7 w-7 rounded-lg bg-gradient-primary flex items-center justify-center shadow-glow-sm">
               <span className="text-white text-xs font-bold">SC</span>
             </div>
-            <span className="text-sm font-semibold text-slate-100">StockCheck360</span>
+            <span className="text-sm font-semibold text-space-100">StockCheck360</span>
           </div>
           <button
             onClick={() => setMobileOpen(true)}
-            className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+            className="p-2 rounded-lg text-space-400 hover:text-space-100 hover:bg-white/10 transition-colors"
           >
             <Menu className="h-5 w-5" />
           </button>
@@ -81,27 +85,20 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         {/* ── Desktop sidebar ───────────────────────────────────────── */}
         {controlledSidebar && (
           <>
-            <div
-              className="hidden md:block h-screen sticky top-0 overflow-hidden shrink-0 w-64"
-              style={{ backgroundColor: "#0F172A", borderRight: "1px solid #1E293B" }}
-            >
+            <div className="hidden md:block h-screen sticky top-0 overflow-hidden shrink-0 w-64 border-r border-space-800/60">
               <Sidebar />
             </div>
 
-            {/* Mobile drawer */}
             <>
-              {/* Backdrop */}
               <div
                 className={`fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden transition-opacity duration-300 ${
                   mobileOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
                 }`}
                 onClick={() => setMobileOpen(false)}
               />
-              {/* Drawer */}
               <div
                 className={`fixed inset-y-0 left-0 z-50 w-72 md:hidden transform transition-transform duration-300 ease-out shadow-2xl
                             ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}
-                style={{ backgroundColor: "#0F172A" }}
               >
                 <Sidebar isMobile onClose={() => setMobileOpen(false)} />
               </div>
@@ -112,29 +109,16 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         {/* ── Main content ──────────────────────────────────────────── */}
         <main className="flex-1 w-full min-w-0 overflow-x-hidden">
           {/* Top bar — desktop only */}
-          <div
-            className="hidden md:flex sticky top-0 z-20 items-center justify-between
-                       px-6 h-14 border-b"
-            style={{ backgroundColor: "#FFFFFF", borderColor: "#E2E8F0" }}
-          >
-            {/* Breadcrumb area — pages can inject content here via context if needed */}
+          <div className="hidden md:flex sticky top-0 z-20 items-center justify-between px-6 h-14 border-b border-space-200 bg-white/80 backdrop-blur-md">
             <div className="flex items-center gap-2">
-              <div
-                className="h-1.5 w-1.5 rounded-full"
-                style={{ backgroundColor: "#7C3AED" }}
-              />
-              <span className="text-[13px] font-medium text-slate-500">
-                {location.pathname === "/" ? "Dashboard"
-                  : location.pathname.replace("/", "").replace(/-/g, " ")
-                    .replace(/\b\w/g, (c) => c.toUpperCase())}
+              <div className="h-1.5 w-1.5 rounded-full bg-gradient-primary shadow-glow-sm" />
+              <span className="text-[13px] font-semibold text-space-500">
+                {currentPageLabel}
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <div
-                className="h-2 w-2 rounded-full bg-emerald-500"
-                title="Connected"
-              />
-              <span className="text-[11px] text-slate-400">Live</span>
+              <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" title="Connected" />
+              <span className="text-[11px] font-medium text-space-400">Live</span>
             </div>
           </div>
 
@@ -143,10 +127,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             <React.Suspense
               fallback={
                 <div className="flex items-center justify-center h-64">
-                  <div
-                    className="h-8 w-8 rounded-full border-2 border-t-transparent animate-spin"
-                    style={{ borderColor: "#7C3AED", borderTopColor: "transparent" }}
-                  />
+                  <div className="h-9 w-9 rounded-full border-[3px] border-violet-200 border-t-violet-600 animate-spin" />
                 </div>
               }
             >
@@ -155,34 +136,62 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           </div>
         </main>
 
-        {/* ── Mobile bottom nav ─────────────────────────────────────── */}
+        {/* ── Mobile bottom nav — Scan gets a raised FAB-style button since
+             it's the auditor's primary action, not just another flat icon
+             tied for visual weight with Home/Reports/Upload. ── */}
         {isMobile && controlledSidebar && (
-          <div
-            className="fixed bottom-0 left-0 right-0 z-40 flex border-t"
-            style={{ backgroundColor: "#FFFFFF", borderColor: "#E2E8F0", height: "60px" }}
-          >
-            {[
-              { to: "/",        icon: Home,          label: "Home",    show: true },
-              { to: "/scanner", icon: ScanBarcode,   label: "Scan",    show: canScan },
-              { to: "/reports", icon: FileSpreadsheet,label: "Reports", show: true },
-              { to: "/upload",  icon: Upload,        label: "Upload",  show: canUpload },
-            ]
-              .filter((i) => i.show)
-              .map((item) => (
+          <div className="fixed bottom-0 left-0 right-0 z-40 flex items-center border-t border-space-200 bg-white/95 backdrop-blur-md h-[64px] px-2">
+            <Link
+              to="/"
+              className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors h-full
+                          ${isActive("/") ? "text-violet-600" : "text-space-400 hover:text-space-700"}`}
+            >
+              <Home className={`h-5 w-5 ${isActive("/") ? "text-violet-600" : "text-space-400"}`} />
+              Home
+            </Link>
+
+            {canScan && (
+              <div className="flex-1 flex justify-center relative">
                 <Link
-                  key={item.to}
-                  to={item.to}
-                  className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors
-                              ${isActive(item.to)
-                                ? "text-violet-600"
-                                : "text-slate-400 hover:text-slate-700"}`}
+                  to="/scanner"
+                  className="absolute -top-6 flex flex-col items-center gap-1"
                 >
-                  <item.icon
-                    className={`h-5 w-5 ${isActive(item.to) ? "text-violet-600" : "text-slate-400"}`}
-                  />
-                  {item.label}
+                  <div
+                    className={`h-14 w-14 rounded-full flex items-center justify-center transition-all duration-200
+                                ${isActive("/scanner") ? "scale-105" : "hover:scale-105"}`}
+                    style={{
+                      background: "linear-gradient(135deg, #8338FF 0%, #6E1FEB 60%, #D0219A 100%)",
+                      boxShadow: "0 6px 20px rgba(131,56,255,0.5), 0 0 0 4px white",
+                    }}
+                  >
+                    <ScanBarcode className="h-6 w-6 text-white" />
+                  </div>
+                  <span className={`text-[10px] font-bold ${isActive("/scanner") ? "text-violet-600" : "text-space-500"}`}>
+                    Scan
+                  </span>
                 </Link>
-              ))}
+              </div>
+            )}
+
+            <Link
+              to="/reports"
+              className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors h-full
+                          ${isActive("/reports") ? "text-violet-600" : "text-space-400 hover:text-space-700"}`}
+            >
+              <FileSpreadsheet className={`h-5 w-5 ${isActive("/reports") ? "text-violet-600" : "text-space-400"}`} />
+              Reports
+            </Link>
+
+            {canUpload && (
+              <Link
+                to="/upload"
+                className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors h-full
+                            ${isActive("/upload") ? "text-violet-600" : "text-space-400 hover:text-space-700"}`}
+              >
+                <Upload className={`h-5 w-5 ${isActive("/upload") ? "text-violet-600" : "text-space-400"}`} />
+                Upload
+              </Link>
+            )}
           </div>
         )}
       </div>

@@ -50,86 +50,87 @@ export default {
           DEFAULT:    "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
-        
-        // ── Professional Brand Palette ─────────────────────────────────
-        // We keep the object name "violet" so your existing code doesn't break,
-        // but the actual colors are now a crisp, enterprise-grade Azure Blue.
+        // ── Electric Violet — the real primary, vivid not muted ──────────
         violet: {
-          50:  "#eff6ff",
-          100: "#dbeafe",
-          200: "#bfdbfe",
-          300: "#93c5fd",
-          400: "#60a5fa",
-          500: "#3b82f6",
-          600: "#2563eb",   // ← PRIMARY (Corporate Blue)
-          700: "#1d4ed8",
-          800: "#1e40af",
-          900: "#1e3a8a",
-          950: "#172554",
+          50:  "#F5F1FF",
+          100: "#EBE3FF",
+          200: "#D6C6FF",
+          300: "#B899FF",
+          400: "#9A66FF",
+          500: "#8338FF",   // vivid
+          600: "#6E1FEB",   // ← PRIMARY
+          700: "#5A17C4",
+          800: "#47139C",
+          900: "#360F78",
+          950: "#1F0850",
         },
-        
-        // ── Refined Neutrals ───────────────────────────────────────────
-        slate: {
-          50:  "#F8FAFC",
-          100: "#F1F5F9",
-          200: "#E2E8F0",
-          300: "#CBD5E1",
-          400: "#94A3B8",
-          500: "#64748B",
-          600: "#475569",
-          700: "#334155",
-          800: "#1E293B",
-          900: "#0F172A",
-          950: "#0B0F19",   // ← Darkened for a stricter, inkier background
+        // Secondary accent — magenta/pink, used sparingly for gradient pairs
+        magenta: {
+          400: "#F056C4",
+          500: "#E63DB0",
+          600: "#D0219A",
+        },
+        // Deep space neutrals — cooler and darker than generic slate
+        space: {
+          50:  "#F7F7FB",
+          100: "#ECECF5",
+          200: "#D8D8E6",
+          300: "#ABABC7",
+          400: "#7B7B9E",
+          500: "#54547A",
+          600: "#3D3D5C",
+          700: "#2A2A45",
+          800: "#191930",
+          900: "#0D0D20",
+          950: "#060612",
         },
       },
       fontFamily: {
-        sans: [
-          "Inter",
-          "ui-sans-serif",
-          "-apple-system",
-          "BlinkMacSystemFont",
-          "Segoe UI",
-          "sans-serif",
-        ],
+        sans: ["Inter", "ui-sans-serif", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"],
       },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
+      backgroundImage: {
+        "gradient-primary": "linear-gradient(135deg, #8338FF 0%, #6E1FEB 50%, #D0219A 100%)",
+        "gradient-space":   "linear-gradient(180deg, #0D0D20 0%, #060612 100%)",
+        "gradient-radial-violet": "radial-gradient(circle, rgba(131,56,255,0.35) 0%, transparent 70%)",
+        "gradient-radial-magenta": "radial-gradient(circle, rgba(208,33,154,0.25) 0%, transparent 70%)",
+      },
       boxShadow: {
-        xs:   "0 1px 2px 0 rgb(0 0 0 / 0.04)",
-        sm:   "0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.04)",
-        md:   "0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.04)",
-        lg:   "0 10px 15px -3px rgb(0 0 0 / 0.06), 0 4px 6px -4px rgb(0 0 0 / 0.04)",
-        
-        // Replaced the blurry neon glow with a sharp, professional elevation shadow
-        "violet": "0 1px 3px rgba(37, 99, 235, 0.25), 0 1px 2px rgba(37, 99, 235, 0.15)",
+        xs: "0 1px 2px 0 rgb(0 0 0 / 0.04)",
+        sm: "0 1px 3px 0 rgb(0 0 0 / 0.08), 0 1px 2px -1px rgb(0 0 0 / 0.06)",
+        md: "0 4px 6px -1px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.06)",
+        lg: "0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.06)",
+        glow: "0 0 24px rgba(131, 56, 255, 0.45), 0 4px 12px rgba(0,0,0,0.25)",
+        "glow-sm": "0 0 12px rgba(131, 56, 255, 0.35)",
       },
       keyframes: {
-        "accordion-down": {
-          from: { height: "0" },
-          to:   { height: "var(--radix-accordion-content-height)" },
+        "accordion-down": { from: { height: "0" }, to: { height: "var(--radix-accordion-content-height)" } },
+        "accordion-up":   { from: { height: "var(--radix-accordion-content-height)" }, to: { height: "0" } },
+        "fade-in-up":     { from: { opacity: "0", transform: "translateY(8px)" }, to: { opacity: "1", transform: "translateY(0)" } },
+        "float": {
+          "0%, 100%": { transform: "translateY(0px)" },
+          "50%":      { transform: "translateY(-8px)" },
         },
-        "accordion-up": {
-          from: { height: "var(--radix-accordion-content-height)" },
-          to:   { height: "0" },
+        "pulse-glow": {
+          "0%, 100%": { opacity: "1" },
+          "50%":      { opacity: "0.6" },
         },
-        "fade-in-up": {
-          from: { opacity: "0", transform: "translateY(8px)" },
-          to:   { opacity: "1", transform: "translateY(0)" },
-        },
-        "slide-in-left": {
-          from: { opacity: "0", transform: "translateX(-12px)" },
-          to:   { opacity: "1", transform: "translateX(0)" },
+        "shimmer": {
+          "0%":   { backgroundPosition: "-200% 0" },
+          "100%": { backgroundPosition: "200% 0" },
         },
       },
       animation: {
-        "accordion-down":  "accordion-down 0.2s ease-out",
-        "accordion-up":    "accordion-up 0.2s ease-out",
-        "fade-in-up":      "fade-in-up 0.25s ease-out both",
-        "slide-in-left":   "slide-in-left 0.2s ease-out both",
+        "accordion-down": "accordion-down 0.2s ease-out",
+        "accordion-up":   "accordion-up 0.2s ease-out",
+        "fade-in-up":     "fade-in-up 0.3s ease-out both",
+        "float":          "float 6s ease-in-out infinite",
+        "pulse-glow":     "pulse-glow 2.5s ease-in-out infinite",
+        "shimmer":        "shimmer 2.5s linear infinite",
       },
     },
   },

@@ -451,33 +451,33 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
             <div className={isPickerMode ? "" : "order-1 lg:order-1 flex flex-col"}>
                 <SyncStatusBanner />
 
-                <Card className="shadow-sm border-gray-200">
+                <Card className="shadow-sm border-space-200">
                     {!isPickerMode && (
                     <CardHeader className="pb-3">
-                        <CardTitle className="flex items-center justify-between text-gray-900">
+                        <CardTitle className="flex items-center justify-between text-space-900">
                             <div className="flex items-center gap-2">
-                                <Barcode className="h-5 w-5 text-indigo-600" />
+                                <Barcode className="h-5 w-5 text-violet-600" />
                                 <span>Scanner</span>
                             </div>
                             {isScanning && !isProcessing && <span className="text-xs font-normal text-red-500 animate-pulse flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500"/> Live</span>}
-                            {isProcessing && <span className="text-xs font-normal text-indigo-600 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin"/> Processing</span>}
+                            {isProcessing && <span className="text-xs font-normal text-violet-600 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin"/> Processing</span>}
                         </CardTitle>
                     </CardHeader>
                     )}
                     <CardContent className={isPickerMode ? "pt-6" : ""}>
                         <div className="space-y-4">
                             {!isPickerMode && (
-                                <div className="flex items-center gap-2 mb-2 p-2 bg-gray-50 rounded border border-gray-200">
-                                    <MapPin className="h-4 w-4 text-indigo-500" />
-                                    <span className="text-sm font-medium text-gray-700 truncate">
+                                <div className="flex items-center gap-2 mb-2 p-2 bg-space-50 rounded border border-space-200">
+                                    <MapPin className="h-4 w-4 text-violet-500" />
+                                    <span className="text-sm font-medium text-space-700 truncate">
                                         {locations.find(l => l.id === selectedLocation)?.name || 'Select Assignment...'}
                                     </span>
                                 </div>
                             )}
 
                             {!isPickerMode && (
-                                <div className="p-3 bg-indigo-50/50 rounded-lg border border-indigo-100">
-                                    <Label className="text-xs font-semibold text-gray-500 uppercase mb-2 block">
+                                <div className="p-3 bg-violet-50/50 rounded-lg border border-violet-100">
+                                    <Label className="text-xs font-semibold text-space-500 uppercase mb-2 block">
                                          Audit Sub-Location (Box / Row / Rack)
                                     </Label>
                                     <div className="flex gap-2 mb-2">
@@ -499,7 +499,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                                                 variant="outline"
                                                 role="combobox"
                                                 aria-expanded={subLocationSearchOpen}
-                                                className="w-full justify-between bg-white text-gray-700 font-normal"
+                                                className="w-full justify-between bg-white text-space-700 font-normal"
                                             >
                                                 {selectedSubLocation
                                                     ? selectedSubLocation
@@ -546,27 +546,27 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                             
                             {isHardwareScannerMode ? (
                                 <div>
-                                    <div className="w-full aspect-video relative bg-indigo-50 rounded-lg overflow-hidden mb-4 flex items-center justify-center border-2 border-indigo-200 border-dashed">
+                                    <div className="w-full aspect-video relative bg-violet-50 rounded-lg overflow-hidden mb-4 flex items-center justify-center border-2 border-violet-200 border-dashed">
                                         <div className="text-center p-4">
-                                            <Keyboard className="h-10 w-10 text-indigo-500 mx-auto mb-2 animate-bounce" />
-                                            <p className="text-indigo-900 font-semibold">Hardware Mode</p>
-                                            <p className="text-sm text-indigo-600">Ready to scan with external device</p>
+                                            <Keyboard className="h-10 w-10 text-violet-500 mx-auto mb-2 animate-bounce" />
+                                            <p className="text-violet-900 font-semibold">Hardware Mode</p>
+                                            <p className="text-sm text-violet-600">Ready to scan with external device</p>
                                             {scannedBarcode && (
-                                                <div className="mt-3 inline-flex items-center gap-2 bg-white px-3 py-1 rounded-full border border-indigo-100 shadow-sm">
+                                                <div className="mt-3 inline-flex items-center gap-2 bg-white px-3 py-1 rounded-full border border-violet-100 shadow-sm">
                                                     <Check className="h-3 w-3 text-green-500" />
-                                                    <span className="text-xs font-mono text-gray-700">{scannedBarcode}</span>
+                                                    <span className="text-xs font-mono text-space-700">{scannedBarcode}</span>
                                                 </div>
                                             )}
                                         </div>
                                     </div>
-                                    <Button variant="destructive" className="w-full" onClick={handleStopHardwareScanner}>
+                                    <Button variant="destructive" className="w-full h-14 text-[15px] font-bold" onClick={handleStopHardwareScanner}>
                                         <X className="mr-2 h-4 w-4" /> Stop Hardware Scanner
                                     </Button>
                                 </div>
                             ) : (
                                 <div>
                                     <div 
-                                        className={`w-full relative rounded-lg overflow-hidden mb-4 border border-gray-200 bg-black ${!isScanning ? 'hidden' : 'block'}`}
+                                        className={`w-full relative rounded-lg overflow-hidden mb-4 border border-space-200 bg-black ${!isScanning ? 'hidden' : 'block'}`}
                                         style={{ minHeight: '250px' }} 
                                     >
                                         <div id={scannerElementId} className="w-full h-full" />
@@ -574,15 +574,15 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                                             <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-10 backdrop-blur-[2px]">
                                                 <div className="bg-white px-4 py-2 rounded-full flex items-center gap-2 shadow-lg">
                                                     <Check className="h-5 w-5 text-green-600" />
-                                                    <span className="font-semibold text-gray-800">Scanned!</span>
+                                                    <span className="font-semibold text-space-800">Scanned!</span>
                                                 </div>
                                             </div>
                                         )}
                                     </div>
                                     
                                     {!isScanning && (
-                                        <div className="w-full aspect-video relative bg-gray-100 rounded-lg overflow-hidden mb-4 flex items-center justify-center border border-gray-200">
-                                            <div className="text-center text-gray-400">
+                                        <div className="w-full aspect-video relative bg-space-100 rounded-lg overflow-hidden mb-4 flex items-center justify-center border border-space-200">
+                                            <div className="text-center text-space-400">
                                                 <Camera className="h-10 w-10 mx-auto mb-2 opacity-50" />
                                                 <p className="text-sm">Camera inactive</p>
                                             </div>
@@ -590,15 +590,15 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                                     )}
                                     
                                     {isScanning ? (
-                                        <Button variant="destructive" className="w-full" onClick={handleStopScanning}>
+                                        <Button variant="destructive" className="w-full h-14 text-[15px] font-bold" onClick={handleStopScanning}>
                                             <X className="mr-2 h-4 w-4" /> Stop Camera
                                         </Button>
                                     ) : (
                                         <div className="grid grid-cols-2 gap-3">
-                                            <Button variant="default" className="w-full bg-indigo-600 hover:bg-indigo-700" onClick={handleStartScanning} disabled={!isPickerMode && (!selectedLocation || !selectedSubLocation)}>
+                                            <Button variant="default" className="w-full h-14 text-[15px] font-bold bg-gradient-primary hover:shadow-glow shadow-glow-sm transition-all" onClick={handleStartScanning} disabled={!isPickerMode && (!selectedLocation || !selectedSubLocation)}>
                                                 <Scan className="mr-2 h-4 w-4" /> Camera
                                             </Button>
-                                            <Button variant="outline" className="w-full border-gray-300 text-gray-700" onClick={handleStartHardwareScanner} disabled={!isPickerMode && (!selectedLocation || !selectedSubLocation)}>
+                                            <Button variant="outline" className="w-full h-14 text-[15px] font-bold border-space-300 text-space-700" onClick={handleStartHardwareScanner} disabled={!isPickerMode && (!selectedLocation || !selectedSubLocation)}>
                                                 <Keyboard className="mr-2 h-4 w-4" /> Hardware
                                             </Button>
                                         </div>
@@ -607,11 +607,11 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                             )}
                             
                             {!isPickerMode && (
-                                <div className="border-t border-gray-100 pt-4">
+                                <div className="border-t border-space-100 pt-4">
                                     <form onSubmit={handleManualSubmit} className="flex gap-2">
-                                        <Input placeholder="Manual barcode..." value={manualBarcode} onChange={(e) => setManualBarcode(e.target.value)} disabled={!selectedLocation} className="focus:ring-indigo-600" />
-                                        <Button type="submit" disabled={!selectedLocation || !selectedSubLocation || !manualBarcode.trim()} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-                                            <Check className="h-4 w-4" />
+                                        <Input placeholder="Manual barcode..." value={manualBarcode} onChange={(e) => setManualBarcode(e.target.value)} disabled={!selectedLocation} className="h-12 text-[15px] focus:ring-violet-500" />
+                                        <Button type="submit" disabled={!selectedLocation || !selectedSubLocation || !manualBarcode.trim()} className="h-12 w-12 shrink-0 bg-gradient-primary hover:shadow-glow shadow-glow-sm transition-all text-white">
+                                            <Check className="h-5 w-5" />
                                         </Button>
                                     </form>
                                 </div>
@@ -640,8 +640,8 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                             <RecentActivity selectedLocation={selectedLocation} />
                         </>
                     ) : (
-                        <Card className="h-full flex items-center justify-center p-6 shadow-sm border-gray-200">
-                            <div className="text-center text-gray-400">
+                        <Card className="h-full flex items-center justify-center p-6 shadow-sm border-space-200">
+                            <div className="text-center text-space-400">
                                 <MapPin className="h-12 w-12 mx-auto mb-4 opacity-20" />
                                 <p>Please select an active assignment <br/> to start scanning.</p>
                             </div>
@@ -658,15 +658,15 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                             <AlertCircle className="h-5 w-5" />
                             <DialogTitle>Item Not Found</DialogTitle>
                         </div>
-                        <DialogDescription className="pt-2 text-gray-700">
-                            The barcode <span className="font-mono font-bold text-gray-900">{scannedUnknownBarcode}</span> was not found in the master data for this location.
+                        <DialogDescription className="pt-2 text-space-700">
+                            The barcode <span className="font-mono font-bold text-space-900">{scannedUnknownBarcode}</span> was not found in the master data for this location.
                         </DialogDescription>
                     </DialogHeader>
                     <DialogFooter className="flex flex-row gap-2 sm:justify-end">
                         <Button variant="outline" onClick={handleDeclineNotFound} className="flex-1 sm:flex-none">
                             Decline
                         </Button>
-                        <Button onClick={handleOpenAddForm} className="bg-indigo-600 hover:bg-indigo-700 flex-1 sm:flex-none">
+                        <Button onClick={handleOpenAddForm} className="bg-gradient-primary hover:shadow-glow flex-1 shadow-glow-sm transition-all sm:flex-none">
                             <PackagePlus className="mr-2 h-4 w-4" />
                             Add New Item
                         </Button>
@@ -684,8 +684,8 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
                         <div className="grid gap-2">
-                            <Label htmlFor="scan-sku" className="text-gray-500">SKU / Barcode</Label>
-                            <Input id="scan-sku" value={newItem.sku} readOnly className="bg-gray-50 font-mono" />
+                            <Label htmlFor="scan-sku" className="text-space-500">SKU / Barcode</Label>
+                            <Input id="scan-sku" value={newItem.sku} readOnly className="bg-space-50 font-mono" />
                         </div>
                         <div className="grid gap-2">
                             <Label htmlFor="scan-name">Item Name</Label>
@@ -755,7 +755,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                         {/* Dynamic Fields from Master Data + Rate Field */}
                         {dynamicColumns.map(col => (
                             <div className="grid gap-2" key={col}>
-                                <Label htmlFor={`scan-custom-${col}`} className="capitalize text-gray-700">
+                                <Label htmlFor={`scan-custom-${col}`} className="capitalize text-space-700">
                                     {col === 'unit_price' ? 'Rate / Unit Price' : col.replace(/_/g, ' ')}
                                 </Label>
                                 <Input 
@@ -778,14 +778,14 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                             </div>
                         ))}
 
-                        <div className="bg-indigo-50 p-3 rounded-md border border-indigo-100 text-xs text-indigo-800">
+                        <div className="bg-violet-50 p-3 rounded-md border border-violet-100 text-xs text-violet-800">
                             <strong>Note:</strong> System Quantity will be 0. 
                             This item will be recorded at <strong>{selectedSubLocation}</strong>.
                         </div>
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
-                        <Button onClick={handleAddSurplus} disabled={!newItem.name || (categoryOption === 'Other' && !newItem.category)} className="bg-indigo-600 hover:bg-indigo-700">
+                        <Button onClick={handleAddSurplus} disabled={!newItem.name || (categoryOption === 'Other' && !newItem.category)} className="bg-gradient-primary hover:shadow-glow shadow-glow-sm transition-all">
                             Save Item
                         </Button>
                     </DialogFooter>
