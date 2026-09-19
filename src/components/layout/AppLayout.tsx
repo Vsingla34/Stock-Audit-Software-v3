@@ -71,15 +71,20 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
 
         {/* ── Mobile top header ─────────────────────────────────────── */}
         <div
-          className="md:hidden sticky top-0 z-30 w-full flex items-center justify-between px-4 py-3 shadow-md"
+          className="md:hidden sticky top-0 z-30 w-full flex items-center justify-between px-4 min-h-[60px] shadow-md"
           style={{ background: "linear-gradient(135deg, #0D0D20 0%, #060612 100%)" }}
         >
-          <div className="bg-white rounded-lg px-2 py-1.5 flex items-center shadow-glow-sm">
-            <img src={logo} alt="StockCheck360" className="h-5 w-auto object-contain" />
+          {/* Simplified from a 3-layer gradient-ring effect — that was too
+              much visual complexity for this small a space and created
+              uneven padding. A single well-proportioned white pill with
+              generous, even padding + a fixed header min-height (so it
+              lines up cleanly with the menu button) reads as tidier. */}
+          <div className="bg-white rounded-xl px-4 py-2.5 flex items-center shadow-[0_4px_14px_rgba(131,56,255,0.3)]">
+            <img src={logo} alt="StockCheck360" className="h-7 w-auto object-contain" />
           </div>
           <button
             onClick={() => setMobileOpen(true)}
-            className="p-2 rounded-lg text-space-400 hover:text-space-100 hover:bg-white/10 transition-colors"
+            className="h-10 w-10 flex items-center justify-center rounded-xl text-space-300 hover:text-space-100 hover:bg-white/10 transition-colors shrink-0"
           >
             <Menu className="h-5 w-5" />
           </button>

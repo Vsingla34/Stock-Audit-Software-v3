@@ -35,24 +35,47 @@ const StatCard = ({
 // Lightweight, no dependency — types out text once on mount, then leaves a
 // slow blinking cursor. Re-runs if `text` changes (harmless here since it
 // never does, but keeps the hook correct).
-const TypewriterText = ({ text, speed = 55 }: { text: string; speed?: number }) => {
+const TypewriterText = ({ text, speed = 55, pauseMs = 1000 }: { text: string; speed?: number; pauseMs?: number }) => {
   const [displayed, setDisplayed] = useState("");
   const [done, setDone] = useState(false);
 
+  // Loops indefinitely: types out the full text, pauses for `pauseMs`
+  // once complete, then clears and starts again. Uses setTimeout chaining
+  // (not setInterval) so the pause-after-completion step fits naturally
+  // into the same cycle instead of needing a second timer to coordinate.
   useEffect(() => {
-    setDisplayed("");
-    setDone(false);
-    let i = 0;
-    const interval = setInterval(() => {
-      i += 1;
-      setDisplayed(text.slice(0, i));
-      if (i >= text.length) {
-        clearInterval(interval);
-        setDone(true);
-      }
-    }, speed);
-    return () => clearInterval(interval);
-  }, [text, speed]);
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout>;
+
+    const runCycle = () => {
+      let i = 0;
+      setDisplayed("");
+      setDone(false);
+
+      const typeNext = () => {
+        if (cancelled) return;
+        i += 1;
+        setDisplayed(text.slice(0, i));
+
+        if (i >= text.length) {
+          setDone(true);
+          timeoutId = setTimeout(() => {
+            if (!cancelled) runCycle();
+          }, pauseMs);
+        } else {
+          timeoutId = setTimeout(typeNext, speed);
+        }
+      };
+
+      typeNext();
+    };
+
+    runCycle();
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [text, speed, pauseMs]);
 
   return (
     <span>

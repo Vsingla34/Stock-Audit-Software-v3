@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { InventoryProvider } from "./context/InventoryContext";
 import { AppLayout } from "./components/layout/AppLayout";
+import { ScrollToTop } from "./components/ScrollToTop";
 import { UserProvider, useUser } from "./context/UserContext";
 import { CompanyProvider } from "./context/CompanyContext";
 import { useUserAccess } from "@/hooks/useUserAccess";
@@ -147,6 +148,7 @@ const App = () => {
             <AppLayout>
             {/* Outer Suspense — fallback rarely shown since AppLayout has inner Suspense */}
             <Suspense fallback={<PageLoader />}>
+            <ScrollToTop />
             <Routes>
               {/* Public Routes */}
               <Route path="/login" element={<Login />} />

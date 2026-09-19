@@ -8,7 +8,7 @@ import { useUserAccess } from "@/hooks/useUserAccess";
 import {
   BarChart3, FileSpreadsheet, Home, Search, UserCircle,
   ScanBarcode, LogOut, Upload, ListChecks, History,
-  ArrowLeftRight, X, ChevronRight, Building2, Sparkles,
+  ArrowLeftRight, ChevronRight, Building2, Sparkles,
 } from "lucide-react";
 import { useUser } from "@/context/UserContext";
 import { useCompany } from "@/context/CompanyContext";
@@ -146,15 +146,6 @@ export function Sidebar({ isMobile, onClose }: SidebarProps) {
           }}
         />
       </div>
-
-      {isMobile && (
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 z-20 p-1.5 rounded-lg text-space-400 hover:text-white hover:bg-white/10 transition-colors"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      )}
 
       <div className="relative z-10 flex h-full flex-col">
 
