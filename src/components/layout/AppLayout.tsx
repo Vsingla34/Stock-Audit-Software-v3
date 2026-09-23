@@ -3,7 +3,7 @@
 // through the Tailwind palette so future palette changes propagate
 // automatically instead of leaving stray colors like last time.
 
-import React, { useState, useEffect, createContext, useContext, useCallback } from "react";
+import React, { useState, useEffect, useRef, createContext, useContext, useCallback } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Menu, ScanBarcode, FileSpreadsheet, Upload, Home } from "lucide-react";
@@ -35,6 +35,32 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   const parentCtx  = useContext(AppLayoutContext);
   const isMobile   = useIsMobile();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // ── Auto-hide mobile header on scroll ──────────────────────────────
+  // Slides up (hidden) when scrolling down past a small threshold,
+  // slides back down (visible) when scrolling up or near the top.
+  // Threshold (24px) avoids flicker from tiny scroll jitters; the
+  // header only reacts to genuine, deliberate scrolling.
+  const [headerVisible, setHeaderVisible] = useState(true);
+  const lastScrollY = useRef(0);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentY = window.scrollY;
+      const goingDown = currentY > lastScrollY.current;
+      const pastThreshold = Math.abs(currentY - lastScrollY.current) > 8;
+
+      if (currentY <= 24) {
+        setHeaderVisible(true); // always show near the very top
+      } else if (pastThreshold) {
+        setHeaderVisible(!goingDown);
+      }
+      lastScrollY.current = currentY;
+    };
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
   const location   = useLocation();
   const { userRole } = useUserAccess();
 
@@ -69,9 +95,12 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             content's full height, covering everything. flex-col fixes
             mobile stacking; md:flex-row keeps the desktop sidebar layout. */}
 
-        {/* ── Mobile top header ─────────────────────────────────────── */}
+        {/* ── Mobile top header — slides off-screen when scrolling down,
+             slides back in when scrolling up (or near the top) ── */}
         <div
-          className="md:hidden sticky top-0 z-30 w-full flex items-center justify-between px-4 min-h-[60px] shadow-md"
+          className={`md:hidden sticky top-0 z-30 w-full flex items-center justify-between px-4 min-h-[60px] shadow-md transition-transform duration-300 ease-out ${
+            headerVisible ? "translate-y-0" : "-translate-y-full"
+          }`}
           style={{ background: "linear-gradient(135deg, #0D0D20 0%, #060612 100%)" }}
         >
           {/* Simplified from a 3-layer gradient-ring effect — that was too

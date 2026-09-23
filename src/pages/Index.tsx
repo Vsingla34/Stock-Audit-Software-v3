@@ -279,7 +279,11 @@ const Index = () => {
       <div className="space-y-3 md:space-y-6 w-full max-w-full overflow-x-hidden">
 
         {/* ── Header ── */}
-        <div className="flex flex-col md:flex-row justify-between items-start gap-3">
+        {/* mt-2 on mobile only — breathing room below the sticky top header,
+            which sits right above this with no gap otherwise. Desktop
+            already has its own top bar with adequate spacing, so no
+            change needed there. */}
+        <div className="flex flex-col md:flex-row justify-between items-start gap-3 mt-2 md:mt-0">
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-lg md:text-3xl font-bold tracking-tight text-gray-900 leading-tight">
