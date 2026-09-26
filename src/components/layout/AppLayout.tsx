@@ -3,7 +3,7 @@
 // through the Tailwind palette so future palette changes propagate
 // automatically instead of leaving stray colors like last time.
 
-import React, { useState, useEffect, useRef, createContext, useContext, useCallback } from "react";
+import React, { useState, useEffect, createContext, useContext, useCallback } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Menu, ScanBarcode, FileSpreadsheet, Upload, Home } from "lucide-react";
@@ -36,26 +36,35 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   const isMobile   = useIsMobile();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // ── Auto-hide mobile header on scroll ──────────────────────────────
-  // Slides up (hidden) when scrolling down past a small threshold,
-  // slides back down (visible) when scrolling up or near the top.
-  // Threshold (24px) avoids flicker from tiny scroll jitters; the
-  // header only reacts to genuine, deliberate scrolling.
+  // ── Auto-hide mobile header after the first scroll ─────────────────
+  // Header stays visible at the very top, then hides as soon as the
+  // page is scrolled past a small threshold — and stays hidden while
+  // scrolling, rather than sliding back in on scroll-up. It only
+  // reappears once the user scrolls back up near the very top.
   const [headerVisible, setHeaderVisible] = useState(true);
-  const lastScrollY = useRef(0);
 
   useEffect(() => {
-    const handleScroll = () => {
-      const currentY = window.scrollY;
-      const goingDown = currentY > lastScrollY.current;
-      const pastThreshold = Math.abs(currentY - lastScrollY.current) > 8;
+    // FIX: the raw "scroll" event can fire dozens of times per second
+    // (every pixel on a trackpad). Calling setState on every one of those,
+    // unthrottled, re-renders the whole layout that often and is what was
+    // dragging the dev server down. rAF-gating collapses that to at most
+    // once per animation frame, and we bail out early if the visibility
+    // value wouldn't actually change, so most frames cause zero renders.
+    let ticking = false;
+    let lastVisible = true;
 
-      if (currentY <= 24) {
-        setHeaderVisible(true); // always show near the very top
-      } else if (pastThreshold) {
-        setHeaderVisible(!goingDown);
-      }
-      lastScrollY.current = currentY;
+    const handleScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        const currentY = window.scrollY;
+        const shouldBeVisible = currentY <= 24;
+        if (shouldBeVisible !== lastVisible) {
+          lastVisible = shouldBeVisible;
+          setHeaderVisible(shouldBeVisible);
+        }
+        ticking = false;
+      });
     };
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
@@ -88,32 +97,38 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
 
   return (
     <AppLayoutContext.Provider value={{ isMounted: true, setSidebarVisible }}>
-      <div className="min-h-screen flex flex-col md:flex-row w-full bg-space-50">
+      <div className="min-h-screen min-h-dvh flex flex-col md:flex-row w-full bg-space-50">
+        {/* min-h-dvh (after min-h-screen so it wins where supported):
+            100vh is the LAYOUT viewport, which mobile browsers keep at
+            full height even while their address bar is showing — so a
+            "fixed" bottom element measured against 100vh can end up
+            positioned below the actual visible screen for a frame while
+            the browser reconciles that against the VISUAL viewport during
+            a scroll-triggered address-bar show/hide. dvh tracks the real
+            visible viewport directly, which is the actual fix for the
+            "disappears when I scroll up" glitch — not just a mitigation. */}
         {/* FIX: was "flex w-full" (defaults to flex-row). On mobile the
             header became a row-sibling of page content, and flexbox's
             default align-items:stretch made the header stretch to match
             content's full height, covering everything. flex-col fixes
             mobile stacking; md:flex-row keeps the desktop sidebar layout. */}
 
-        {/* ── Mobile top header — slides off-screen when scrolling down,
-             slides back in when scrolling up (or near the top) ── */}
+        {/* ── Mobile top header — plain white so it merges seamlessly with
+             the logo (no more boxed-pill vs dark-header contrast); a
+             hairline black-at-low-opacity border along the bottom is the
+             only separation from the page content below. Slides off-screen
+             when scrolling past the top, slides back in near the top. ── */}
         <div
-          className={`md:hidden sticky top-0 z-30 w-full flex items-center justify-between px-4 min-h-[60px] shadow-md transition-transform duration-300 ease-out ${
+          className={`md:hidden sticky top-0 z-30 w-full flex items-center justify-between px-4 min-h-[60px] bg-white border-b border-black/10 transition-transform duration-300 ease-out ${
             headerVisible ? "translate-y-0" : "-translate-y-full"
           }`}
-          style={{ background: "linear-gradient(135deg, #0D0D20 0%, #060612 100%)" }}
         >
-          {/* Simplified from a 3-layer gradient-ring effect — that was too
-              much visual complexity for this small a space and created
-              uneven padding. A single well-proportioned white pill with
-              generous, even padding + a fixed header min-height (so it
-              lines up cleanly with the menu button) reads as tidier. */}
-          <div className="bg-white rounded-xl px-4 py-2.5 flex items-center shadow-[0_4px_14px_rgba(131,56,255,0.3)]">
+          <div className="flex items-center">
             <img src={logo} alt="StockCheck360" className="h-7 w-auto object-contain" />
           </div>
           <button
             onClick={() => setMobileOpen(true)}
-            className="h-10 w-10 flex items-center justify-center rounded-xl text-space-300 hover:text-space-100 hover:bg-white/10 transition-colors shrink-0"
+            className="h-10 w-10 flex items-center justify-center rounded-xl text-space-500 hover:text-space-800 hover:bg-space-100 transition-colors shrink-0"
           >
             <Menu className="h-5 w-5" />
           </button>
@@ -177,7 +192,19 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
              it's the auditor's primary action, not just another flat icon
              tied for visual weight with Home/Reports/Upload. ── */}
         {isMobile && controlledSidebar && (
-          <div className="fixed bottom-0 left-0 right-0 z-40 flex items-center border-t border-space-200 bg-white/95 backdrop-blur-md h-[64px] px-2">
+          // FIX (round 2): root cause was the root container using
+          // min-h-screen (100vh = the LAYOUT viewport, which mobile
+          // browsers keep full-height even with the address bar showing).
+          // "fixed" measured against that could end up placed below the
+          // actual visible screen for a frame while scrolling toggled the
+          // address bar, reading as "disappears". Switched the root
+          // container to min-h-dvh above (tracks the real visible
+          // viewport) — "fixed" is the right tool for an always-present
+          // app-shell nav bar and now measures against the correct box.
+          <div
+            className="fixed bottom-0 left-0 right-0 z-40 flex items-center border-t border-space-200 bg-white h-[64px] px-2 [transform:translateZ(0)] will-change-transform"
+            style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+          >
             <Link
               to="/"
               className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors h-full
