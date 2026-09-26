@@ -171,24 +171,24 @@ const AdminOverview = () => {
       <div className="space-y-6">
         
         {/* Header with Back Button */}
-        <div className="flex items-center gap-4">
-          <Button 
-            variant="ghost" 
-            onClick={() => navigate(-1)} 
-            className="p-0 hover:bg-transparent"
+        <div className="flex items-start md:items-center gap-3 md:gap-4">
+          <Button
+            variant="ghost"
+            onClick={() => navigate(-1)}
+            className="p-0 hover:bg-transparent shrink-0 mt-1 md:mt-0"
           >
-            <ArrowLeft className="h-6 w-6 text-gray-500 hover:text-gray-900" />
+            <ArrowLeft className="h-5 w-5 md:h-6 md:w-6 text-gray-500 hover:text-gray-900" />
           </Button>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight text-gray-900">Admin Overview</h1>
-            <p className="text-gray-500">
+          <div className="min-w-0">
+            <h1 className="text-xl md:text-3xl font-bold tracking-tight text-gray-900">Admin Overview</h1>
+            <p className="text-xs md:text-base text-gray-500">
               Live audit progress for {companyName || "selected company"}
             </p>
           </div>
         </div>
 
         {/* Overview Cards */}
-        <div className="grid gap-6 md:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 md:gap-6 md:grid-cols-4">
           <Card className="bg-indigo-50 border-indigo-100 shadow-sm">
             <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
               <CardTitle className="text-sm font-medium text-indigo-900">Total Items</CardTitle>
@@ -254,87 +254,93 @@ const AdminOverview = () => {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-gray-50 hover:bg-gray-50">
-                  <TableHead className="font-semibold text-gray-700">Location</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Auditors</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Date</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Status</TableHead>
-                  <TableHead className="font-semibold text-gray-700 text-center">Audited / Total</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Discrepancies</TableHead>
-                  <TableHead className="font-semibold text-gray-700">Progress</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="h-24 text-center text-gray-500">
-                      Loading data...
-                    </TableCell>
+            <div className="overflow-x-auto -mx-3 md:mx-0 rounded-none md:rounded-md border-x-0 md:border-x">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-gray-50 hover:bg-gray-50">
+                    <TableHead className="font-semibold text-gray-700 p-2 md:p-4 text-xs md:text-sm sticky left-0 z-10 bg-gray-50 md:static">Location</TableHead>
+                    <TableHead className="font-semibold text-gray-700 hidden md:table-cell">Auditors</TableHead>
+                    <TableHead className="font-semibold text-gray-700 hidden md:table-cell">Date</TableHead>
+                    <TableHead className="font-semibold text-gray-700 p-2 md:p-4 text-xs md:text-sm">Status</TableHead>
+                    <TableHead className="font-semibold text-gray-700 text-center p-2 md:p-4 text-xs md:text-sm">Audited / Total</TableHead>
+                    <TableHead className="font-semibold text-gray-700 hidden md:table-cell">Discrepancies</TableHead>
+                    <TableHead className="font-semibold text-gray-700 hidden md:table-cell">Progress</TableHead>
                   </TableRow>
-                ) : assignmentStats.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="h-24 text-center text-gray-500">
-                      No active assignments found.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  assignmentStats.map((stat) => {
-                    const progressPercentage = stat.totalItems > 0
-                      ? Math.round((stat.auditedItems / stat.totalItems) * 100)
-                      : 0;
-                    
-                    return (
-                      <TableRow key={stat.assignmentId} className="hover:bg-indigo-50/30 transition-colors">
-                        <TableCell className="font-medium text-gray-900">
-                          {stat.locationName}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col gap-1">
-                            {stat.auditorNames.length > 0 ? (
-                              stat.auditorNames.map((name, i) => (
-                                <div key={i} className="flex items-center gap-1 text-xs text-gray-600">
-                                  <User className="h-3 w-3 text-gray-400" /> {name}
-                                </div>
-                              ))
-                            ) : (
-                              <span className="text-gray-400 text-xs italic">Unassigned</span>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2 text-gray-600 text-sm">
-                            <CalendarDays className="h-3 w-3" />
-                            {stat.scheduledDate ? format(new Date(stat.scheduledDate), "MMM dd") : "-"}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {getStatusBadge(stat.status)}
-                        </TableCell>
-                        <TableCell className="text-center font-medium">
-                          <span className="text-gray-900">{stat.auditedItems}</span>
-                          <span className="text-gray-400 mx-1">/</span>
-                          <span className="text-gray-500">{stat.totalItems}</span>
-                        </TableCell>
-                        <TableCell className={stat.discrepancies > 0 ? "text-red-600 font-bold" : "text-gray-400"}>
-                          {stat.discrepancies}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <Progress 
-                              value={progressPercentage} 
-                              className="h-2 w-full max-w-[80px] bg-gray-100 [&>*]:bg-indigo-600" 
-                            />
-                            <span className="text-xs font-medium text-gray-600 w-8 text-right">{progressPercentage}%</span>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
-                )}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {loading ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="h-24 text-center text-gray-500">
+                        Loading data...
+                      </TableCell>
+                    </TableRow>
+                  ) : assignmentStats.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="h-24 text-center text-gray-500">
+                        No active assignments found.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    assignmentStats.map((stat) => {
+                      const progressPercentage = stat.totalItems > 0
+                        ? Math.round((stat.auditedItems / stat.totalItems) * 100)
+                        : 0;
+
+                      return (
+                        <TableRow key={stat.assignmentId} className="hover:bg-indigo-50/30 transition-colors">
+                          <TableCell className="font-medium text-gray-900 p-2 md:p-4 text-xs md:text-sm sticky left-0 z-10 bg-white md:static">
+                            {stat.locationName}
+                            <div className="flex items-center gap-1 text-[10px] text-gray-500 mt-0.5 md:hidden">
+                              <CalendarDays className="h-3 w-3" />
+                              {stat.scheduledDate ? format(new Date(stat.scheduledDate), "MMM dd") : "-"}
+                            </div>
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell">
+                            <div className="flex flex-col gap-1">
+                              {stat.auditorNames.length > 0 ? (
+                                stat.auditorNames.map((name, i) => (
+                                  <div key={i} className="flex items-center gap-1 text-xs text-gray-600">
+                                    <User className="h-3 w-3 text-gray-400" /> {name}
+                                  </div>
+                                ))
+                              ) : (
+                                <span className="text-gray-400 text-xs italic">Unassigned</span>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell">
+                            <div className="flex items-center gap-2 text-gray-600 text-sm">
+                              <CalendarDays className="h-3 w-3" />
+                              {stat.scheduledDate ? format(new Date(stat.scheduledDate), "MMM dd") : "-"}
+                            </div>
+                          </TableCell>
+                          <TableCell className="p-2 md:p-4">
+                            {getStatusBadge(stat.status)}
+                          </TableCell>
+                          <TableCell className="text-center font-medium p-2 md:p-4 text-xs md:text-sm">
+                            <span className="text-gray-900">{stat.auditedItems}</span>
+                            <span className="text-gray-400 mx-1">/</span>
+                            <span className="text-gray-500">{stat.totalItems}</span>
+                          </TableCell>
+                          <TableCell className={`hidden md:table-cell ${stat.discrepancies > 0 ? "text-red-600 font-bold" : "text-gray-400"}`}>
+                            {stat.discrepancies}
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell">
+                            <div className="flex items-center gap-3">
+                              <Progress
+                                value={progressPercentage}
+                                className="h-2 w-full max-w-[80px] bg-gray-100 [&>*]:bg-indigo-600"
+                              />
+                              <span className="text-xs font-medium text-gray-600 w-8 text-right">{progressPercentage}%</span>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
       </div>

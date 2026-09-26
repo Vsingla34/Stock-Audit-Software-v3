@@ -275,13 +275,17 @@ const AssignmentSelection = () => {
         <div className="h-1 w-full" style={{ backgroundColor: s.dot }} />
 
         <div className="p-5">
-          <div className="flex items-start justify-between mb-4">
-            <div
-              className="h-11 w-11 rounded-xl flex items-center justify-center shrink-0"
-              style={{ backgroundColor: s.badgeBg, border: `1px solid ${s.badgeBorder}`, color: s.text }}
+          {/* Assignment number — now the first thing on the card, bold and
+              highlighted, since it's what people use to identify/reference
+              a specific assignment (e.g. on a call or in a report). Status
+              pill moves alongside it on the same row. */}
+          <div className="flex items-center justify-between mb-3">
+            <span
+              className="text-[17px] font-black font-mono tracking-tight px-2.5 py-1 rounded-lg"
+              style={{ backgroundColor: "#EDE4FF", color: "#6E1FEB" }}
             >
-              <ClipboardList className="h-5 w-5" />
-            </div>
+              #{paddedId}
+            </span>
             <div className="flex items-center gap-1.5">
               {s.pulse ? (
                 <span className="relative flex h-1.5 w-1.5">
@@ -297,25 +301,28 @@ const AssignmentSelection = () => {
             </div>
           </div>
 
-          <h3 className="text-[15px] font-bold text-space-900 tracking-tight truncate group-hover:text-violet-700 transition-colors duration-150">
-            {assignment.locationName}
-          </h3>
-          <p className="text-[12px] text-space-500 truncate flex items-center gap-1.5 mt-1">
+          <div className="flex items-center gap-2 mb-1">
+            <div
+              className="h-8 w-8 rounded-lg flex items-center justify-center shrink-0"
+              style={{ backgroundColor: s.badgeBg, border: `1px solid ${s.badgeBorder}`, color: s.text }}
+            >
+              <ClipboardList className="h-4 w-4" />
+            </div>
+            <h3 className="text-[15px] font-bold text-space-900 tracking-tight truncate group-hover:text-violet-700 transition-colors duration-150">
+              {assignment.locationName}
+            </h3>
+          </div>
+          <p className="text-[12px] text-space-500 truncate flex items-center gap-1.5 mt-1 pl-10">
             <Building2 className="h-3.5 w-3.5 shrink-0 opacity-60" />
             {assignment.companyName}
           </p>
         </div>
 
         <div className="mt-auto flex items-center justify-between px-5 py-3 border-t border-space-100 group-hover:bg-violet-50/60 transition-colors duration-200">
-          <div className="flex items-center gap-3">
-            <span className="text-[11px] font-mono font-medium px-2 py-1 rounded" style={{ backgroundColor: "#F0F2F7", color: "#54547A" }}>
-              #{paddedId}
-            </span>
-            <span className="text-[11px] text-space-400 flex items-center gap-1">
-              <CalendarDays className="h-3 w-3 opacity-70" />
-              {assignment.date}
-            </span>
-          </div>
+          <span className="text-[11px] text-space-400 flex items-center gap-1">
+            <CalendarDays className="h-3 w-3 opacity-70" />
+            {assignment.date}
+          </span>
           <ArrowRight className="h-3.5 w-3.5 text-space-400 group-hover:text-violet-600 group-hover:translate-x-0.5 transition-all duration-200" />
         </div>
       </button>

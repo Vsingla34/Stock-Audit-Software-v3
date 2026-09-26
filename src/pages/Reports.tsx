@@ -1227,37 +1227,42 @@ const Reports = () => {
                 {filteredTableData.length > 0 && !showingAll && (<div className="flex gap-2"><Button size="sm" variant="outline" className="hover:text-indigo-600" onClick={handleShowMore}>Show next 100</Button><Button size="sm" variant="ghost" className="hover:text-indigo-600" onClick={handleShowAll}>Show all</Button></div>)}
               </div>
 
-              <div className="rounded-md border border-gray-200 overflow-x-auto">
+              {/* Mobile: only SKU / Name & Breakdown / Phy / Status stay
+                  visible so the table fits with minimal side scroll,
+                  matching the same treatment applied to the item table.
+                  Everything else restores from md: up — desktop is
+                  unchanged. */}
+              <div className="rounded-md border border-gray-200 overflow-x-auto -mx-3 md:mx-0 rounded-none md:rounded-md border-x-0 md:border-x">
                 <Table>
                   <TableHeader>
                     <TableRow className="bg-gray-50">
-                      <TableHead className="w-[100px]">SKU</TableHead>
-                      <TableHead className="w-[200px]">Name & Breakdown</TableHead>
-                      <TableHead>Location</TableHead>
-                      <TableHead>Category</TableHead>
-                      
+                      <TableHead className="w-[80px] md:w-[100px] p-2 md:p-4 text-xs md:text-sm sticky left-0 z-10 bg-gray-50 md:static">SKU</TableHead>
+                      <TableHead className="min-w-[140px] md:w-[200px] p-2 md:p-4 text-xs md:text-sm">Name & Breakdown</TableHead>
+                      <TableHead className="hidden md:table-cell">Location</TableHead>
+                      <TableHead className="hidden md:table-cell">Category</TableHead>
+
                       {hasPricing && !hideSystemQuantity && (
                         <>
-                           <TableHead className="text-right w-[100px] bg-indigo-50/50">Price</TableHead>
-                           <TableHead className="text-right w-[100px] bg-indigo-50/50">Sys Val</TableHead>
-                           <TableHead className="text-right w-[100px] bg-indigo-50/50">Phy Val</TableHead>
-                           <TableHead className="text-right w-[100px] bg-indigo-50/50">Val Var</TableHead>
+                           <TableHead className="text-right w-[100px] bg-indigo-50/50 hidden md:table-cell">Price</TableHead>
+                           <TableHead className="text-right w-[100px] bg-indigo-50/50 hidden md:table-cell">Sys Val</TableHead>
+                           <TableHead className="text-right w-[100px] bg-indigo-50/50 hidden md:table-cell">Phy Val</TableHead>
+                           <TableHead className="text-right w-[100px] bg-indigo-50/50 hidden md:table-cell">Val Var</TableHead>
                         </>
                       )}
-                      
+
                       {!hideSystemQuantity && (
-                          <TableHead className="text-center w-[80px]">Sys</TableHead>
+                          <TableHead className="text-center w-[80px] hidden md:table-cell">Sys</TableHead>
                       )}
-                      
-                      <TableHead className="text-center w-[80px]">Phy</TableHead>
-                      
+
+                      <TableHead className="text-center w-[64px] md:w-[80px] p-2 md:p-4 text-xs md:text-sm">Phy</TableHead>
+
                       {!hideSystemQuantity && (
-                          <TableHead className="text-center w-[80px]">Var</TableHead>
+                          <TableHead className="text-center w-[80px] hidden md:table-cell">Var</TableHead>
                       )}
-                      
-                      <TableHead className="text-center w-[100px]">Status</TableHead>
-                      <TableHead className="text-center w-[60px]">Day</TableHead>
-                      <TableHead className="w-[180px]">Remarks</TableHead>
+
+                      <TableHead className="text-center w-[90px] md:w-[100px] p-2 md:p-4 text-xs md:text-sm">Status</TableHead>
+                      <TableHead className="text-center w-[60px] hidden md:table-cell">Day</TableHead>
+                      <TableHead className="w-[180px] hidden md:table-cell">Remarks</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1289,9 +1294,9 @@ const Reports = () => {
 
                         return (
                           <TableRow key={`${item.id}-${item.location}`}>
-                            <TableCell className="font-medium text-gray-900 text-xs">{item.sku}</TableCell>
-                            <TableCell>
-                                <div className="truncate max-w-[200px] text-sm font-medium text-gray-900" title={item.name}>
+                            <TableCell className="font-medium text-gray-900 text-xs p-2 md:p-4 sticky left-0 z-10 bg-white md:static">{item.sku}</TableCell>
+                            <TableCell className="p-2 md:p-4">
+                                <div className="truncate max-w-[130px] md:max-w-[200px] text-xs md:text-sm font-medium text-gray-900" title={item.name}>
                                     {item.name}
                                 </div>
                                 {consolidatedEntries.length > 0 && (
@@ -1309,41 +1314,41 @@ const Reports = () => {
                                 )}
                             </TableCell>
 
-                            <TableCell className="text-xs">{item.location}</TableCell>
-                            <TableCell className="text-xs">{item.category}</TableCell>
-                            
+                            <TableCell className="text-xs hidden md:table-cell">{item.location}</TableCell>
+                            <TableCell className="text-xs hidden md:table-cell">{item.category}</TableCell>
+
                             {hasPricing && !hideSystemQuantity && (
                                 <>
-                                  <TableCell className="text-right text-xs font-mono bg-indigo-50/30">
+                                  <TableCell className="text-right text-xs font-mono bg-indigo-50/30 hidden md:table-cell">
                                       {formatCurrency(unitPrice)}
                                   </TableCell>
-                                  <TableCell className="text-right text-xs font-mono bg-indigo-50/30">
+                                  <TableCell className="text-right text-xs font-mono bg-indigo-50/30 hidden md:table-cell">
                                       {formatCurrency(sysValue)}
                                   </TableCell>
-                                  <TableCell className={`text-right text-xs font-mono bg-indigo-50/30 ${item.status === 'discrepancy' ? 'text-red-600 font-bold' : ''}`}>
+                                  <TableCell className={`text-right text-xs font-mono bg-indigo-50/30 hidden md:table-cell ${item.status === 'discrepancy' ? 'text-red-600 font-bold' : ''}`}>
                                       {formatCurrency(phyValue)}
                                   </TableCell>
-                                  <TableCell className={`text-right text-xs font-mono bg-indigo-50/30 font-bold ${valueVariance < 0 ? 'text-red-600' : valueVariance > 0 ? 'text-green-600' : 'text-gray-500'}`}>
+                                  <TableCell className={`text-right text-xs font-mono bg-indigo-50/30 font-bold hidden md:table-cell ${valueVariance < 0 ? 'text-red-600' : valueVariance > 0 ? 'text-green-600' : 'text-gray-500'}`}>
                                       {formatCurrency(valueVariance)}
                                   </TableCell>
                                 </>
                             )}
 
                             {!hideSystemQuantity && (
-                                <TableCell className="text-center font-medium">
+                                <TableCell className="text-center font-medium hidden md:table-cell">
                                     {item.systemQuantity}
                                 </TableCell>
                             )}
-                            
-                            <TableCell className="text-center font-medium">{item.physicalQuantity}</TableCell>
-                            
+
+                            <TableCell className="text-center font-medium text-xs md:text-sm p-2 md:p-4">{item.physicalQuantity}</TableCell>
+
                             {!hideSystemQuantity && (
-                                <TableCell className={`text-center font-bold ${item.variance !== 0 ? "text-red-600" : ""}`}>
+                                <TableCell className={`text-center font-bold hidden md:table-cell ${item.variance !== 0 ? "text-red-600" : ""}`}>
                                     {item.variance}
                                 </TableCell>
                             )}
-                            
-                            <TableCell className="text-center">
+
+                            <TableCell className="text-center p-2 md:p-4">
                               {hideSystemQuantity ? (
                                   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800">
                                       {item.physicalQuantity > 0 || item.status !== 'pending' ? 'Audited' : 'Pending'}
@@ -1354,10 +1359,10 @@ const Reports = () => {
                                   </span>
                               )}
                             </TableCell>
-                            <TableCell className="text-center text-xs font-mono text-gray-600">
+                            <TableCell className="text-center text-xs font-mono text-gray-600 hidden md:table-cell">
                                 {item.auditDay}
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="hidden md:table-cell">
                               {editingRemark === item.id ? (
                                 <Input 
                                   value={tempRemark} 

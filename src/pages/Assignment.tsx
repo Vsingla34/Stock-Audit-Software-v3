@@ -358,17 +358,17 @@ const AssignmentPage = () => {
             <CardTitle className="flex items-center gap-2 text-gray-900"><ClipboardList className="h-5 w-5 text-indigo-600" /> Assignments List</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto -mx-3 md:mx-0 rounded-none md:rounded-md border-x-0 md:border-x">
                 <Table>
                   <TableHeader className="bg-gray-50">
                     <TableRow>
-                      <TableHead>ID</TableHead>
-                      <TableHead>Location</TableHead>
+                      <TableHead className="p-2 md:p-4 text-xs md:text-sm sticky left-0 z-10 bg-gray-50 md:static">ID</TableHead>
+                      <TableHead className="p-2 md:p-4 text-xs md:text-sm">Location</TableHead>
                       <TableHead className="hidden md:table-cell">Company</TableHead>
                       <TableHead className="hidden lg:table-cell">Auditors</TableHead>
                       <TableHead className="hidden md:table-cell">Due Date</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
+                      <TableHead className="p-2 md:p-4 text-xs md:text-sm">Status</TableHead>
+                      <TableHead className="text-right p-2 md:p-4 text-xs md:text-sm">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -379,9 +379,9 @@ const AssignmentPage = () => {
                     ) : (
                         rows.map((row) => (
                             <TableRow key={row.dbId} className="hover:bg-gray-50">
-                                <TableCell className="font-mono text-xs text-gray-500">#{row.dbId}</TableCell>
-                                <TableCell className="font-medium">
-                                    <div className="flex flex-col"><span>{row.locationName}</span><span className="md:hidden text-xs text-gray-500">{row.companyName}</span></div>
+                                <TableCell className="font-mono text-xs text-gray-500 p-2 md:p-4 sticky left-0 z-10 bg-white md:static">#{row.dbId}</TableCell>
+                                <TableCell className="font-medium p-2 md:p-4 text-xs md:text-sm">
+                                    <div className="flex flex-col"><span>{row.locationName}</span><span className="md:hidden text-[10px] text-gray-500">{row.companyName}</span></div>
                                 </TableCell>
                                 <TableCell className="hidden md:table-cell text-gray-600">{row.companyName}</TableCell>
                                 <TableCell className="hidden lg:table-cell">
@@ -390,9 +390,9 @@ const AssignmentPage = () => {
                                     </div>
                                 </TableCell>
                                 <TableCell className="hidden md:table-cell text-gray-600">{row.completionDate ? format(new Date(row.completionDate), 'MMM dd, yyyy') : '-'}</TableCell>
-                                <TableCell>{getStatusBadge(row.status)}</TableCell>
-                                <TableCell className="text-right">
-                                    <div className="flex justify-end gap-2">
+                                <TableCell className="p-2 md:p-4">{getStatusBadge(row.status)}</TableCell>
+                                <TableCell className="text-right p-2 md:p-4">
+                                    <div className="flex justify-end gap-1 md:gap-2">
                                         {(isSuperAdmin || isAdmin) && row.status !== 'finalized' && (
                                             <Button variant="outline" size="sm" onClick={() => handleInitiateFinalization(row)} className="h-8 text-xs bg-green-50 text-green-700 border-green-200 hover:bg-green-100 hidden sm:flex">
                                                 <Lock className="mr-1 h-3 w-3" /> Finalize

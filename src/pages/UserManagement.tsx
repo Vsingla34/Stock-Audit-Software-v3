@@ -380,18 +380,18 @@ const UserManagement = () => {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <AppLayout showSidebar={false}>
-      <div className="space-y-6 max-w-7xl mx-auto pt-6">
+      <div className="space-y-4 md:space-y-6 max-w-7xl mx-auto pt-4 md:pt-6">
 
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 md:gap-4">
+          <div className="flex items-start md:items-center gap-3 md:gap-4">
+            <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="shrink-0">
               <ArrowLeft className="w-5 h-5" />
             </Button>
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+            <div className="min-w-0">
+              <h1 className="text-xl md:text-2xl font-bold tracking-tight text-gray-900">
                 User Management
               </h1>
-              <p className="text-sm text-gray-500">
+              <p className="text-xs md:text-sm text-gray-500">
                 Create and manage user access
               </p>
             </div>
@@ -401,7 +401,7 @@ const UserManagement = () => {
             <Button
               variant="outline"
               onClick={() => setIsImportDialogOpen(true)}
-              className="bg-white"
+              className="bg-white flex-1 md:flex-none"
             >
               <UploadCloud className="w-4 h-4 mr-2 text-indigo-600" />
               Import CSV
@@ -411,7 +411,7 @@ const UserManagement = () => {
                 resetForm();
                 setIsAddDialogOpen(true);
               }}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white flex-1 md:flex-none"
             >
               <Plus className="w-4 h-4 mr-2" />
               Add User
@@ -425,11 +425,13 @@ const UserManagement = () => {
           All user operations are secured via server-side Edge Functions. No service key is exposed in the browser.
         </div>
 
-        <div className="flex items-center gap-4 bg-white p-4 rounded-lg border shadow-sm">
-          <Filter className="w-4 h-4 text-gray-500" />
-          <span className="text-sm font-medium">Filter by Company:</span>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 md:gap-4 bg-white p-3 md:p-4 rounded-lg border shadow-sm">
+          <div className="flex items-center gap-2">
+            <Filter className="w-4 h-4 text-gray-500 shrink-0" />
+            <span className="text-sm font-medium">Filter by Company:</span>
+          </div>
           <Select value={companyFilter} onValueChange={setCompanyFilter}>
-            <SelectTrigger className="w-[200px]">
+            <SelectTrigger className="w-full sm:w-[200px]">
               <SelectValue placeholder="All Companies" />
             </SelectTrigger>
             <SelectContent>
@@ -445,111 +447,133 @@ const UserManagement = () => {
 
         <Card className="border-none shadow-sm bg-white">
           <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-gray-50">
-                  <TableHead>Name</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Assigned Companies</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={4} className="h-24 text-center">
-                      <Loader2 className="w-6 h-6 animate-spin mx-auto text-indigo-600" />
-                    </TableCell>
+            <div className="overflow-x-auto -mx-3 md:mx-0 rounded-none md:rounded-md border-x-0 md:border-x">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-gray-50">
+                    <TableHead className="p-2 md:p-4 text-xs md:text-sm sticky left-0 z-10 bg-gray-50 md:static">Name</TableHead>
+                    <TableHead className="p-2 md:p-4 text-xs md:text-sm">Role</TableHead>
+                    <TableHead className="hidden md:table-cell">Assigned Companies</TableHead>
+                    <TableHead className="text-right p-2 md:p-4 text-xs md:text-sm">Actions</TableHead>
                   </TableRow>
-                ) : filteredUsers.length === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={4}
-                      className="h-24 text-center text-gray-500"
-                    >
-                      No users found.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  filteredUsers.map((user) => (
-                    <TableRow key={user.id}>
-                      <TableCell>
-                        <div className="flex flex-col">
-                          <span className="font-medium text-gray-900">
-                            {user.name}
-                          </span>
-                          <span className="text-xs text-gray-500">
-                            {user.email}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant="outline"
-                          className="capitalize bg-indigo-50 text-indigo-700 border-indigo-100"
-                        >
-                          {user.role.replace("_", " ")}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          {user.assigned_companies &&
-                          user.assigned_companies.length > 0 ? (
-                            user.assigned_companies.map((cid) => {
-                              const cName = companies.find(
-                                (c) => c.id === cid
-                              )?.name;
-                              return cName ? (
-                                <span
-                                  key={cid}
-                                  className="text-xs bg-gray-100 px-2 py-1 rounded"
-                                >
-                                  {cName}
-                                </span>
-                              ) : null;
-                            })
-                          ) : (
-                            <span className="text-gray-400 text-xs">-</span>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => {
-                              setSelectedUser(user);
-                              setFormData({
-                                name: user.name,
-                                email: user.email,
-                                password: "",
-                                role: user.role as any,
-                                assignedCompanies:
-                                  user.assigned_companies || [],
-                              });
-                              setIsEditDialogOpen(true);
-                            }}
-                          >
-                            <Edit className="w-4 h-4 text-gray-500" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => {
-                              setSelectedUser(user);
-                              setIsDeleteDialogOpen(true);
-                            }}
-                          >
-                            <Trash className="w-4 h-4 text-red-500" />
-                          </Button>
-                        </div>
+                </TableHeader>
+                <TableBody>
+                  {loading ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="h-24 text-center">
+                        <Loader2 className="w-6 h-6 animate-spin mx-auto text-indigo-600" />
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+                  ) : filteredUsers.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={4}
+                        className="h-24 text-center text-gray-500"
+                      >
+                        No users found.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredUsers.map((user) => (
+                      <TableRow key={user.id}>
+                        <TableCell className="p-2 md:p-4 sticky left-0 z-10 bg-white md:static">
+                          <div className="flex flex-col">
+                            <span className="font-medium text-gray-900 text-xs md:text-sm">
+                              {user.name}
+                            </span>
+                            <span className="text-[10px] md:text-xs text-gray-500">
+                              {user.email}
+                            </span>
+                            <div className="flex flex-wrap gap-1 mt-1 md:hidden">
+                              {user.assigned_companies &&
+                              user.assigned_companies.length > 0 ? (
+                                user.assigned_companies.map((cid) => {
+                                  const cName = companies.find(
+                                    (c) => c.id === cid
+                                  )?.name;
+                                  return cName ? (
+                                    <span
+                                      key={cid}
+                                      className="text-[10px] bg-gray-100 px-1.5 py-0.5 rounded"
+                                    >
+                                      {cName}
+                                    </span>
+                                  ) : null;
+                                })
+                              ) : null}
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell className="p-2 md:p-4">
+                          <Badge
+                            variant="outline"
+                            className="capitalize bg-indigo-50 text-indigo-700 border-indigo-100 text-[10px] md:text-xs"
+                          >
+                            {user.role.replace("_", " ")}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          <div className="flex flex-wrap gap-1">
+                            {user.assigned_companies &&
+                            user.assigned_companies.length > 0 ? (
+                              user.assigned_companies.map((cid) => {
+                                const cName = companies.find(
+                                  (c) => c.id === cid
+                                )?.name;
+                                return cName ? (
+                                  <span
+                                    key={cid}
+                                    className="text-xs bg-gray-100 px-2 py-1 rounded"
+                                  >
+                                    {cName}
+                                  </span>
+                                ) : null;
+                              })
+                            ) : (
+                              <span className="text-gray-400 text-xs">-</span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right p-2 md:p-4">
+                          <div className="flex justify-end gap-1 md:gap-2">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8"
+                              onClick={() => {
+                                setSelectedUser(user);
+                                setFormData({
+                                  name: user.name,
+                                  email: user.email,
+                                  password: "",
+                                  role: user.role as any,
+                                  assignedCompanies:
+                                    user.assigned_companies || [],
+                                });
+                                setIsEditDialogOpen(true);
+                              }}
+                            >
+                              <Edit className="w-4 h-4 text-gray-500" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8"
+                              onClick={() => {
+                                setSelectedUser(user);
+                                setIsDeleteDialogOpen(true);
+                              }}
+                            >
+                              <Trash className="w-4 h-4 text-red-500" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
 

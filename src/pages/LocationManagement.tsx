@@ -12,24 +12,24 @@ const LocationManagement = () => {
 
   return (
     <AppLayout showSidebar={false}>
-      <div className="space-y-6">
-        <div className="flex items-center gap-4">
+      <div className="space-y-4 md:space-y-6">
+        <div className="flex items-start md:items-center gap-3 md:gap-4">
           {/* ADDED BACK BUTTON */}
-          <Button 
-            variant="ghost" 
-            onClick={() => navigate(-1)} 
-            className="p-0 hover:bg-transparent"
+          <Button
+            variant="ghost"
+            onClick={() => navigate(-1)}
+            className="p-0 hover:bg-transparent shrink-0 mt-1 md:mt-0"
           >
-            <ArrowLeft className="h-6 w-6 text-gray-500 hover:text-gray-900" />
+            <ArrowLeft className="h-5 w-5 md:h-6 md:w-6 text-gray-500 hover:text-gray-900" />
           </Button>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Location Management</h1>
-            <p className="text-muted-foreground">Manage inventory locations and view location-specific audit data</p>
+          <div className="min-w-0">
+            <h1 className="text-xl md:text-3xl font-bold tracking-tight">Location Management</h1>
+            <p className="text-xs md:text-sm text-muted-foreground">Manage inventory locations and view location-specific audit data</p>
           </div>
         </div>
-        
+
         <Tabs defaultValue="manage" className="w-full">
-           <TabsList className="mb-4 bg-gray-100">
+           <TabsList className="mb-4 bg-gray-100 w-full md:w-auto">
               <TabsTrigger 
                 value="manage"
                 className="data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-sm"

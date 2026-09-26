@@ -206,17 +206,19 @@ export const LocationMaster = () => {
               </div>
             )}
 
-            {/* RESPONSIVE: Added overflow-x-auto for horizontal scrolling */}
-            <div className="rounded-md border border-gray-200 overflow-x-auto">
+            {/* Mobile: Name / Status / Items / Actions stay visible, Name
+                pinned as a sticky column; Description & Company restore
+                from md: up. Same treatment as the item/report tables. */}
+            <div className="rounded-md border border-gray-200 overflow-x-auto -mx-3 md:mx-0 rounded-none md:rounded-md border-x-0 md:border-x">
               <Table>
                 <TableHeader className="bg-gray-50/50">
                   <TableRow>
-                    <TableHead className="font-semibold text-gray-700 min-w-[150px]">Name</TableHead>
-                    <TableHead className="font-semibold text-gray-700 min-w-[200px]">Description</TableHead>
-                    <TableHead className="font-semibold text-gray-700 min-w-[150px]">Company</TableHead>
-                    <TableHead className="font-semibold text-gray-700 w-[100px]">Status</TableHead>
-                    <TableHead className="font-semibold text-gray-700 w-[100px]">Items</TableHead>
-                    <TableHead className="text-right font-semibold text-gray-700 min-w-[120px]">Actions</TableHead>
+                    <TableHead className="font-semibold text-gray-700 min-w-[110px] md:min-w-[150px] p-2 md:p-4 text-xs md:text-sm sticky left-0 z-10 bg-gray-50/50 md:static">Name</TableHead>
+                    <TableHead className="font-semibold text-gray-700 min-w-[200px] hidden md:table-cell">Description</TableHead>
+                    <TableHead className="font-semibold text-gray-700 min-w-[150px] hidden md:table-cell">Company</TableHead>
+                    <TableHead className="font-semibold text-gray-700 w-[90px] p-2 md:p-4 text-xs md:text-sm">Status</TableHead>
+                    <TableHead className="font-semibold text-gray-700 w-[70px] p-2 md:p-4 text-xs md:text-sm">Items</TableHead>
+                    <TableHead className="text-right font-semibold text-gray-700 min-w-[90px] md:min-w-[120px] p-2 md:p-4 text-xs md:text-sm">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
