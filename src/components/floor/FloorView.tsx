@@ -6,7 +6,7 @@
 // This shows WHERE scanning is happening right now and WHO is there —
 // which is still genuinely useful for an admin watching a live count.
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useFloorPresence, FloorPresenceEntry } from "@/hooks/useFloorPresence";
 import { Card, CardContent } from "@/components/ui/card";
@@ -62,11 +62,10 @@ const FloorTile = ({
 
   return (
     <div
-      className={`rounded-xl border p-4 transition-all duration-300 ${
-        isLive
+      className={`rounded-xl border p-4 transition-all duration-300 ${isLive
           ? "border-violet-300 bg-violet-50/60 shadow-[0_0_0_1px_rgba(124,58,237,0.15)]"
           : "border-slate-200 bg-white"
-      }`}
+        }`}
     >
       <div className="flex items-start justify-between mb-2">
         <div className="flex items-center gap-1.5 min-w-0">
@@ -115,7 +114,7 @@ interface FloorViewProps {
 }
 
 export const FloorView = ({ assignmentId }: FloorViewProps) => {
-  const [rows, setRows]       = useState<ActivityRow[]>([]);
+  const [rows, setRows] = useState<ActivityRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   const { activeAuditors } = useFloorPresence(assignmentId);
@@ -150,7 +149,10 @@ export const FloorView = ({ assignmentId }: FloorViewProps) => {
   // Refresh counts immediately when presence changes — someone showing up
   // usually means they're about to scan, so a fresh count read is cheap
   // and keeps things feeling responsive.
+  // (skip the first run: the effect above already fetched on mount)
+  const presenceMountedRef = useRef(false);
   useEffect(() => {
+    if (!presenceMountedRef.current) { presenceMountedRef.current = true; return; }
     fetchActivity();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeAuditors.length]);

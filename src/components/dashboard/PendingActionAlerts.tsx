@@ -18,19 +18,19 @@ interface AlertItem {
 
 const SEVERITY_STYLES: Record<AlertItem["severity"], string> = {
   critical: "bg-white border-rose-200 text-rose-900",
-  warning:  "bg-white border-amber-200 text-amber-900",
-  info:     "bg-white border-blue-200 text-blue-900",
+  warning: "bg-white border-amber-200 text-amber-900",
+  info: "bg-white border-blue-200 text-blue-900",
 };
 
 const ICON_STYLES: Record<AlertItem["severity"], string> = {
   critical: "text-rose-600 bg-rose-50 border border-rose-100",
-  warning:  "text-amber-600 bg-amber-50 border border-amber-100",
-  info:     "text-blue-600 bg-blue-50 border border-blue-100",
+  warning: "text-amber-600 bg-amber-50 border border-amber-100",
+  info: "text-blue-600 bg-blue-50 border border-blue-100",
 };
 
 export const PendingActionAlerts = () => {
   const navigate = useNavigate();
-  const { itemMaster, auditedItems, assignments } = useInventory();
+  const { itemMaster, auditedItems, assignments, dashboardSummary } = useInventory();
   const { selectedAssignmentId, selectedCompanyId } = useCompany();
 
   const alerts = useMemo((): AlertItem[] => {
@@ -48,6 +48,11 @@ export const PendingActionAlerts = () => {
 
     const activeAssignments = assignments.filter((a) => a.status === "active" && String(a.companyId) === String(selectedCompanyId));
     const unstarted = activeAssignments.filter((a) => {
+      // Server summary describes the selected assignment (the only one whose rows are loaded).
+      if (dashboardSummary) {
+        if (String(a.id) !== String(selectedAssignmentId)) return false;
+        return dashboardSummary.totalCount > 0 && dashboardSummary.matched + dashboardSummary.discrepancy === 0;
+      }
       const hasItems = itemMaster.some((item) => String(item.assignmentId) === String(a.id));
       const hasScans = auditedItems.some((item) => String(item.assignmentId) === String(a.id) && item.status !== "pending");
       return hasItems && !hasScans;
@@ -62,24 +67,31 @@ export const PendingActionAlerts = () => {
     }
 
     if (selectedAssignmentId) {
-      const discrepancies = auditedItems.filter((item) => String(item.assignmentId) === String(selectedAssignmentId) && item.status === "discrepancy");
-      if (discrepancies.length > 0) {
-        let valueVariance = 0, hasPricing = false;
+      let discrepancyCount = 0, valueVariance = 0, hasPricing = false;
+      if (dashboardSummary) {
+        discrepancyCount = dashboardSummary.discrepancy;
+        valueVariance = Number(dashboardSummary.valueVariance) || 0;
+        hasPricing = dashboardSummary.hasPricing;
+      } else {
+        const discrepancies = auditedItems.filter((item) => String(item.assignmentId) === String(selectedAssignmentId) && item.status === "discrepancy");
+        discrepancyCount = discrepancies.length;
         discrepancies.forEach((item) => {
           const price = Number(item.customAttributes?.unit_price || item.customAttributes?.Unit_Price || 0);
           if (price > 0) { hasPricing = true; valueVariance += (Number(item.physicalQuantity) - Number(item.systemQuantity)) * price; }
         });
+      }
+      if (discrepancyCount > 0) {
         const valueStr = hasPricing ? ` • Value variance: ₹${Math.abs(valueVariance).toLocaleString("en-IN", { maximumFractionDigits: 0 })} ${valueVariance < 0 ? "short" : "excess"}` : "";
         list.push({
           id: "discrepancies", icon: <TrendingDown className="h-4 w-4" />,
-          title: `${discrepancies.length} item${discrepancies.length > 1 ? "s" : ""} with discrepancies`,
+          title: `${discrepancyCount} item${discrepancyCount > 1 ? "s" : ""} with discrepancies`,
           description: `Physical count differs from system quantity.${valueStr}`,
           action: "View in Reports", route: "/reports", params: "?status=discrepancy", severity: "critical",
         });
       }
     }
     return list;
-  }, [assignments, itemMaster, auditedItems, selectedAssignmentId, selectedCompanyId]);
+  }, [assignments, itemMaster, auditedItems, dashboardSummary, selectedAssignmentId, selectedCompanyId]);
 
   if (alerts.length === 0) return null;
 
@@ -111,11 +123,18 @@ export const PendingActionAlerts = () => {
 
 export const ExceptionTile = () => {
   const navigate = useNavigate();
-  const { auditedItems } = useInventory();
+  const { auditedItems, dashboardSummary } = useInventory();
   const { selectedAssignmentId } = useCompany();
 
   const { discrepancyCount, valueVariance, hasPricing } = useMemo(() => {
     if (!selectedAssignmentId) return { discrepancyCount: 0, valueVariance: 0, hasPricing: false };
+    if (dashboardSummary) {
+      return {
+        discrepancyCount: dashboardSummary.discrepancy,
+        valueVariance: Number(dashboardSummary.valueVariance) || 0,
+        hasPricing: dashboardSummary.hasPricing,
+      };
+    }
     const items = auditedItems.filter((i) => String(i.assignmentId) === String(selectedAssignmentId) && i.status === "discrepancy");
     let val = 0, pricing = false;
     items.forEach((i) => {
@@ -123,7 +142,7 @@ export const ExceptionTile = () => {
       if (price > 0) { pricing = true; val += (Number(i.physicalQuantity) - Number(i.systemQuantity)) * price; }
     });
     return { discrepancyCount: items.length, valueVariance: val, hasPricing: pricing };
-  }, [auditedItems, selectedAssignmentId]);
+  }, [auditedItems, dashboardSummary, selectedAssignmentId]);
 
   if (discrepancyCount === 0) return null;
 

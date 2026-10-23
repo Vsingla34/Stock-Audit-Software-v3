@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { STATUS_CONFIG } from "@/lib/statusConfig";
+import type { DashboardSummary } from "@/context/InventoryContext";
 
 interface ChartItem {
   status?: string;
@@ -26,23 +27,31 @@ interface ChartItem {
 
 interface DashboardChartsProps {
   items: ChartItem[];
+  /** Server-computed numbers. When present, `items` is not used at all. */
+  summary?: DashboardSummary | null;
 }
 
-const StatusDonut = ({ items }: { items: ChartItem[] }) => {
+const StatusDonut = ({ items, summary }: { items: ChartItem[]; summary?: DashboardSummary | null }) => {
   const data = useMemo(() => {
     const counts = { matched: 0, discrepancy: 0, pending: 0 };
-    items.forEach((i) => {
-      const s = (i.status || "pending") as keyof typeof counts;
-      if (s in counts) counts[s]++;
-    });
+    if (summary) {
+      counts.matched = summary.matched;
+      counts.discrepancy = summary.discrepancy;
+      counts.pending = summary.pending;
+    } else {
+      items.forEach((i) => {
+        const s = (i.status || "pending") as keyof typeof counts;
+        if (s in counts) counts[s]++;
+      });
+    }
     return [
-      { name: "Matched",     value: counts.matched,     color: "#10b981" }, // Emerald 500
+      { name: "Matched", value: counts.matched, color: "#10b981" }, // Emerald 500
       { name: "Discrepancy", value: counts.discrepancy, color: "#f43f5e" }, // Rose 500
-      { name: "Pending",     value: counts.pending,     color: "#94a3b8" }, // Slate 400
+      { name: "Pending", value: counts.pending, color: "#94a3b8" }, // Slate 400
     ].filter((d) => d.value > 0);
-  }, [items]);
+  }, [items, summary]);
 
-  const total = items.length;
+  const total = summary ? summary.totalCount : items.length;
 
   return (
     <Card className="shadow-sm border border-slate-200 bg-white rounded-xl transition-all duration-300 hover:shadow-md">
@@ -122,21 +131,24 @@ const StatusDonut = ({ items }: { items: ChartItem[] }) => {
   );
 };
 
-const CategoryDiscrepancyBar = ({ items }: { items: ChartItem[] }) => {
+const CategoryDiscrepancyBar = ({ items, summary }: { items: ChartItem[]; summary?: DashboardSummary | null }) => {
   const data = useMemo(() => {
+    if (summary) {
+      return summary.categories.map((c) => ({ ...c, category: c.category.slice(0, 12) }));
+    }
     const map = new Map<string, { matched: number; discrepancy: number }>();
     items.forEach((i) => {
       const cat = i.category || "Uncategorised";
       if (!map.has(cat)) map.set(cat, { matched: 0, discrepancy: 0 });
       const entry = map.get(cat)!;
-      if (i.status === "matched")      entry.matched++;
-      if (i.status === "discrepancy")  entry.discrepancy++;
+      if (i.status === "matched") entry.matched++;
+      if (i.status === "discrepancy") entry.discrepancy++;
     });
     return Array.from(map.entries())
       .map(([category, v]) => ({ category: category.slice(0, 12), ...v }))
       .sort((a, b) => b.discrepancy - a.discrepancy)
       .slice(0, 6);
-  }, [items]);
+  }, [items, summary]);
 
   return (
     <Card className="shadow-sm border border-slate-200 bg-white rounded-xl transition-all duration-300 hover:shadow-md">
@@ -213,9 +225,9 @@ const CategoryDiscrepancyBar = ({ items }: { items: ChartItem[] }) => {
   );
 };
 
-export const DashboardCharts = ({ items }: DashboardChartsProps) => (
+export const DashboardCharts = ({ items, summary }: DashboardChartsProps) => (
   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-    <StatusDonut items={items} />
-    <CategoryDiscrepancyBar items={items} />
+    <StatusDonut items={items} summary={summary} />
+    <CategoryDiscrepancyBar items={items} summary={summary} />
   </div>
 );
