@@ -1,10 +1,13 @@
 import { useUser } from "@/context/UserContext";
-import { useInventory } from "@/context/InventoryContext";
+import { useInventoryMeta } from "@/context/InventoryContext";
+import { useCallback } from "react";
 import { useCompany } from "@/context/CompanyContext";
 
 export const useUserAccess = () => {
   const { currentUser } = useUser();
-  const { locations, assignments } = useInventory(); 
+  // Only locations/assignments are needed here. Using the full inventory context
+  // made every route guard / layout re-render on every scan.
+  const { locations, assignments } = useInventoryMeta();
   const { selectedCompanyId } = useCompany();
 
   const userRole = currentUser?.role || "client";
@@ -19,7 +22,8 @@ export const useUserAccess = () => {
     }
   };
 
-  const accessibleLocations = () => {
+  // Stable identity => components can safely memoize on it.
+  const accessibleLocations = useCallback(() => {
     if (!currentUser) return [];
 
     if (userRole === "super_admin") {
@@ -40,9 +44,9 @@ export const useUserAccess = () => {
 
     if (userRole === "auditor") {
       const myAssignments = assignments.filter(a => {
-        const auditorIds = (a as any).auditorIds || []; 
+        const auditorIds = (a as any).auditorIds || [];
         if (Array.isArray(auditorIds)) {
-            return auditorIds.includes(currentUser.id);
+          return auditorIds.includes(currentUser.id);
         }
         return (a.auditorId === currentUser.id);
       });
@@ -51,13 +55,13 @@ export const useUserAccess = () => {
       let allowed = locations.filter(l => myLocationIds.includes(l.id));
 
       if (selectedCompanyId) {
-         allowed = allowed.filter(l => l.companyId === selectedCompanyId);
+        allowed = allowed.filter(l => l.companyId === selectedCompanyId);
       }
       return allowed;
     }
 
     return [];
-  };
+  }, [currentUser, userRole, locations, assignments, selectedCompanyId]);
 
   // --- IDENTITY HELPERS ---
   const isSuperAdmin = () => userRole === "super_admin";
@@ -66,12 +70,12 @@ export const useUserAccess = () => {
   const isClientUser = () => userRole === "client";
 
   // --- PERMISSION HELPERS ---
-  
+
   // FIX: Removed 'client' - they cannot scan anymore
   const canPerformAudits = () => ["super_admin", "admin", "auditor"].includes(userRole);
-  
+
   const canViewAnalytics = () => ["super_admin", "admin", "client"].includes(userRole);
-  
+
   // FIX: New permission for finalizing reports (Spectator role)
   const canFinalizeReports = () => ["super_admin", "admin", "client"].includes(userRole);
 
@@ -87,7 +91,7 @@ export const useUserAccess = () => {
     userRole,
     userRoleDisplay,
     accessibleLocations,
-    
+
     // Roles
     isSuperAdmin,
     isAdmin,

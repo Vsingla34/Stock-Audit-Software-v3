@@ -34,7 +34,10 @@ const AutoScaledNumber = ({ value, prefix = "", className = "" }: { value: numbe
 
 export const InventoryOverview = () => {
   const navigate = useNavigate();
-  const { locations, assignments, submitAudit, itemMaster, auditedItems } = useInventory();
+  const { locations, assignments, submitAudit, itemMaster, auditedItems, getInventorySummary } = useInventory();
+  const serverStats = getInventorySummary() as any;
+  // Present once the get_inventory_stats RPC returns quantity totals.
+  const hasServerQty = serverStats && serverStats.totalQty !== undefined && serverStats.totalQty !== null;
   const { selectedAssignmentId } = useCompany();
   const { currentUser } = useUser();
   const { isClientUser } = useUserAccess();
@@ -49,7 +52,7 @@ export const InventoryOverview = () => {
   const isClient = isClientUser();
 
   const latestItems = useMemo(() => {
-    if (!selectedAssignmentId) return [];
+    if (hasServerQty || !selectedAssignmentId) return [];
     const auditedMap = new Map();
     auditedItems.forEach(item => auditedMap.set(item.id, item));
     const results: any[] = [];
@@ -59,9 +62,23 @@ export const InventoryOverview = () => {
       }
     });
     return results;
-  }, [itemMaster, auditedItems, selectedAssignmentId]);
+  }, [itemMaster, auditedItems, selectedAssignmentId, hasServerQty]);
 
   const stats = useMemo(() => {
+    if (hasServerQty) {
+      const totalStock = Number(serverStats.totalQty) || 0;
+      const auditedStock = Number(serverStats.auditedQty) || 0;
+      return {
+        totalStock,
+        auditedStock,
+        matchedStock: Number(serverStats.matchedQty) || 0,
+        discrepancyStock: Number(serverStats.varianceQty) || 0,
+        progressPercentage: totalStock > 0 ? Math.round((auditedStock / totalStock) * 100) : 0,
+        pendingStock: totalStock - auditedStock,
+        totalSkus: Number(serverStats.totalItems) || 0,
+        auditedSkus: Number(serverStats.auditedItems) || 0,
+      };
+    }
     const totalStock = latestItems.reduce((sum, item) => sum + (Number(item.systemQuantity) || 0), 0);
     const activeAuditedItems = latestItems.filter(item => item.status && item.status !== 'pending');
     const auditedStock = activeAuditedItems.reduce((sum, item) => sum + (Number(item.physicalQuantity) || 0), 0);
@@ -72,7 +89,9 @@ export const InventoryOverview = () => {
     const progressPercentage = totalStock > 0 ? Math.round((auditedStock / totalStock) * 100) : 0;
 
     return { totalStock, auditedStock, matchedStock, discrepancyStock, progressPercentage, pendingStock: totalStock - auditedStock, totalSkus: latestItems.length, auditedSkus: activeAuditedItems.length };
-  }, [latestItems]);
+  }, [latestItems, hasServerQty, serverStats]);
+
+  const isEmptyTiles = hasServerQty ? stats.totalSkus === 0 : latestItems.length === 0;
 
   const handleSubmitReport = async () => {
     if (!selectedAssignmentId) return;
@@ -133,12 +152,12 @@ export const InventoryOverview = () => {
       </CardHeader>
       
       <CardContent className="p-0">
-        {latestItems.length === 0 && (
+        {isEmptyTiles && (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4">
             {[1,2,3,4].map(i => <Skeleton key={i} className="h-20 md:h-28 rounded-xl bg-white border border-slate-200 shadow-sm" />)}
           </div>
         )}
-        <div className={`grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4 ${latestItems.length === 0 ? "hidden" : ""}`}>
+        <div className={`grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4 ${isEmptyTiles ? "hidden" : ""}`}>
           
           <div className="p-2.5 md:p-5 bg-white rounded-lg md:rounded-xl border border-slate-200 shadow-sm hover:border-slate-300 hover:shadow-md transition-all duration-300 group overflow-hidden">
             <div className="flex justify-between items-start mb-1.5 md:mb-4">

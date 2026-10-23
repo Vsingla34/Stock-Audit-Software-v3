@@ -262,4 +262,4 @@ export const LocationMaster = () => {
       </CardContent>
     </Card>
   );  
-};
+};   

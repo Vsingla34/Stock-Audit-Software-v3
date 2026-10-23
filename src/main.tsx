@@ -2,33 +2,20 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { InventoryProvider } from "@/context/InventoryContext";
-import { UserProvider } from "@/context/UserContext";
 import { BrowserRouter } from "react-router-dom";
-import { CompanyProvider } from "@/context/CompanyContext";
+import { Toaster } from "@/components/ui/toaster";
 
-const queryClient = new QueryClient();
-
+// PERFORMANCE FIX: App.tsx already mounts QueryClientProvider, TooltipProvider,
+// UserProvider, CompanyProvider, InventoryProvider and the Sonner Toaster.
+// They used to be mounted a SECOND time here, which meant two InventoryProviders
+// (two full 15k-row downloads, two realtime channels, two IndexedDB writers,
+// two sync loops) and every toast shown twice. Only the router lives here now.
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <TooltipProvider>
-          <CompanyProvider>
-          <UserProvider>
-            <InventoryProvider>
-              <Toaster />
-              <Sonner />
-              <App />
-            </InventoryProvider>
-          </UserProvider>
-          </CompanyProvider>
-        </TooltipProvider>
-      </BrowserRouter>
-    </QueryClientProvider>
+    <BrowserRouter>
+      <App />
+      {/* shadcn toaster is used by UserProfile (useToast); Sonner is mounted in App */}
+      <Toaster />
+    </BrowserRouter>
   </React.StrictMode>
 );

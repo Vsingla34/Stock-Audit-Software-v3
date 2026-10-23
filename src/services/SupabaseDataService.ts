@@ -7,8 +7,8 @@ import {
 } from "@/context/InventoryContext";
 
 class SupabaseDataService {
-  
-  public currentUser: any = null; 
+
+  public currentUser: any = null;
   private pendingVerificationEmail: string | null = null;
 
   constructor() {
@@ -69,9 +69,9 @@ class SupabaseDataService {
       let unitPrice = 0;
       let measuringUnit = "";
 
-      const priceKeywords    = ['unit price', 'price', 'rate', 'cost', 'mrp', 'unit cost', 'item value', 'value', 'unit_price'];
+      const priceKeywords = ['unit price', 'price', 'rate', 'cost', 'mrp', 'unit cost', 'item value', 'value', 'unit_price'];
       const uglyValueKeywords = ['system value', 'system_value', 'physical value', 'physical_value', 'sys value', 'phy value', 'val var'];
-      const uomKeywords       = ['measuring unit', 'unit', 'uom', 'measure unit'];
+      const uomKeywords = ['measuring unit', 'unit', 'uom', 'measure unit'];
 
       Object.keys(cleanedCustomAttributes).forEach(key => {
         const lowerK = key.trim().toLowerCase();
@@ -96,8 +96,8 @@ class SupabaseDataService {
         }
       });
 
-      if (unitPrice > 0)    cleanedCustomAttributes['unit_price'] = unitPrice;
-      if (measuringUnit)    cleanedCustomAttributes['Unit'] = measuringUnit;
+      if (unitPrice > 0) cleanedCustomAttributes['unit_price'] = unitPrice;
+      if (measuringUnit) cleanedCustomAttributes['Unit'] = measuringUnit;
 
       return {
         id: item.id,
@@ -160,7 +160,7 @@ class SupabaseDataService {
       let audIds: string[] = [];
       if (Array.isArray(item.auditor_ids)) audIds = item.auditor_ids;
       else if (typeof item.auditor_ids === 'string') audIds = [item.auditor_ids];
-      
+
       let cliIds: string[] = [];
       if (Array.isArray(item.client_ids)) cliIds = item.client_ids;
       else if (typeof item.client_ids === 'string') cliIds = [item.client_ids];
@@ -196,7 +196,7 @@ class SupabaseDataService {
         status: assignment.status,
         scheduled_date: assignment.scheduledDate,
         auditor_ids: assignment.auditorIds || [],
-        client_ids: assignment.clientIds || [], 
+        client_ids: assignment.clientIds || [],
         show_system_quantity: assignment.showSystemQuantity !== false,
       })
       .select()
@@ -206,7 +206,7 @@ class SupabaseDataService {
 
     const audIds = Array.isArray(data.auditor_ids) ? data.auditor_ids : [];
     const cliIds = Array.isArray(data.client_ids) ? data.client_ids : [];
-    
+
     return {
       id: data.id,
       locationId: data.location_id,
@@ -228,8 +228,8 @@ class SupabaseDataService {
     showSystemQuantity?: boolean;
   }): Promise<void> {
     const payload: any = {};
-    if (updates.status)        payload.status          = updates.status;
-    if (updates.scheduledDate) payload.scheduled_date  = updates.scheduledDate;
+    if (updates.status) payload.status = updates.status;
+    if (updates.scheduledDate) payload.scheduled_date = updates.scheduledDate;
     if (updates.auditorIds !== undefined) payload.auditor_ids = updates.auditorIds;
     if (updates.clientIds !== undefined) payload.client_ids = updates.clientIds;
     if (updates.showSystemQuantity !== undefined) payload.show_system_quantity = updates.showSystemQuantity;
@@ -269,28 +269,28 @@ class SupabaseDataService {
     let targetEmail = "";
 
     if (assignment.client_ids && assignment.client_ids.length > 0) {
-        const { data: assignedClients } = await supabase
-            .from("user_profiles")
-            .select("email")
-            .in("id", assignment.client_ids);
-        
-        if (assignedClients && assignedClients.length > 0) {
-            targetEmail = assignedClients[0].email;
-        }
+      const { data: assignedClients } = await supabase
+        .from("user_profiles")
+        .select("email")
+        .in("id", assignment.client_ids);
+
+      if (assignedClients && assignedClients.length > 0) {
+        targetEmail = assignedClients[0].email;
+      }
     }
 
     if (!targetEmail) {
-        const { data: clients, error: clientError } = await supabase
-          .from("user_profiles")
-          .select("email")
-          .eq("role", "client")
-          .contains("assigned_companies", [assignment.company_id]);
+      const { data: clients, error: clientError } = await supabase
+        .from("user_profiles")
+        .select("email")
+        .eq("role", "client")
+        .contains("assigned_companies", [assignment.company_id]);
 
-        if (clientError) throw clientError;
-        if (!clients || clients.length === 0) {
-          throw new Error("No client account found associated with this assignment or company.");
-        }
-        targetEmail = clients[0].email;
+      if (clientError) throw clientError;
+      if (!clients || clients.length === 0) {
+        throw new Error("No client account found associated with this assignment or company.");
+      }
+      targetEmail = clients[0].email;
     }
 
     // Fix 2.4: persist in sessionStorage so OTP survives a page refresh
@@ -338,34 +338,99 @@ class SupabaseDataService {
   }
 
   public async getItemMaster(companyId: string, assignmentId: number | null = null): Promise<InventoryItem[]> {
-    const allItems: any[] = [];
-    let page = 0;
     const pageSize = 1000;
+    // PERFORMANCE / RELIABILITY FIX:
+    // The old version fired all 16 partitions at once. For 15k rows, with RLS
+    // evaluated per row, several users doing it at the same moment tripped
+    // statement timeouts / rate limits, one failed partition rejected the whole
+    // Promise.all, and those users ended up with an empty or partial dashboard.
+    // Now: a small worker pool (4 at a time) + per-request retry with backoff,
+    // so a transient failure no longer loses the whole load.
+    const CONCURRENCY = 4;
+    const MAX_RETRIES = 3;
 
-    while (true) {
-      let query = supabase
-        .from("inventory_items")
-        .select("*")
-        .eq("company_id", companyId);
+    const hex = "0123456789abcdef".split("");
+    const bound = (d: string) => `${d}0000000-0000-0000-0000-000000000000`;
 
-      if (assignmentId) {
-        query = query.eq("assignment_id", assignmentId);
-      } else {
-        query = query.is("assignment_id", null);
+    const withRetry = async (run: () => PromiseLike<{ data: any[] | null; error: any }>) => {
+      let lastError: any;
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        const { data, error } = await run();
+        if (!error) return data;
+        lastError = error;
+        await new Promise((r) => setTimeout(r, 400 * 2 ** attempt + Math.random() * 300));
       }
+      console.error("Error fetching item master:", lastError);
+      throw lastError;
+    };
 
-      query = query.range(page * pageSize, (page + 1) * pageSize - 1);
+    // Each partition is keyset-paged on the primary key (stable, no skipped or
+    // duplicated rows). We page until an empty response rather than trusting
+    // "short page = last page", because the server's max-rows cap can be
+    // lower than pageSize.
+    const fetchPartition = async (idx: number): Promise<any[]> => {
+      const rows: any[] = [];
+      const lower = bound(hex[idx]);
+      const upper = idx < 15 ? bound(hex[idx + 1]) : null;
+      let lastId: string | null = null;
 
-      const { data, error } = await query;
-      if (error) { console.error("Error fetching item master:", error); throw error; }
-      if (!data || data.length === 0) break;
+      while (true) {
+        const data = await withRetry(() => {
+          let query = supabase
+            .from("inventory_items")
+            .select("*")
+            .eq("company_id", companyId);
 
-      allItems.push(...data);
-      if (data.length < pageSize) break;
-      page++;
-    }
+          if (assignmentId) {
+            query = query.eq("assignment_id", assignmentId);
+          } else {
+            query = query.is("assignment_id", null);
+          }
 
-    return this.mapDbRows(allItems);
+          query = lastId ? query.gt("id", lastId) : query.gte("id", lower);
+          if (upper) query = query.lt("id", upper);
+          return query.order("id", { ascending: true }).limit(pageSize) as any;
+        });
+        if (!data || data.length === 0) break;
+
+        rows.push(...data);
+        lastId = data[data.length - 1].id;
+      }
+      return rows;
+    };
+
+    const parts: any[][] = new Array(16);
+    let nextPartition = 0;
+    const worker = async () => {
+      while (true) {
+        const i = nextPartition++;
+        if (i >= 16) return;
+        parts[i] = await fetchPartition(i);
+      }
+    };
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+
+    return this.mapDbRows(parts.flat());
+  }
+
+  /** Fetch a handful of rows by primary key in ONE request (used by live-sync / scan reconcile). */
+  public async getItemsByIds(ids: string[]): Promise<InventoryItem[]> {
+    if (ids.length === 0) return [];
+    const unique = Array.from(new Set(ids));
+    const chunks: string[][] = [];
+    for (let i = 0; i < unique.length; i += 100) chunks.push(unique.slice(i, i + 100));
+
+    const results = await Promise.all(
+      chunks.map(async (chunk) => {
+        const { data, error } = await supabase
+          .from("inventory_items")
+          .select("*")
+          .in("id", chunk);
+        if (error) throw error;
+        return data || [];
+      })
+    );
+    return this.mapDbRows(results.flat());
   }
 
   public async getAuditedItems(companyId: string, assignmentId: number | null = null): Promise<InventoryItem[]> {
@@ -410,6 +475,7 @@ class SupabaseDataService {
         .select("sku")
         .eq("company_id", companyId)
         .is("assignment_id", null)
+        .order("id", { ascending: true })
         .range(start, start + pageSize - 1);
 
       if (error) { console.error("Error fetching SKUs at page", page, error); throw error; }
@@ -422,7 +488,6 @@ class SupabaseDataService {
         }
       });
 
-      if (data.length < pageSize) break;
       page++;
     }
 
@@ -620,7 +685,7 @@ class SupabaseDataService {
     }
 
     if (missingSkus.length > 0) {
-      throw new Error(`Validation Failed: ${missingSkus.length} SKUs from your sheet were not found in this Assignment's Closing Stock.\nExample SKUs: ${missingSkus.slice(0,3).join(', ')}.\nEnsure the SKUs perfectly match, or confirm them as new items when prompted.`);
+      throw new Error(`Validation Failed: ${missingSkus.length} SKUs from your sheet were not found in this Assignment's Closing Stock.\nExample SKUs: ${missingSkus.slice(0, 3).join(', ')}.\nEnsure the SKUs perfectly match, or confirm them as new items when prompted.`);
     }
 
     if (payloadRows.length === 0) return;
@@ -704,13 +769,13 @@ class SupabaseDataService {
     if (error) throw error;
   }
 
- 
+
   public async addBulkSurplusItems(params: {
     items: { sku: string; name: string; category: string; physicalQuantity: number; subLocation?: string; customAttributes?: Record<string, any> }[];
     companyId: string;
     assignmentId: number;
     locationName: string;
-    batchKey: string; 
+    batchKey: string;
     userId?: string;
     userName?: string;
   }): Promise<void> {
@@ -825,9 +890,9 @@ class SupabaseDataService {
     }
 
     return (data || []).map((report: any) => {
-      const meta      = report.report_data?.metadata || {};
-      const locName   = report.locations?.name || meta.location_name || "Unknown Location";
-      const dateStr   = report.assignments?.scheduled_date || meta.assignment_date || report.created_at;
+      const meta = report.report_data?.metadata || {};
+      const locName = report.locations?.name || meta.location_name || "Unknown Location";
+      const dateStr = report.assignments?.scheduled_date || meta.assignment_date || report.created_at;
       const finalizer = userMap[report.finalized_by];
       const finalizerName = finalizer ? (finalizer.name || finalizer.email) : "Unknown Client";
 
@@ -896,13 +961,13 @@ class SupabaseDataService {
   public async logUploadBatch(params: any): Promise<void> {
     const { data: { user } } = await supabase.auth.getUser();
     await supabase.from("inventory_upload_history").insert({
-      batch_key:     params.batchKey,
-      company_id:    params.companyId,
-      location_id:   params.locationId   || null,
+      batch_key: params.batchKey,
+      company_id: params.companyId,
+      location_id: params.locationId || null,
       location_name: params.locationName || "Unknown Location",
-      upload_type:   params.uploadType,
-      total_items:   params.totalItems,
-      uploaded_by:   user?.id            || null,
+      upload_type: params.uploadType,
+      total_items: params.totalItems,
+      uploaded_by: user?.id || null,
       assignment_id: params.assignmentId || null,
     });
   }
@@ -918,49 +983,49 @@ class SupabaseDataService {
     if (!history) return;
 
     if (history.upload_type === 'physical_quantity') {
-       const { data: items } = await supabase
-         .from("inventory_items")
-       
-         .select("id, physical_quantity, system_quantity, auditor_entries, company_id, assignment_id, sku, name, category, location")
-         .eq("assignment_id", history.assignment_id);
+      const { data: items } = await supabase
+        .from("inventory_items")
 
-       const updates = (items || []).map(item => {
-          let entries = item.auditor_entries;
-          if (typeof entries === 'string') entries = JSON.parse(entries);
-          if (!Array.isArray(entries)) entries = [];
+        .select("id, physical_quantity, system_quantity, auditor_entries, company_id, assignment_id, sku, name, category, location")
+        .eq("assignment_id", history.assignment_id);
 
-          const hasBatch = entries.some((e: any) => e.batchKey === history.batch_key);
-          if (!hasBatch) return null; 
+      const updates = (items || []).map(item => {
+        let entries = item.auditor_entries;
+        if (typeof entries === 'string') entries = JSON.parse(entries);
+        if (!Array.isArray(entries)) entries = [];
 
-          const keptEntries = entries.filter((e: any) => e.batchKey !== history.batch_key);
-          
-          const newQty = keptEntries.reduce((sum, e) => sum + (Number(e.quantityFound) || 0), 0);
-          const sysQty = Number(item.system_quantity) || 0;
+        const hasBatch = entries.some((e: any) => e.batchKey === history.batch_key);
+        if (!hasBatch) return null;
 
-          return {
-             id: item.id,
-             company_id: item.company_id,
-             assignment_id: item.assignment_id,
-             sku: item.sku,
-             name: item.name,             // 🔥 FIX: Pass existing name back
-             category: item.category,     // 🔥 FIX: Pass existing category back
-             location: item.location,     // 🔥 FIX: Pass existing location back
-             system_quantity: item.system_quantity,
-             physical_quantity: newQty,
-             status: newQty === sysQty ? 'matched' : 'discrepancy',
-             auditor_entries: keptEntries
-          };
-       }).filter(Boolean);
+        const keptEntries = entries.filter((e: any) => e.batchKey !== history.batch_key);
 
-       if (updates.length > 0) {
-          const CHUNK_SIZE = 500;
-          for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
-             const { error } = await supabase.from('inventory_items').upsert(updates.slice(i, i + CHUNK_SIZE) as any);
-             if (error) throw error;
-          }
-       }
+        const newQty = keptEntries.reduce((sum, e) => sum + (Number(e.quantityFound) || 0), 0);
+        const sysQty = Number(item.system_quantity) || 0;
+
+        return {
+          id: item.id,
+          company_id: item.company_id,
+          assignment_id: item.assignment_id,
+          sku: item.sku,
+          name: item.name,             // 🔥 FIX: Pass existing name back
+          category: item.category,     // 🔥 FIX: Pass existing category back
+          location: item.location,     // 🔥 FIX: Pass existing location back
+          system_quantity: item.system_quantity,
+          physical_quantity: newQty,
+          status: newQty === sysQty ? 'matched' : 'discrepancy',
+          auditor_entries: keptEntries
+        };
+      }).filter(Boolean);
+
+      if (updates.length > 0) {
+        const CHUNK_SIZE = 500;
+        for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
+          const { error } = await supabase.from('inventory_items').upsert(updates.slice(i, i + CHUNK_SIZE) as any);
+          if (error) throw error;
+        }
+      }
     } else {
-       await supabase.from("inventory_items")
+      await supabase.from("inventory_items")
         .delete()
         .eq("upload_batch_key", history.batch_key)
         .eq("company_id", history.company_id);
@@ -1014,7 +1079,7 @@ class SupabaseDataService {
   public async getQuestions(cId: string) {
     const { data, error } = await supabase.from("questions").select("*").eq("company_id", cId);
     if (error) throw error;
-    
+
     return data?.map((q: any) => ({
       id: q.id,
       text: q.text,
@@ -1026,14 +1091,14 @@ class SupabaseDataService {
   }
 
   public async addQuestion(q: any) {
-    const { error } = await supabase.from("questions").insert({ 
-      text: q.text, 
-      type: q.type, 
-      required: q.required, 
-      options: q.options, 
-      company_id: q.companyId 
+    const { error } = await supabase.from("questions").insert({
+      text: q.text,
+      type: q.type,
+      required: q.required,
+      options: q.options,
+      company_id: q.companyId
     });
-    
+
     if (error) throw error;
   }
 
@@ -1057,24 +1122,24 @@ class SupabaseDataService {
   public async getQuestionnaireAnswers(cId: string) {
     const { data } = await supabase.from("questionnaire_answers").select("*").eq("company_id", cId);
     return data?.map((a: any) => ({
-      questionId:   a.question_id,
-      locationId:   a.location_id,
-      answer:       a.answer,
-      answeredBy:   a.answered_by,
-      answeredOn:   a.answered_on,
-      companyId:    a.company_id,
+      questionId: a.question_id,
+      locationId: a.location_id,
+      answer: a.answer,
+      answeredBy: a.answered_by,
+      answeredOn: a.answered_on,
+      companyId: a.company_id,
       assignmentId: a.assignment_id,
     })) || [];
   }
 
   public async upsertQuestionnaireAnswer(a: any) {
     await supabase.from("questionnaire_answers").upsert({
-      question_id:  a.questionId,
-      location_id:  a.locationId,
-      company_id:   a.companyId,
-      answer:       a.answer,
-      answered_by:  a.answeredBy,
-      answered_on:  a.answeredOn,
+      question_id: a.questionId,
+      location_id: a.locationId,
+      company_id: a.companyId,
+      answer: a.answer,
+      answered_by: a.answeredBy,
+      answered_on: a.answeredOn,
       assignment_id: a.assignmentId,
     } as any, { onConflict: 'question_id,assignment_id' as any });
   }
@@ -1089,8 +1154,8 @@ class SupabaseDataService {
 
   public async secureRecordScan(itemId: string, newEntry: any, quantityAdded: number): Promise<void> {
     const { error } = await supabase.rpc('record_scan', {
-      p_item_id:        itemId,
-      p_new_entry:      newEntry,
+      p_item_id: itemId,
+      p_new_entry: newEntry,
       p_quantity_added: quantityAdded,
     });
 
@@ -1100,9 +1165,29 @@ class SupabaseDataService {
     }
   }
 
+  // Server-side aggregate for the dashboard (status counts, category chart,
+  // discrepancy value). Returns null if the SQL function isn't installed yet,
+  // in which case the UI falls back to computing from the loaded items.
+  private dashboardSummaryMissing = false;
+  public async getDashboardSummary(companyId: string, assignmentId: number): Promise<any | null> {
+    if (this.dashboardSummaryMissing) return null;
+    const { data, error } = await (supabase.rpc as any)('get_dashboard_summary', {
+      p_company_id: companyId,
+      p_assignment_id: assignmentId,
+    });
+    if (error) {
+      if ((error as any).code === 'PGRST202' || /could not find the function/i.test(error.message || '')) {
+        this.dashboardSummaryMissing = true;
+      }
+      console.warn("Dashboard summary unavailable, using client-side fallback:", error.message);
+      return null;
+    }
+    return data;
+  }
+
   public async getInventoryStats(companyId: string, assignmentId: number): Promise<any> {
     const { data, error } = await supabase.rpc('get_inventory_stats', {
-      p_company_id:    companyId,
+      p_company_id: companyId,
       p_assignment_id: assignmentId,
     });
 
@@ -1178,17 +1263,20 @@ class SupabaseDataService {
 
     let q = supabase
       .from("audit_log")
-      .select("*", { count: "exact" })
+      // "estimated" = exact for small tables, planner estimate for big ones.
+      // An exact count over a large audit_log (one row per scan) was a slow
+      // full count on every dashboard load; the UI only shows it as a label.
+      .select("*", { count: "estimated" })
       .eq("company_id", companyId)
       .order("occurred_at", { ascending: false });
 
     if (assignmentId) q = q.eq("assignment_id", assignmentId);
-    if (entityType)   q = q.eq("entity_type", entityType);
-    if (entityId)     q = q.eq("entity_id", entityId);
-    if (actorId)      q = q.eq("actor_id", actorId);
-    if (action)       q = q.eq("action", action);
-    if (from)         q = q.gte("occurred_at", from);
-    if (to)           q = q.lte("occurred_at", to);
+    if (entityType) q = q.eq("entity_type", entityType);
+    if (entityId) q = q.eq("entity_id", entityId);
+    if (actorId) q = q.eq("actor_id", actorId);
+    if (action) q = q.eq("action", action);
+    if (from) q = q.gte("occurred_at", from);
+    if (to) q = q.lte("occurred_at", to);
 
     q = q.range(offset, offset + limit - 1);
 
@@ -1207,7 +1295,7 @@ class SupabaseDataService {
       limit: 20,
     });
     return rows;
-  }   
+  }
   // Build 04: translates a VALIDATED QueryFilter (already passed through
   // QueryFilterSchema.parse on the client) into a call to the
   // query_inventory_by_filter RPC. This function never sees raw model

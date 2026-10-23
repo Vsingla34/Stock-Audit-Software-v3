@@ -21,7 +21,7 @@ import { format } from "date-fns";
 import { useUser } from "@/context/UserContext";
 import { useUserAccess } from "@/hooks/useUserAccess";
 import { ItemHistoryPopover } from "@/components/audit/ItemHistoryPopover";
-import { useMemo, useCallback, useState, useEffect } from "react";
+import { useMemo, useCallback, useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ExportPhysicalCountSheet } from "./ExportPhysicalCountSheet";
@@ -29,7 +29,8 @@ import { ExportPhysicalCountSheet } from "./ExportPhysicalCountSheet";
 const ROW_LIMIT = 100;
 
 export const InventoryTable = () => {
-  const { itemMaster, auditedItems, locations, updateItemRemark, assignments } = useInventory();
+  // itemMaster and auditedItems are the same array in the context.
+  const { itemMaster, itemsVersion, locations, updateItemRemark, assignments } = useInventory();
   const { currentUser } = useUser();
   const { accessibleLocations } = useUserAccess();
   const { selectedLocation } = useLocationFilter();
@@ -52,36 +53,17 @@ export const InventoryTable = () => {
     return currentUser?.role === 'client' && currentLocationObj.auditStatus === 'submitted';
   }, [currentUser, currentLocationObj]);
 
-  const allTableData = useMemo(() => {
-    return itemMaster
-      .filter((item) => item.location !== "")
-      .map((item) => {
-        const auditedItem = auditedItems.find((a) => a.id === item.id && a.location === item.location);
-        if (auditedItem) {
-          return {
-            ...item,
-            physicalQuantity: auditedItem.physicalQuantity,
-            status: auditedItem.status,
-            lastAudited: auditedItem.lastAudited,
-            clientRemarks: item.clientRemarks, 
-            customAttributes: item.customAttributes || {}
-          };
-        }
-        return {
-          ...item,
-          physicalQuantity: 0,
-          status: "pending" as const,
-          lastAudited: undefined,
-          auditedBy: undefined,
-          clientRemarks: item.clientRemarks,
-          customAttributes: item.customAttributes || {}
-        };
-      });
-  }, [itemMaster, auditedItems]);
+  // PERFORMANCE FIX: this used to run auditedItems.find() for every item
+  // (15k x 15k = ~225M comparisons) and clone every row, on every scan.
+  // The live rows already carry the audited quantity/status, so just filter.
+  const allTableData = useMemo(
+    () => itemMaster.filter((item) => item.location !== ""),
+    [itemMaster]
+  );
 
   const locationFilteredData = useMemo(() => {
     if (selectedAssignmentId) {
-       return allTableData; 
+      return allTableData;
     }
 
     const isAllLocations = !selectedLocation || selectedLocation === "all";
@@ -89,24 +71,30 @@ export const InventoryTable = () => {
     if (isAllLocations) {
       if (currentUser?.role === "admin" || currentUser?.role === "super_admin") {
         return allTableData;
-      } 
+      }
       else {
         const accessibleLocationNames = userLocations.map((loc) => loc.name);
         return allTableData.filter((item) => accessibleLocationNames.includes(item.location));
       }
-    } 
-    
+    }
+
     if (currentLocationObj) return allTableData.filter((item) => item.location === currentLocationObj.name);
     return [];
   }, [allTableData, selectedLocation, currentLocationObj, currentUser?.role, userLocations, selectedAssignmentId]);
 
+  // Column set only changes when rows are added/removed/reloaded, not when a
+  // quantity changes, so key it on itemsVersion instead of re-scanning every
+  // row's attributes after every scan.
+  const filteredForColumnsRef = useRef(locationFilteredData);
+  filteredForColumnsRef.current = locationFilteredData;
   const rawDynamicColumns = useMemo(() => {
     const keys = new Set<string>();
-    locationFilteredData.forEach(item => {
+    filteredForColumnsRef.current.forEach(item => {
       if (item.customAttributes) Object.keys(item.customAttributes).forEach(k => keys.add(k));
     });
     return Array.from(keys).sort();
-  }, [locationFilteredData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itemsVersion, selectedLocation, selectedAssignmentId, userLocations]);
 
   const priceColumnKey = useMemo(() => {
     const priceKeywords = ['unit price', 'unit_price', 'price', 'rate', 'cost', 'mrp', 'unit cost'];
@@ -155,20 +143,20 @@ export const InventoryTable = () => {
   const renderStatus = useCallback(
     (status: string | undefined, physicalQty: number) => {
       if (hideSystemQuantity) {
-          if (physicalQty > 0 || status !== 'pending') {
-              return (
-                <div className="flex items-center justify-center">
-                  <ShieldAlert className="h-4 w-4 text-blue-500 mr-1" />
-                  <Badge variant="default" className="bg-blue-100 text-blue-800 border-blue-200 shadow-none">Audited</Badge>
-                </div>
-              );
-          }
+        if (physicalQty > 0 || status !== 'pending') {
           return (
             <div className="flex items-center justify-center">
-              <Clock className="h-4 w-4 text-gray-400 mr-1" />
-              <Badge variant="outline" className="text-gray-600">Pending</Badge>
+              <ShieldAlert className="h-4 w-4 text-blue-500 mr-1" />
+              <Badge variant="default" className="bg-blue-100 text-blue-800 border-blue-200 shadow-none">Audited</Badge>
             </div>
           );
+        }
+        return (
+          <div className="flex items-center justify-center">
+            <Clock className="h-4 w-4 text-gray-400 mr-1" />
+            <Badge variant="outline" className="text-gray-600">Pending</Badge>
+          </div>
+        );
       }
 
       // Fix 4.7: use shared statusConfig for consistent colours
@@ -257,10 +245,10 @@ export const InventoryTable = () => {
                 let unitPrice = 0, sysValue = 0, phyValue = 0, valueVariance = 0;
 
                 if (hasPricing && !hideSystemQuantity && priceColumnKey) {
-                   unitPrice = parsePrice(item.customAttributes?.['unit_price'] || item.customAttributes?.[priceColumnKey]);
-                   sysValue = item.customAttributes?.['system_value'] ? parsePrice(item.customAttributes['system_value']) : unitPrice * item.systemQuantity;
-                   phyValue = item.customAttributes?.['physical_value'] ? parsePrice(item.customAttributes['physical_value']) : unitPrice * physicalQty;
-                   valueVariance = phyValue - sysValue;
+                  unitPrice = parsePrice(item.customAttributes?.['unit_price'] || item.customAttributes?.[priceColumnKey]);
+                  sysValue = item.customAttributes?.['system_value'] ? parsePrice(item.customAttributes['system_value']) : unitPrice * item.systemQuantity;
+                  phyValue = item.customAttributes?.['physical_value'] ? parsePrice(item.customAttributes['physical_value']) : unitPrice * physicalQty;
+                  valueVariance = phyValue - sysValue;
                 }
 
                 return (
@@ -277,20 +265,20 @@ export const InventoryTable = () => {
                     {displayDynamicColumns.map(colKey => (<TableCell key={colKey} className="text-xs text-gray-600 hidden md:table-cell">{item.customAttributes?.[colKey] !== undefined ? String(item.customAttributes[colKey]) : "-"}</TableCell>))}
 
                     {hasPricing && !hideSystemQuantity && (
-                        <>
-                          <TableCell className="text-right text-xs font-mono bg-indigo-50/30 hidden md:table-cell">{formatCurrency(unitPrice)}</TableCell>
-                          <TableCell className="text-right text-xs font-mono bg-indigo-50/30 font-medium text-gray-700 hidden md:table-cell">{formatCurrency(sysValue)}</TableCell>
-                          <TableCell className={`text-right text-xs font-mono bg-indigo-50/30 font-medium hidden md:table-cell ${item.status === 'discrepancy' ? 'text-red-600' : 'text-green-600'}`}>{formatCurrency(phyValue)}</TableCell>
-                          <TableCell className={`text-right text-xs font-mono bg-indigo-50/30 font-bold hidden md:table-cell ${valueVariance < 0 ? 'text-red-600' : valueVariance > 0 ? 'text-green-600' : 'text-gray-500'}`}>{formatCurrency(valueVariance)}</TableCell>
-                        </>
+                      <>
+                        <TableCell className="text-right text-xs font-mono bg-indigo-50/30 hidden md:table-cell">{formatCurrency(unitPrice)}</TableCell>
+                        <TableCell className="text-right text-xs font-mono bg-indigo-50/30 font-medium text-gray-700 hidden md:table-cell">{formatCurrency(sysValue)}</TableCell>
+                        <TableCell className={`text-right text-xs font-mono bg-indigo-50/30 font-medium hidden md:table-cell ${item.status === 'discrepancy' ? 'text-red-600' : 'text-green-600'}`}>{formatCurrency(phyValue)}</TableCell>
+                        <TableCell className={`text-right text-xs font-mono bg-indigo-50/30 font-bold hidden md:table-cell ${valueVariance < 0 ? 'text-red-600' : valueVariance > 0 ? 'text-green-600' : 'text-gray-500'}`}>{formatCurrency(valueVariance)}</TableCell>
+                      </>
                     )}
 
                     <TableCell className="text-xs hidden md:table-cell">{item.location}</TableCell>
 
                     {!hideSystemQuantity && (
-                        <TableCell className="text-center font-medium hidden md:table-cell">
-                            {item.systemQuantity}
-                        </TableCell>
+                      <TableCell className="text-center font-medium hidden md:table-cell">
+                        {item.systemQuantity}
+                      </TableCell>
                     )}
 
                     <TableCell className={`text-center font-medium text-xs md:text-sm p-2 md:p-4 ${getQuantityCellClass(item.status, item.systemQuantity, physicalQty)}`}>
@@ -298,7 +286,7 @@ export const InventoryTable = () => {
                     </TableCell>
 
                     {!hideSystemQuantity && (
-                        <TableCell className="text-center text-xs md:text-sm p-2 md:p-4">{physicalQty - item.systemQuantity}</TableCell>
+                      <TableCell className="text-center text-xs md:text-sm p-2 md:p-4">{physicalQty - item.systemQuantity}</TableCell>
                     )}
 
                     <TableCell className="text-center p-2 md:p-4">{renderStatus(item.status, physicalQty)}</TableCell>
@@ -320,7 +308,7 @@ export const InventoryTable = () => {
               })
             ) : (
               <TableRow>
-                  <TableCell colSpan={hideSystemQuantity ? 6 : (8 + (hasPricing ? 4 : 0))} className="text-center py-4 text-gray-500">No data available matching filters</TableCell>
+                <TableCell colSpan={hideSystemQuantity ? 6 : (8 + (hasPricing ? 4 : 0))} className="text-center py-4 text-gray-500">No data available matching filters</TableCell>
               </TableRow>
             )}
           </TableBody>

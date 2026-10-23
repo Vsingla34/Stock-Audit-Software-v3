@@ -2,11 +2,11 @@
 // Phase 4: Role-specific landing (4.2), Charts (4.1), Exception tile (4.3),
 //          Pending alerts (4.4), Loading skeletons (4.6), Empty states (4.6)
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useDeferredValue } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { InventoryOverview } from "@/components/dashboard/InventoryOverview";
 import { RecentActivity } from "@/components/dashboard/RecentActivity";
-import { InventoryTable } from "@/components/inventory/InventoryTable";
+import { ExportPhysicalCountSheet } from "@/components/inventory/ExportPhysicalCountSheet";
 import { DashboardCharts } from "@/components/dashboard/DashboardCharts";
 import { PendingActionAlerts, ExceptionTile } from "@/components/dashboard/PendingActionAlerts";
 import { FloorView } from "@/components/floor/FloorView";
@@ -47,21 +47,20 @@ const QuickActionSkeleton = () => (
 const RoleBadge = ({ role }: { role: string }) => {
   const config: Record<string, string> = {
     super_admin: "bg-purple-100 text-purple-800 border-purple-200",
-    admin:       "bg-violet-100 text-violet-800 border-violet-200",
-    auditor:     "bg-blue-100  text-blue-800  border-blue-200",
-    client:      "bg-green-100 text-green-800 border-green-200",
+    admin: "bg-violet-100 text-violet-800 border-violet-200",
+    auditor: "bg-blue-100  text-blue-800  border-blue-200",
+    client: "bg-green-100 text-green-800 border-green-200",
   };
   const label: Record<string, string> = {
     super_admin: "Super Admin",
-    admin:       "Admin",
-    auditor:     "Auditor",
-    client:      "Client",
+    admin: "Admin",
+    auditor: "Auditor",
+    client: "Client",
   };
   return (
     <span
-      className={`text-xs font-medium px-2.5 py-0.5 rounded-full border ${
-        config[role] || "bg-gray-100 text-gray-800 border-gray-200"
-      }`}
+      className={`text-xs font-medium px-2.5 py-0.5 rounded-full border ${config[role] || "bg-gray-100 text-gray-800 border-gray-200"
+        }`}
     >
       {label[role] || role}
     </span>
@@ -70,16 +69,19 @@ const RoleBadge = ({ role }: { role: string }) => {
 
 // ── 4.2: Auditor-specific section ────────────────────────────────────────────
 const AuditorDashboard = ({ assignmentId }: { assignmentId: string | null }) => {
-  const { itemMaster, auditedItems, assignments } = useInventory();
+  // Server-side aggregate (get_inventory_stats) — available immediately and
+  // doesn't require the full item list to be downloaded first.
+  const { getInventorySummary } = useInventory();
+  const summary = getInventorySummary();
 
   const stats = useMemo(() => {
     if (!assignmentId) return null;
-    const total    = itemMaster.filter(i => String(i.assignmentId) === String(assignmentId)).length;
-    const scanned  = auditedItems.filter(i => String(i.assignmentId) === String(assignmentId) && i.status !== "pending").length;
-    const pending  = total - scanned;
-    const pct      = total > 0 ? Math.round((scanned / total) * 100) : 0;
+    const total = summary.totalItems;
+    const scanned = summary.auditedItems;
+    const pending = total - scanned;
+    const pct = total > 0 ? Math.round((scanned / total) * 100) : 0;
     return { total, scanned, pending, pct };
-  }, [itemMaster, auditedItems, assignmentId]);
+  }, [summary.totalItems, summary.auditedItems, assignmentId]);
 
   if (!assignmentId || !stats) return (
     <Card className="border-amber-200 bg-amber-50">
@@ -135,8 +137,8 @@ const AdminStatsRow = () => {
       (a) => String(a.companyId) === String(selectedCompanyId)
     );
     return {
-      total:     companyAssignments.length,
-      active:    companyAssignments.filter((a) => a.status === "active").length,
+      total: companyAssignments.length,
+      active: companyAssignments.filter((a) => a.status === "active").length,
       submitted: companyAssignments.filter((a) => a.status === "submitted").length,
       finalized: companyAssignments.filter((a) => a.status === "finalized").length,
       locations: locations.filter((l) => String(l.companyId) === String(selectedCompanyId)).length,
@@ -146,10 +148,10 @@ const AdminStatsRow = () => {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 md:gap-3">
       {[
-        { label: "Active Audits",   value: stats.active,    icon: <ScanBarcode className="h-4 w-4" />, color: "violet" },
-        { label: "Awaiting Review", value: stats.submitted,  icon: <Clock className="h-4 w-4" />,       color: "amber"  },
-        { label: "Finalized",       value: stats.finalized,  icon: <CheckCircle2 className="h-4 w-4" />, color: "green" },
-        { label: "Locations",       value: stats.locations,  icon: <MapPin className="h-4 w-4" />,       color: "blue"  },
+        { label: "Active Audits", value: stats.active, icon: <ScanBarcode className="h-4 w-4" />, color: "violet" },
+        { label: "Awaiting Review", value: stats.submitted, icon: <Clock className="h-4 w-4" />, color: "amber" },
+        { label: "Finalized", value: stats.finalized, icon: <CheckCircle2 className="h-4 w-4" />, color: "green" },
+        { label: "Locations", value: stats.locations, icon: <MapPin className="h-4 w-4" />, color: "blue" },
       ].map((s) => (
         <div key={s.label} className={`bg-${s.color}-50 border border-${s.color}-100 rounded-lg md:rounded-xl p-2 md:p-3`}>
           <div className={`text-${s.color}-500 mb-0.5 md:mb-1 [&>svg]:h-3.5 [&>svg]:w-3.5 md:[&>svg]:h-4 md:[&>svg]:w-4`}>{s.icon}</div>
@@ -179,10 +181,10 @@ const ClientDashboard = () => {
   );
 
   const statusLabel: Record<string, { label: string; cls: string }> = {
-    active:    { label: "In Progress", cls: "bg-violet-100 text-violet-700 border-violet-200" },
+    active: { label: "In Progress", cls: "bg-violet-100 text-violet-700 border-violet-200" },
     submitted: { label: "Awaiting Your Sign-off", cls: "bg-amber-100 text-amber-700 border-amber-200" },
     finalized: { label: "Finalized", cls: "bg-green-100 text-green-700 border-green-200" },
-    pending:   { label: "Not Started", cls: "bg-gray-100 text-gray-600 border-gray-200" },
+    pending: { label: "Not Started", cls: "bg-gray-100 text-gray-600 border-gray-200" },
   };
 
   return (
@@ -239,14 +241,14 @@ const EmptyDashboardState = () => (
 
 const Index = () => {
   const { canUploadData, canPerformAudits, isClientUser, isSuperAdmin, isAdmin, isAuditor } = useUserAccess();
-  const { currentUser }                  = useUser();
+  const { currentUser } = useUser();
   const { selectedCompanyId, selectedAssignmentId } = useCompany();
-  const { itemMaster, auditedItems, isLoading, assignments }     = useInventory();
+  const { itemMaster, isLoading, assignments, dashboardSummary } = useInventory();
 
   const [companyName, setCompanyName] = useState("");
 
   const role = currentUser?.role || "auditor";
-  const isAdminUser   = isSuperAdmin() || isAdmin();
+  const isAdminUser = isSuperAdmin() || isAdmin();
   const isAuditorUser = isAuditor();
   const isClientUser_ = isClientUser();
 
@@ -258,21 +260,25 @@ const Index = () => {
       .eq("id", selectedCompanyId)
       .single()
       .then(({ data }) => { if (data?.name) setCompanyName(data.name); })
-      .catch(() => {});
+      .catch(() => { });
   }, [selectedCompanyId]);
 
-  // Items for current assignment (used by charts)
+  // Items for current assignment (used by charts).
+  // itemMaster and auditedItems are kept identical by the context, so use
+  // one list directly (the old per-item .find() was O(n²) — ~225M ops at 15k).
+  // useDeferredValue: charts re-render at low priority, so scanning / typing
+  // elsewhere on the page is never blocked by a 15k-row chart recompute.
+  const deferredItems = useDeferredValue(itemMaster);
   const currentItems = useMemo(() => {
-    if (!selectedAssignmentId) return [];
-    return itemMaster
-      .map((m) => {
-        const a = auditedItems.find((ai) => ai.id === m.id);
-        return a || m;
-      })
-      .filter((i) => String(i.assignmentId) === String(selectedAssignmentId));
-  }, [itemMaster, auditedItems, selectedAssignmentId]);
+    // With server-side numbers the 15k rows aren't needed on the dashboard at all.
+    if (!selectedAssignmentId || dashboardSummary) return [];
+    return deferredItems.filter((i) => String(i.assignmentId) === String(selectedAssignmentId));
+  }, [deferredItems, selectedAssignmentId, dashboardSummary]);
 
-  const hasData = currentItems.length > 0;
+  // Show the dashboard as soon as the cheap server-side count says there is
+  // data, instead of waiting for every row to download.
+  const { getInventorySummary: getSummary } = useInventory();
+  const hasData = currentItems.length > 0 || (!!dashboardSummary && dashboardSummary.totalCount > 0) || (!!selectedAssignmentId && getSummary().totalItems > 0);
 
   return (
     <AppLayout>
@@ -343,7 +349,7 @@ const Index = () => {
         {hasData ? (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5 md:gap-4">
             <div className="lg:col-span-2">
-              <DashboardCharts items={currentItems} />
+              <DashboardCharts items={currentItems} summary={dashboardSummary} />
             </div>
             <div className="flex flex-col gap-2.5 md:gap-4">
               <ExceptionTile />
@@ -488,13 +494,16 @@ const Index = () => {
           </div>
         )}
 
-        {/* ── Inventory table — admins and auditors ── */}
-        {!isClientUser_ && (
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900 mb-3">Inventory Status</h2>
-            <div className="overflow-x-auto">
-              <InventoryTable />
+        {/* The full inventory table was removed from the dashboard: rendering it
+            (plus its per-row history popovers) for 15k items froze the page.
+            The detailed list lives on Search / Reports; the export button stays. */}
+        {!isClientUser_ && selectedAssignmentId && (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-gray-900">Physical count sheet</h2>
+              <p className="text-xs text-gray-500">Download the current stock as a CSV to count offline.</p>
             </div>
+            <ExportPhysicalCountSheet />
           </div>
         )}
 
