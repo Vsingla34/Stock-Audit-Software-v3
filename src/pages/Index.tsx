@@ -2,7 +2,8 @@
 // Phase 4: Role-specific landing (4.2), Charts (4.1), Exception tile (4.3),
 //          Pending alerts (4.4), Loading skeletons (4.6), Empty states (4.6)
 
-import { useState, useEffect, useMemo, useDeferredValue } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { DeferMount } from "@/components/common/DeferMount";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { InventoryOverview } from "@/components/dashboard/InventoryOverview";
 import { RecentActivity } from "@/components/dashboard/RecentActivity";
@@ -263,22 +264,12 @@ const Index = () => {
       .catch(() => { });
   }, [selectedCompanyId]);
 
-  // Items for current assignment (used by charts).
-  // itemMaster and auditedItems are kept identical by the context, so use
-  // one list directly (the old per-item .find() was O(n²) — ~225M ops at 15k).
-  // useDeferredValue: charts re-render at low priority, so scanning / typing
-  // elsewhere on the page is never blocked by a 15k-row chart recompute.
-  const deferredItems = useDeferredValue(itemMaster);
-  const currentItems = useMemo(() => {
-    // With server-side numbers the 15k rows aren't needed on the dashboard at all.
-    if (!selectedAssignmentId || dashboardSummary) return [];
-    return deferredItems.filter((i) => String(i.assignmentId) === String(selectedAssignmentId));
-  }, [deferredItems, selectedAssignmentId, dashboardSummary]);
-
-  // Show the dashboard as soon as the cheap server-side count says there is
-  // data, instead of waiting for every row to download.
+  // The dashboard never walks the item rows: every number comes from the
+  // server-side (or once-computed local) summary held in the context.
+  // `dashboardSummary === null` while loading => only the boxes show skeletons.
   const { getInventorySummary: getSummary } = useInventory();
-  const hasData = currentItems.length > 0 || (!!dashboardSummary && dashboardSummary.totalCount > 0) || (!!selectedAssignmentId && getSummary().totalItems > 0);
+  const summaryPending = !!selectedAssignmentId && !dashboardSummary;
+  const hasData = (!!dashboardSummary && dashboardSummary.totalCount > 0) || (!dashboardSummary && !!selectedAssignmentId && getSummary().totalItems > 0);
 
   return (
     <AppLayout>
@@ -346,16 +337,37 @@ const Index = () => {
         <InventoryOverview />
 
         {/* ── 4.1: Charts + 4.3: Exception tile ── */}
-        {hasData ? (
+        {summaryPending ? (
+          // Only these boxes show a loading state; the rest of the page is already live.
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5 md:gap-4">
-            <div className="lg:col-span-2">
-              <DashboardCharts items={currentItems} summary={dashboardSummary} />
+            <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Skeleton className="h-72 w-full rounded-xl" />
+              <Skeleton className="h-72 w-full rounded-xl" />
             </div>
-            <div className="flex flex-col gap-2.5 md:gap-4">
-              <ExceptionTile />
-            </div>
+            <Skeleton className="h-40 w-full rounded-xl" />
           </div>
-        ) : !isLoading && (
+        ) : hasData ? (
+          <DeferMount
+            fallback={
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5 md:gap-4">
+                <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Skeleton className="h-72 w-full rounded-xl" />
+                  <Skeleton className="h-72 w-full rounded-xl" />
+                </div>
+                <Skeleton className="h-40 w-full rounded-xl" />
+              </div>
+            }
+          >
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5 md:gap-4">
+              <div className="lg:col-span-2">
+                <DashboardCharts items={[]} summary={dashboardSummary} />
+              </div>
+              <div className="flex flex-col gap-2.5 md:gap-4">
+                <ExceptionTile />
+              </div>
+            </div>
+          </DeferMount>
+        ) : (
           <EmptyDashboardState />
         )}
 
@@ -372,29 +384,26 @@ const Index = () => {
           return (
             <div>
               <p className="section-label">Live floor</p>
-              <FloorView assignmentId={selectedAssignmentId} />
+              <DeferMount fallback={<Skeleton className="h-40 w-full rounded-xl" />}>
+                <FloorView assignmentId={selectedAssignmentId} />
+              </DeferMount>
             </div>
           );
         })()}
-
-        {isLoading && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Skeleton className="h-64 w-full rounded-xl" />
-            <Skeleton className="h-64 w-full rounded-xl" />
-          </div>
-        )}
 
         {/* ── Main grid: Recent Activity + Quick Actions ── */}
         {!isClientUser_ && (
           <div className="grid gap-3 md:gap-6 grid-cols-1 lg:grid-cols-2">
             <div className="min-h-[300px]">
-              <RecentActivity />
+              <DeferMount fallback={<Skeleton className="h-[300px] w-full rounded-xl" />}>
+                <RecentActivity />
+              </DeferMount>
             </div>
 
             <div className="space-y-2 md:space-y-4">
               <h2 className="text-[11px] md:text-lg font-bold md:font-semibold text-gray-500 md:text-gray-900 uppercase md:normal-case tracking-wide md:tracking-normal">Quick Actions</h2>
 
-              {isLoading ? <QuickActionSkeleton /> : (
+              {(
                 <div className="grid gap-2 md:gap-3 grid-cols-2">
 
                   {/* Scan — auditors + admins */}

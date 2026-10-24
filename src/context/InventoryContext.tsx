@@ -50,7 +50,54 @@ export interface DashboardSummary {
   valueVariance: number;
   hasPricing: boolean;
   categories: { category: string; matched: number; discrepancy: number }[];
+  // Quantity totals (optional: older server functions don't return them).
+  auditedCount?: number;
+  totalQty?: number;
+  auditedQty?: number;
+  matchedQty?: number;
+  varianceQty?: number;
 }
+
+/**
+ * Single-pass summary over the loaded rows. Only used when the server-side
+ * get_dashboard_summary() function isn't available; it is computed OFF the
+ * render path (see the effect in InventoryProvider), never on page mount.
+ */
+export const computeLocalSummary = (items: InventoryItem[]): DashboardSummary => {
+  let matched = 0, discrepancy = 0, pending = 0, valueVariance = 0, hasPricing = false;
+  let totalQty = 0, auditedQty = 0, matchedQty = 0, varianceQty = 0;
+  const cats = new Map<string, { matched: number; discrepancy: number }>();
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    const sq = Number(it.systemQuantity) || 0;
+    const pq = Number(it.physicalQuantity) || 0;
+    totalQty += sq;
+    if (it.status === 'matched') {
+      matched++; auditedQty += pq; matchedQty += pq;
+    } else if (it.status === 'discrepancy') {
+      discrepancy++; auditedQty += pq; varianceQty += pq - sq;
+      const ca: any = it.customAttributes;
+      const price = Number(ca?.unit_price || ca?.Unit_Price || 0);
+      if (price > 0) { hasPricing = true; valueVariance += (pq - sq) * price; }
+    } else {
+      pending++;
+    }
+    if (it.status === 'matched' || it.status === 'discrepancy') {
+      const cat = (it.category && it.category.trim()) || 'Uncategorised';
+      let e = cats.get(cat);
+      if (!e) { e = { matched: 0, discrepancy: 0 }; cats.set(cat, e); }
+      if (it.status === 'matched') e.matched++; else e.discrepancy++;
+    }
+  }
+  const categories = Array.from(cats.entries())
+    .map(([category, v]) => ({ category, ...v }))
+    .sort((a, b) => b.discrepancy - a.discrepancy)
+    .slice(0, 6);
+  return {
+    totalCount: items.length, matched, discrepancy, pending, valueVariance, hasPricing, categories,
+    auditedCount: matched + discrepancy, totalQty, auditedQty, matchedQty, varianceQty,
+  };
+};
 
 export type AuditStatus = "pending" | "active" | "submitted" | "finalized";
 
@@ -443,7 +490,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         ]);
         if (scopeRef.current.assignmentId !== assignmentId) return;
         if (stats) setDashboardStats(stats);
-        if (summary) setDashboardSummary(summary);
+        if (summary) { summaryFromServerRef.current = true; setDashboardSummary(summary); }
       }
     }, 2000);
   };
@@ -492,6 +539,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const loadRetryRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadDataRef = useRef<() => Promise<void>>(async () => { });
+  const summaryFromServerRef = useRef(false);
+  const localSummaryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadData = async () => {
     if (!selectedCompanyId) return;
@@ -518,7 +567,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           ]);
           if (isStale()) return;
           if (stats) setDashboardStats(stats);
-          setDashboardSummary(summary ?? null);
+          summaryFromServerRef.current = !!summary;
+          if (summary) setDashboardSummary(summary);
         } else if (!isStale()) {
           setDashboardStats({ totalItems: 0, auditedItems: 0, pendingItems: 0, matched: 0, discrepancies: 0 });
           setDashboardSummary(null);
@@ -531,6 +581,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           const adjustedItems = await applyPendingScansToItems(dbItems);
           if (isStale()) return;
           commitStructural(adjustedItems); // fresh server data supersedes optimistic values
+          // No server summary yet/available: derive it locally from the rows we just got.
+          if (!summaryFromServerRef.current) setDashboardSummary(computeLocalSummary(adjustedItems));
           loadRetryRef.current = 0;
           if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
           persistTimerRef.current = setTimeout(() => { persistCache(assignmentIdParam); }, 2500);
@@ -588,6 +640,20 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
   loadDataRef.current = loadData;
 
+  // Fallback only: when the server summary function isn't installed, compute the
+  // dashboard numbers ONCE here (throttled, after the UI has painted) so pages
+  // never loop over 15k rows while mounting/navigating.
+  useEffect(() => {
+    if (summaryFromServerRef.current || itemMaster.length === 0) return;
+    if (localSummaryTimerRef.current) return; // throttle: one pass per window
+    localSummaryTimerRef.current = setTimeout(() => {
+      localSummaryTimerRef.current = null;
+      if (summaryFromServerRef.current) return;
+      setDashboardSummary(computeLocalSummary(itemsRef.current));
+    }, 400);
+  }, [itemMaster]);
+  useEffect(() => () => { if (localSummaryTimerRef.current) clearTimeout(localSummaryTimerRef.current); }, []);
+
   const runSync = async () => {
     if (!navigator.onLine) return;
     const count = await SyncService.getPendingCount();
@@ -616,6 +682,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     // New company / assignment => drop the previous scope's rows right away
     // (never show or scan against another assignment's data).
     loadRetryRef.current = 0;
+    summaryFromServerRef.current = false;
+    setDashboardSummary(null);
     if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
     if (itemsRef.current.length > 0) {
       commitStructural([]);
@@ -747,15 +815,58 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       await fetchAndApplyByIds(ids);
     };
 
-    const connectRealtime = () => {
-      if (!navigator.onLine || channel) return;
+    // ── connection management ────────────────────────────────────────────────
+    // Each connection gets a UNIQUE topic. Re-using the same topic name makes
+    // realtime-js route the old channel's "leave/close" reply to the new channel
+    // (React StrictMode / fast assignment switches), which silently kills it.
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryCount = 0;
+    let connecting = false;
+    let needsCatchUp = false; // true after a drop: events may have been missed
+    // If the server-side filter is rejected/never joins, fall back to an unfiltered
+    // subscription (events are still checked against company/assignment below).
+    let useServerFilter = true;
+    let failures = 0;
 
-      channel = supabase
-        .channel(channelName)
+    const dropChannel = () => {
+      const ch = channel;
+      channel = null;
+      if (ch) { void supabase.removeChannel(ch); }
+    };
+
+    const scheduleRetry = () => {
+      if (disposed || retryTimer) return;
+      const delay = Math.min(1000 * 2 ** retryCount, 30000) + Math.random() * 500;
+      retryCount++;
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        void connectRealtime();
+      }, delay);
+    };
+
+    const connectRealtime = async () => {
+      if (disposed || connecting || channel || !navigator.onLine) return;
+      connecting = true;
+      try {
+        // Make sure the socket joins with the signed-in user's JWT. If it joins with the
+        // anon key, RLS hides every row and the subscription "works" but never delivers.
+        const { data } = await supabase.auth.getSession();
+        if (data.session?.access_token) await supabase.realtime.setAuth(data.session.access_token);
+      } catch (e) {
+        console.warn('[realtime] could not read session before subscribing', e);
+      } finally {
+        connecting = false;
+      }
+      if (disposed || channel || !navigator.onLine) return;
+
+      const ch = supabase
+        .channel(`${channelName}-${Math.random().toString(36).slice(2, 8)}`)
         .on(
           'postgres_changes',
-          { event: '*', schema: 'public', table: 'inventory_items', filter },
-          (payload) => {
+          (useServerFilter
+            ? { event: '*', schema: 'public', table: 'inventory_items', filter }
+            : { event: '*', schema: 'public', table: 'inventory_items' }) as any,
+          (payload: any) => {
             lastEventAt = Date.now();
 
             if (payload.eventType === 'DELETE') {
@@ -777,25 +888,59 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             // Throttle (not debounce): flush at most every 300ms while events stream in
             if (!flushTimer) flushTimer = setTimeout(flush, 300);
           }
-        )
-        .subscribe();
+        );
+      channel = ch;
+
+      ch.subscribe((status, err) => {
+        if (disposed || ch !== channel) return; // stale channel
+        if (status === 'SUBSCRIBED') {
+          retryCount = 0;
+          failures = 0;
+          console.info(`[realtime] inventory live updates connected (${useServerFilter ? filter : 'unfiltered'})`);
+          if (needsCatchUp) {
+            // we were disconnected for a while: pull whatever we missed
+            needsCatchUp = false;
+            lastEventAt = Date.now();
+            scheduleBulkReload();
+          }
+          return;
+        }
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          console.warn(`[realtime] inventory channel ${status}`, err ?? '');
+          needsCatchUp = true;
+          if (++failures >= 2) useServerFilter = false;
+          dropChannel();
+          scheduleRetry();
+        }
+      });
     };
 
     const disconnectRealtime = () => {
-      if (channel) { supabase.removeChannel(channel); channel = null; }
+      if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+      if (channel) needsCatchUp = true;
+      dropChannel();
     };
 
-    connectRealtime();
-    window.addEventListener('online', connectRealtime);
+    const onOnline = () => { retryCount = 0; void connectRealtime(); };
+    // Browsers freeze background tabs; make sure we are connected when the user comes back.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void connectRealtime();
+    };
+
+    void connectRealtime();
+    window.addEventListener('online', onOnline);
     window.addEventListener('offline', disconnectRealtime);
+    document.addEventListener('visibilitychange', onVisible);
 
     return () => {
       disposed = true;
       if (flushTimer) clearTimeout(flushTimer);
       if (reloadTimer) clearTimeout(reloadTimer);
-      window.removeEventListener('online', connectRealtime);
+      if (retryTimer) clearTimeout(retryTimer);
+      window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', disconnectRealtime);
-      disconnectRealtime();
+      document.removeEventListener('visibilitychange', onVisible);
+      dropChannel();
     };
   }, [selectedCompanyId, selectedAssignmentId]);
 

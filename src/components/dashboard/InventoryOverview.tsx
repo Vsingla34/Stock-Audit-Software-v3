@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { useInventory } from "@/context/InventoryContext";
+import { useInventory, computeLocalSummary, type DashboardSummary } from "@/context/InventoryContext";
 import { useCompany } from "@/context/CompanyContext";
 import { useUser } from "@/context/UserContext";
 import { useUserAccess } from "@/hooks/useUserAccess";
@@ -7,7 +7,7 @@ import { AlertCircle, CheckCircle2, MapPin, Send, Boxes } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // ── Dynamic Text Scaler ───────────────────────────────────────────────────────
@@ -32,12 +32,15 @@ const AutoScaledNumber = ({ value, prefix = "", className = "" }: { value: numbe
   );
 };
 
+// Shows a skeleton in place of the number until the data is ready, so only this
+// tile is in a "loading" state (never the whole page).
+const StatNumber = ({ ready, ...props }: { ready: boolean; value: number; prefix?: string; className?: string }) =>
+  ready ? <AutoScaledNumber {...props} /> : <Skeleton className="h-7 md:h-9 w-24 md:w-32 rounded-md" />;
+
 export const InventoryOverview = () => {
   const navigate = useNavigate();
-  const { locations, assignments, submitAudit, itemMaster, auditedItems, getInventorySummary } = useInventory();
+  const { locations, assignments, submitAudit, itemMaster, itemsVersion, getInventorySummary, dashboardSummary } = useInventory();
   const serverStats = getInventorySummary() as any;
-  // Present once the get_inventory_stats RPC returns quantity totals.
-  const hasServerQty = serverStats && serverStats.totalQty !== undefined && serverStats.totalQty !== null;
   const { selectedAssignmentId } = useCompany();
   const { currentUser } = useUser();
   const { isClientUser } = useUserAccess();
@@ -51,47 +54,55 @@ export const InventoryOverview = () => {
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
   const isClient = isClientUser();
 
-  const latestItems = useMemo(() => {
-    if (hasServerQty || !selectedAssignmentId) return [];
-    const auditedMap = new Map();
-    auditedItems.forEach(item => auditedMap.set(item.id, item));
-    const results: any[] = [];
-    itemMaster.forEach(masterItem => {
-      if (String(masterItem.assignmentId) === String(selectedAssignmentId)) {
-        results.push(auditedMap.get(masterItem.id) || masterItem);
-      }
-    });
-    return results;
-  }, [itemMaster, auditedItems, selectedAssignmentId, hasServerQty]);
+  // Quantity totals come from the server summary (one aggregate query). If an
+  // older server function doesn't return them, compute them ONCE after the
+  // first paint (never synchronously while this page mounts).
+  const summaryHasQty = !!dashboardSummary && dashboardSummary.totalQty !== undefined && dashboardSummary.totalQty !== null;
+  const statsHaveQty = serverStats && serverStats.totalQty !== undefined && serverStats.totalQty !== null;
+  const needLocal = !!dashboardSummary && !summaryHasQty && !statsHaveQty;
+  const [localSummary, setLocalSummary] = useState<DashboardSummary | null>(null);
+  useEffect(() => { if (!dashboardSummary) setLocalSummary(null); }, [dashboardSummary]);
+  useEffect(() => {
+    if (!needLocal || itemMaster.length === 0) return;
+    const t = setTimeout(() => setLocalSummary(computeLocalSummary(itemMaster)), 0);
+    return () => clearTimeout(t);
+    // itemsVersion (not itemMaster): don't recompute on every scan
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needLocal, itemsVersion]);
 
   const stats = useMemo(() => {
-    if (hasServerQty) {
-      const totalStock = Number(serverStats.totalQty) || 0;
-      const auditedStock = Number(serverStats.auditedQty) || 0;
-      return {
-        totalStock,
-        auditedStock,
-        matchedStock: Number(serverStats.matchedQty) || 0,
-        discrepancyStock: Number(serverStats.varianceQty) || 0,
-        progressPercentage: totalStock > 0 ? Math.round((auditedStock / totalStock) * 100) : 0,
-        pendingStock: totalStock - auditedStock,
-        totalSkus: Number(serverStats.totalItems) || 0,
-        auditedSkus: Number(serverStats.auditedItems) || 0,
-      };
+    let totalStock = 0, auditedStock = 0, matchedStock = 0, discrepancyStock = 0, totalSkus = 0, auditedSkus = 0;
+    let ready = false;
+    if (summaryHasQty && dashboardSummary) {
+      ready = true;
+      totalStock = Number(dashboardSummary.totalQty) || 0;
+      auditedStock = Number(dashboardSummary.auditedQty) || 0;
+      matchedStock = Number(dashboardSummary.matchedQty) || 0;
+      discrepancyStock = Number(dashboardSummary.varianceQty) || 0;
+      totalSkus = dashboardSummary.totalCount;
+      auditedSkus = dashboardSummary.auditedCount ?? (dashboardSummary.matched + dashboardSummary.discrepancy);
+    } else if (statsHaveQty) {
+      ready = true;
+      totalStock = Number(serverStats.totalQty) || 0;
+      auditedStock = Number(serverStats.auditedQty) || 0;
+      matchedStock = Number(serverStats.matchedQty) || 0;
+      discrepancyStock = Number(serverStats.varianceQty) || 0;
+      totalSkus = Number(serverStats.totalItems) || 0;
+      auditedSkus = Number(serverStats.auditedItems) || 0;
+    } else if (localSummary) {
+      ready = true;
+      totalStock = localSummary.totalQty || 0;
+      auditedStock = localSummary.auditedQty || 0;
+      matchedStock = localSummary.matchedQty || 0;
+      discrepancyStock = localSummary.varianceQty || 0;
+      totalSkus = localSummary.totalCount;
+      auditedSkus = localSummary.auditedCount || 0;
     }
-    const totalStock = latestItems.reduce((sum, item) => sum + (Number(item.systemQuantity) || 0), 0);
-    const activeAuditedItems = latestItems.filter(item => item.status && item.status !== 'pending');
-    const auditedStock = activeAuditedItems.reduce((sum, item) => sum + (Number(item.physicalQuantity) || 0), 0);
-    const matchedItems = latestItems.filter(item => item.status === 'matched');
-    const matchedStock = matchedItems.reduce((sum, item) => sum + (Number(item.physicalQuantity) || 0), 0);
-    const discrepancyItems = latestItems.filter(item => item.status === 'discrepancy');
-    const discrepancyStock = discrepancyItems.reduce((sum, item) => sum + ((Number(item.physicalQuantity) || 0) - (Number(item.systemQuantity) || 0)), 0);
     const progressPercentage = totalStock > 0 ? Math.round((auditedStock / totalStock) * 100) : 0;
+    return { ready, totalStock, auditedStock, matchedStock, discrepancyStock, progressPercentage, pendingStock: totalStock - auditedStock, totalSkus, auditedSkus };
+  }, [summaryHasQty, dashboardSummary, statsHaveQty, serverStats, localSummary]);
 
-    return { totalStock, auditedStock, matchedStock, discrepancyStock, progressPercentage, pendingStock: totalStock - auditedStock, totalSkus: latestItems.length, auditedSkus: activeAuditedItems.length };
-  }, [latestItems, hasServerQty, serverStats]);
-
-  const isEmptyTiles = hasServerQty ? stats.totalSkus === 0 : latestItems.length === 0;
+  const ready = stats.ready || !selectedAssignmentId;
 
   const handleSubmitReport = async () => {
     if (!selectedAssignmentId) return;
@@ -152,12 +163,7 @@ export const InventoryOverview = () => {
       </CardHeader>
       
       <CardContent className="p-0">
-        {isEmptyTiles && (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4">
-            {[1,2,3,4].map(i => <Skeleton key={i} className="h-20 md:h-28 rounded-xl bg-white border border-slate-200 shadow-sm" />)}
-          </div>
-        )}
-        <div className={`grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4 ${isEmptyTiles ? "hidden" : ""}`}>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4">
           
           <div className="p-2.5 md:p-5 bg-white rounded-lg md:rounded-xl border border-slate-200 shadow-sm hover:border-slate-300 hover:shadow-md transition-all duration-300 group overflow-hidden">
             <div className="flex justify-between items-start mb-1.5 md:mb-4">
@@ -166,7 +172,7 @@ export const InventoryOverview = () => {
                 <Boxes className="h-3 w-3 md:h-4 md:w-4 text-blue-600" />
               </div>
             </div>
-            <AutoScaledNumber value={stats.totalStock} className="text-slate-900 group-hover:text-blue-700 transition-colors" />
+            <StatNumber ready={ready} value={stats.totalStock} className="text-slate-900 group-hover:text-blue-700 transition-colors" />
             <div className="text-[9px] md:text-[11px] font-medium text-slate-500 mt-1 md:mt-2 truncate">Total items in system</div>
           </div>
 
@@ -178,7 +184,7 @@ export const InventoryOverview = () => {
                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3 md:w-4 md:h-4 text-blue-600"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
               </div>
             </div>
-            <AutoScaledNumber value={stats.auditedStock} className="text-slate-900 relative z-10" />
+                        <StatNumber ready={ready} value={stats.auditedStock} className="text-slate-900 relative z-10" />
             <div className="text-[9px] md:text-[11px] font-bold text-blue-600 mt-1 md:mt-2 relative z-10 truncate">{stats.progressPercentage}% of total stock</div>
           </div>
 
@@ -189,7 +195,7 @@ export const InventoryOverview = () => {
                 <CheckCircle2 className="h-3 w-3 md:h-4 md:w-4 text-emerald-600" />
               </div>
             </div>
-            <AutoScaledNumber value={stats.matchedStock} className="text-slate-900 group-hover:text-emerald-700 transition-colors" />
+            <StatNumber ready={ready} value={stats.matchedStock} className="text-slate-900 group-hover:text-emerald-700 transition-colors" />
             <div className="text-[9px] md:text-[11px] font-medium text-slate-500 mt-1 md:mt-2 truncate">Quantity fully matched</div>
           </div>
 
@@ -200,7 +206,8 @@ export const InventoryOverview = () => {
                 <AlertCircle className="h-3 w-3 md:h-4 md:w-4 text-rose-600" />
               </div>
             </div>
-            <AutoScaledNumber 
+            <StatNumber 
+               ready={ready}
                value={stats.discrepancyStock} 
                prefix={stats.discrepancyStock > 0 ? "+" : ""}
                className={`${stats.discrepancyStock < 0 ? 'text-amber-600' : stats.discrepancyStock > 0 ? 'text-rose-600' : 'text-slate-900'}`} 

@@ -63,8 +63,8 @@ const FloorTile = ({
   return (
     <div
       className={`rounded-xl border p-4 transition-all duration-300 ${isLive
-          ? "border-violet-300 bg-violet-50/60 shadow-[0_0_0_1px_rgba(124,58,237,0.15)]"
-          : "border-slate-200 bg-white"
+        ? "border-violet-300 bg-violet-50/60 shadow-[0_0_0_1px_rgba(124,58,237,0.15)]"
+        : "border-slate-200 bg-white"
         }`}
     >
       <div className="flex items-start justify-between mb-2">

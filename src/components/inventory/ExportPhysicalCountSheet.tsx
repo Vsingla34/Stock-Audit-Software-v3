@@ -65,28 +65,25 @@ export const ExportPhysicalCountSheet = ({
   const hideSystemQuantity =
     isAuditor() && currentAssignment?.showSystemQuantity === false;
 
-  const rows = useMemo(() => {
-    let data = itemMaster
-      .filter((item) => item.location !== "")
-      .map((item) => {
-        const audited = auditedItems.find(
-          (a) => a.id === item.id && a.location === item.location
-        );
-        return audited || item;
-      });
-
+  // Rows are built ONLY when the user clicks Export. Previously this was a
+  // useMemo that ran on every mount/render of the dashboard, and it did an
+  // auditedItems.find() per item (O(n²) ≈ 100M+ comparisons at 15k rows),
+  // which froze the whole page. itemMaster already holds the live rows
+  // (auditedItems is an alias of it), so no merge is needed at all.
+  const buildRows = () => {
+    let data = itemMaster.filter((item) => item.location !== "");
     if (locationFilter) {
       data = data.filter((item) => item.location === locationFilter);
     }
-
     return data;
-  }, [itemMaster, auditedItems, locationFilter]);
-
-  const hasPricing = rows.some(
-    (item) => parsePrice(item.customAttributes?.unit_price) > 0
-  );
+  };
 
   const handleExport = () => {
+    const rows = buildRows();
+    const hasPricing = rows.some(
+      (item) => parsePrice(item.customAttributes?.unit_price) > 0
+    );
+
     if (rows.length === 0) {
       toast.error("Nothing to export — no items in the current view.");
       return;
@@ -132,8 +129,8 @@ export const ExportPhysicalCountSheet = ({
         item.location,
         ...(hideSystemQuantity ? [] : [item.systemQuantity ?? 0]),
         physicalQty,                          // pre-filled if already counted,
-                                               // blank if still pending — either
-                                               // way, editable before re-upload
+        // blank if still pending — either
+        // way, editable before re-upload
         ...(hideSystemQuantity ? [] : [variance]),
         item.status || "pending",
         item.lastAudited
@@ -149,9 +146,8 @@ export const ExportPhysicalCountSheet = ({
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
 
-    const filename = `physical-count-sheet-${
-      locationFilter ? locationFilter.replace(/\s+/g, "-") + "-" : ""
-    }${new Date().toISOString().slice(0, 10)}.csv`;
+    const filename = `physical-count-sheet-${locationFilter ? locationFilter.replace(/\s+/g, "-") + "-" : ""
+      }${new Date().toISOString().slice(0, 10)}.csv`;
 
     const link = document.createElement("a");
     link.href = url;
