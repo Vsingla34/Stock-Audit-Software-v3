@@ -728,6 +728,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const rows = await SupabaseDataService.getItemsByIds(targets);
       const now = scopeRef.current;
       if (now.companyId !== scope.companyId || now.assignmentId !== scope.assignmentId) return;
+      if (rows.length === 0) console.warn('[realtime] changed rows could not be read back (RLS?)', targets);
 
       const fresh = rows.filter((r) =>
         String(r.companyId) === String(scope.companyId) &&
@@ -736,6 +737,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         !((inflightByIdRef.current.get(r.id) || 0) > 0)
       );
       if (fresh.length === 0) return;
+      console.log('[realtime] applied', fresh.length, 'row(s)', fresh.map((r) => `${r.sku}=${r.physicalQuantity}`).slice(0, 5));
       fresh.forEach((r) => pendingPatchesRef.current.delete(r.id));
       upsertItems(fresh);
       refreshStatsDebounced();
@@ -812,6 +814,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
       const ids = Array.from(pendingUpserts);
       pendingUpserts.clear();
+      dbg('fetching changed rows', ids.length);
       await fetchAndApplyByIds(ids);
     };
 
@@ -825,7 +828,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     let needsCatchUp = false; // true after a drop: events may have been missed
     // If the server-side filter is rejected/never joins, fall back to an unfiltered
     // subscription (events are still checked against company/assignment below).
-    let useServerFilter = true;
+    let useServerFilter = false; // unfiltered = same as the build that worked; rows are filtered below
+    let dbgCount = 0;
+    const dbg = (...a: any[]) => { if (dbgCount++ < 300) console.log('[realtime]', ...a); };
     let failures = 0;
 
     const dropChannel = () => {
@@ -868,6 +873,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             : { event: '*', schema: 'public', table: 'inventory_items' }) as any,
           (payload: any) => {
             lastEventAt = Date.now();
+            dbg('event', payload?.eventType, payload?.new?.id ?? payload?.old?.id, 'company', payload?.new?.company_id, 'assignment', payload?.new?.assignment_id, '| scope', companyId, scopeAssignment);
 
             if (payload.eventType === 'DELETE') {
               // DELETE events can't be filtered server-side; the id lookup makes this a no-op for foreign rows.
@@ -876,11 +882,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             } else {
               const row = payload.new as any;
               if (!row?.id) return;
-              if (String(row.company_id) !== String(companyId)) return;
-              if (String(row.assignment_id ?? "") !== String(scopeAssignment ?? "")) return;
+              if (String(row.company_id) !== String(companyId)) { dbg('dropped: other company'); return; }
+              if (String(row.assignment_id ?? "") !== String(scopeAssignment ?? "")) { dbg('dropped: other assignment'); return; }
 
               const ownScanAt = recentLocalScansRef.current.get(row.id);
-              if (ownScanAt && Date.now() - ownScanAt < OWN_ECHO_WINDOW_MS) return;
+              if (ownScanAt && Date.now() - ownScanAt < OWN_ECHO_WINDOW_MS) { dbg('dropped: own scan echo'); return; }
 
               pendingUpserts.add(row.id);
             }

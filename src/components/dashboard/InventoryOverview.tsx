@@ -7,7 +7,7 @@ import { AlertCircle, CheckCircle2, MapPin, Send, Boxes } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // ── Dynamic Text Scaler ───────────────────────────────────────────────────────
@@ -15,16 +15,16 @@ const AutoScaledNumber = ({ value, prefix = "", className = "" }: { value: numbe
   // Cap decimals to 3 places to avoid infinitely long float strings
   const str = prefix + value.toLocaleString(undefined, { maximumFractionDigits: 3 });
   const len = str.length;
-  
+
   // Step down font size based on character count
   let sizeClass = "text-lg md:text-3xl";
-  if (len >= 15) sizeClass = "text-sm md:text-lg"; 
+  if (len >= 15) sizeClass = "text-sm md:text-lg";
   else if (len >= 12) sizeClass = "text-base md:text-xl";
   else if (len >= 9) sizeClass = "text-lg md:text-2xl";
 
   return (
-    <div 
-      className={`${sizeClass} font-black tracking-tight truncate w-full ${className}`} 
+    <div
+      className={`${sizeClass} font-black tracking-tight truncate w-full ${className}`}
       title={str}
     >
       {str}
@@ -44,12 +44,12 @@ export const InventoryOverview = () => {
   const { selectedAssignmentId } = useCompany();
   const { currentUser } = useUser();
   const { isClientUser } = useUserAccess();
-  
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const currentAssignment = assignments.find(a => String(a.id) === String(selectedAssignmentId));
   const locationName = currentAssignment ? locations.find(l => String(l.id) === String(currentAssignment.locationId))?.name : "Unknown Location";
   const auditStatus = currentAssignment?.status || "pending";
-  
+
   const isAuditor = currentUser?.role === 'auditor';
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
   const isClient = isClientUser();
@@ -62,13 +62,24 @@ export const InventoryOverview = () => {
   const needLocal = !!dashboardSummary && !summaryHasQty && !statsHaveQty;
   const [localSummary, setLocalSummary] = useState<DashboardSummary | null>(null);
   useEffect(() => { if (!dashboardSummary) setLocalSummary(null); }, [dashboardSummary]);
+  // Quantities change on every scan (including scans made by other auditors, which
+  // arrive via realtime), so this must follow itemMaster, not only itemsVersion.
+  // It is THROTTLED (at most one pass every 500 ms) so a busy floor never makes
+  // the dashboard loop over 15k rows on every update.
+  const itemMasterRef = useRef(itemMaster);
+  itemMasterRef.current = itemMaster;
+  const localSummaryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!needLocal || itemMaster.length === 0) return;
-    const t = setTimeout(() => setLocalSummary(computeLocalSummary(itemMaster)), 0);
-    return () => clearTimeout(t);
-    // itemsVersion (not itemMaster): don't recompute on every scan
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [needLocal, itemsVersion]);
+    if (localSummaryTimer.current) return; // a pass is already scheduled; it will read the latest rows
+    localSummaryTimer.current = setTimeout(() => {
+      localSummaryTimer.current = null;
+      setLocalSummary(computeLocalSummary(itemMasterRef.current));
+    }, 500);
+  }, [needLocal, itemMaster, itemsVersion]);
+  useEffect(() => () => {
+    if (localSummaryTimer.current) { clearTimeout(localSummaryTimer.current); localSummaryTimer.current = null; }
+  }, []);
 
   const stats = useMemo(() => {
     let totalStock = 0, auditedStock = 0, matchedStock = 0, discrepancyStock = 0, totalSkus = 0, auditedSkus = 0;
@@ -127,22 +138,22 @@ export const InventoryOverview = () => {
             <div className="p-1.5 rounded-md bg-white border border-slate-200 shadow-sm shrink-0">
               <MapPin className="h-4 w-4 text-blue-600" />
             </div>
-            <span className="text-sm font-semibold text-slate-500 uppercase tracking-widest shrink-0">Location:</span> 
+            <span className="text-sm font-semibold text-slate-500 uppercase tracking-widest shrink-0">Location:</span>
             <span className="text-slate-900 font-bold text-sm tracking-tight truncate" title={locationName}>{locationName}</span>
           </div>
-          
+
           <div className="flex items-center gap-3 shrink-0">
             <div className={`px-3 py-1.5 rounded-md text-[11px] font-black uppercase tracking-widest border flex items-center gap-2 shadow-sm
-              ${auditStatus === 'active' ? 'bg-blue-50 text-blue-700 border-blue-200' : 
+              ${auditStatus === 'active' ? 'bg-blue-50 text-blue-700 border-blue-200' :
                 auditStatus === 'submitted' ? 'bg-amber-50 text-amber-700 border-amber-200' :
-                auditStatus === 'finalized' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                'bg-slate-50 text-slate-600 border-slate-200'}
+                  auditStatus === 'finalized' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                    'bg-slate-50 text-slate-600 border-slate-200'}
             `}>
               <div className={`w-2 h-2 rounded-full 
-                ${auditStatus === 'active' ? 'bg-blue-500' : 
+                ${auditStatus === 'active' ? 'bg-blue-500' :
                   auditStatus === 'submitted' ? 'bg-amber-500' :
-                  auditStatus === 'finalized' ? 'bg-emerald-500' :
-                  'bg-slate-400'}
+                    auditStatus === 'finalized' ? 'bg-emerald-500' :
+                      'bg-slate-400'}
               `} />
               {auditStatus === 'active' ? 'Audit Active' : auditStatus === 'submitted' ? 'Submitted for Review' : auditStatus === 'finalized' ? 'Finalized' : 'Pending'}
             </div>
@@ -154,17 +165,17 @@ export const InventoryOverview = () => {
             )}
 
             {auditStatus === 'submitted' && (isClient || isAdmin) && (
-               <Button size="sm" variant="outline" className="text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700 rounded-md h-8 text-[12px] font-bold tracking-wide transition-all active:scale-95 bg-white shadow-sm" onClick={() => navigate("/reports")}>
+              <Button size="sm" variant="outline" className="text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700 rounded-md h-8 text-[12px] font-bold tracking-wide transition-all active:scale-95 bg-white shadow-sm" onClick={() => navigate("/reports")}>
                 <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" /> Review & Finalize
               </Button>
             )}
           </div>
         </div>
       </CardHeader>
-      
+
       <CardContent className="p-0">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4">
-          
+
           <div className="p-2.5 md:p-5 bg-white rounded-lg md:rounded-xl border border-slate-200 shadow-sm hover:border-slate-300 hover:shadow-md transition-all duration-300 group overflow-hidden">
             <div className="flex justify-between items-start mb-1.5 md:mb-4">
               <span className="text-slate-500 text-[9px] md:text-[11px] font-bold uppercase tracking-widest truncate pr-2">Total Stock</span>
@@ -181,10 +192,10 @@ export const InventoryOverview = () => {
             <div className="flex justify-between items-start mb-1.5 md:mb-4 relative z-10">
               <span className="text-slate-500 text-[9px] md:text-[11px] font-bold uppercase tracking-widest truncate pr-2">Quantity Found</span>
               <div className="p-1.5 md:p-2 bg-blue-50 rounded-md md:rounded-lg border border-blue-100 group-hover:scale-110 group-hover:-rotate-3 transition-transform duration-300 shrink-0">
-                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3 md:w-4 md:h-4 text-blue-600"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3 md:w-4 md:h-4 text-blue-600"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
               </div>
             </div>
-                        <StatNumber ready={ready} value={stats.auditedStock} className="text-slate-900 relative z-10" />
+            <StatNumber ready={ready} value={stats.auditedStock} className="text-slate-900 relative z-10" />
             <div className="text-[9px] md:text-[11px] font-bold text-blue-600 mt-1 md:mt-2 relative z-10 truncate">{stats.progressPercentage}% of total stock</div>
           </div>
 
@@ -206,11 +217,11 @@ export const InventoryOverview = () => {
                 <AlertCircle className="h-3 w-3 md:h-4 md:w-4 text-rose-600" />
               </div>
             </div>
-            <StatNumber 
-               ready={ready}
-               value={stats.discrepancyStock} 
-               prefix={stats.discrepancyStock > 0 ? "+" : ""}
-               className={`${stats.discrepancyStock < 0 ? 'text-amber-600' : stats.discrepancyStock > 0 ? 'text-rose-600' : 'text-slate-900'}`} 
+            <StatNumber
+              ready={ready}
+              value={stats.discrepancyStock}
+              prefix={stats.discrepancyStock > 0 ? "+" : ""}
+              className={`${stats.discrepancyStock < 0 ? 'text-amber-600' : stats.discrepancyStock > 0 ? 'text-rose-600' : 'text-slate-900'}`}
             />
             <div className="text-[9px] md:text-[11px] font-medium text-slate-500 mt-1 md:mt-2 truncate">Physical vs System Qty</div>
           </div>
@@ -222,14 +233,14 @@ export const InventoryOverview = () => {
             <span className="text-blue-600 shrink-0 pl-2">{stats.progressPercentage}%</span>
           </div>
           <div className="h-1.5 md:h-2 bg-slate-100 rounded-full overflow-hidden shadow-inner">
-            <div 
+            <div
               className="h-full bg-blue-600 transition-all duration-1000 ease-out rounded-full"
               style={{ width: `${Math.min(stats.progressPercentage, 100)}%` }}
             />
           </div>
           <div className="flex flex-col sm:flex-row sm:justify-between text-[11px] font-medium text-slate-500 mt-2 gap-1 sm:gap-4">
             <span className="truncate">{stats.auditedSkus.toLocaleString()} of {stats.totalSkus.toLocaleString()} SKUs touched</span>
-            <span className="truncate">{stats.auditedStock.toLocaleString(undefined, {maximumFractionDigits: 3})} of {stats.totalStock.toLocaleString(undefined, {maximumFractionDigits: 3})} quantity found</span>
+            <span className="truncate">{stats.auditedStock.toLocaleString(undefined, { maximumFractionDigits: 3 })} of {stats.totalStock.toLocaleString(undefined, { maximumFractionDigits: 3 })} quantity found</span>
           </div>
         </div>
       </CardContent>
