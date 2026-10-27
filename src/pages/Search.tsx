@@ -11,37 +11,37 @@ import { NLQueryPalette } from "@/components/search/NLQueryPalette";
 const Search = () => {
   const { selectedAssignmentId, selectedCompanyId } = useCompany();
   const { assignments } = useInventory();
-  
+
   const currentAssignment = assignments.find(a => a.id === selectedAssignmentId);
   const selectedLocation = currentAssignment?.locationId || "";
 
   return (
     <AppLayout>
-      <div className="space-y-8 pb-16 w-full max-w-full overflow-x-hidden min-h-screen bg-slate-50/50">
-        
+      <div className="space-y-5 sm:space-y-8 pb-16 w-full max-w-full overflow-x-hidden min-h-screen bg-slate-50/50">
+
         {/* Premium Header */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-6 border-b border-slate-200">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-3 sm:gap-4 pb-4 sm:pb-6 border-b border-slate-200">
           <div>
-            <h1 className="text-3xl md:text-4xl font-black tracking-tight text-slate-900 flex items-center gap-3">
-              <div className="p-2.5 bg-white border border-slate-200 shadow-sm rounded-xl">
-                <LayoutGrid className="h-6 w-6 text-blue-600" />
+            <h1 className="text-2xl sm:text-3xl md:text-4xl font-black tracking-tight text-slate-900 flex items-center gap-2.5 sm:gap-3">
+              <div className="p-2 sm:p-2.5 bg-white border border-slate-200 shadow-sm rounded-xl">
+                <LayoutGrid className="h-5 w-5 sm:h-6 sm:w-6 text-blue-600" />
               </div>
               Search Inventory
             </h1>
-            <p className="text-[14px] font-medium text-slate-500 mt-3 pl-1">
+            <p className="text-[13px] sm:text-[14px] font-medium text-slate-500 mt-2 sm:mt-3 pl-1">
               Find, audit, and reconcile items manually in real-time.
             </p>
           </div>
           <NLQueryPalette companyId={selectedCompanyId} assignmentId={selectedAssignmentId} />
         </div>
-        
-        <div className="flex flex-col xl:grid xl:grid-cols-3 gap-8 relative">
-          
+
+        <div className="flex flex-col xl:grid xl:grid-cols-3 gap-5 sm:gap-8 relative">
+
           {/* Left Column: Search Component */}
           <div className="xl:col-span-2 order-1">
             <SearchInventory />
           </div>
-          
+
           {/* Right Column: Sticky Stats & Activity */}
           <div className="space-y-6 order-2 xl:sticky xl:top-6 h-fit">
             {selectedLocation ? (
@@ -50,7 +50,7 @@ const Search = () => {
                   <LocationAuditSummary locationId={selectedLocation} hideDropdown={true} />
                 </div>
                 {/* Strict height forces the internal scrollbar to appear */}
-                <div className="h-[450px] w-full">
+                <div className="h-[380px] sm:h-[450px] w-full">
                   <RecentActivity />
                 </div>
               </>

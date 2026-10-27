@@ -38,12 +38,18 @@ import { cn } from "@/lib/utils";
 // 🔥 OFFLINE FEATURE: Import the new banner
 import { SyncStatusBanner } from "@/components/scanner/SyncStatusBanner";
 
+export type ScannerMode = 'camera' | 'hardware';
+
 interface BarcodeScannerProps {
     onResult?: (code: string) => void;
     className?: string;
+    /** Picker mode only: start this scanner automatically and hide the Camera/Hardware chooser. */
+    preferredMode?: ScannerMode | null;
+    /** Picker mode only: called when the user picks Camera or Hardware, so the caller can remember it. */
+    onModeChosen?: (mode: ScannerMode) => void;
 }
 
-export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => {
+export const BarcodeScanner = ({ onResult, className, preferredMode, onModeChosen }: BarcodeScannerProps) => {
     const [isScanning, setIsScanning] = useState(false);
     const [isHardwareScannerMode, setIsHardwareScannerMode] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
@@ -424,6 +430,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
         if (!isPickerMode && !selectedSubLocation) { toast.error("Select Sub-Location first"); return; }
         setIsHardwareScannerMode(true);
         handleStopScanning();
+        onModeChosen?.('hardware');
         toast.success("Hardware scanner activated");
         setTimeout(() => hardwareInputRef.current?.focus(), 100);
     };
@@ -439,6 +446,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
             toast.error("Protocol Error", { description: "Camera access requires HTTPS or localhost." });
             return;
         }
+        onModeChosen?.('camera');
         setIsScanning(true);
         setIsHardwareScannerMode(false);
         setIsProcessing(false);
@@ -482,8 +490,18 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
         }
     };
 
+    // Remembered choice (picker mode): start straight away, once, without showing the chooser.
+    const autoStartedRef = useRef(false);
+    useEffect(() => {
+        if (!isPickerMode || !preferredMode || autoStartedRef.current) return;
+        autoStartedRef.current = true;
+        if (preferredMode === 'camera') handleStartScanning();
+        else handleStartHardwareScanner();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     return (
-        <div className={className || (isPickerMode ? "" : "flex flex-col lg:grid lg:grid-cols-2 gap-6 pb-20")}>
+        <div className={className || (isPickerMode ? "" : "flex flex-col lg:grid lg:grid-cols-2 gap-4 sm:gap-6 pb-20")}>
             <style>{`
                 #barcode-scanner-element video {
                     width: 100% !important;
@@ -498,7 +516,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
 
                 <Card className="shadow-sm border-space-200">
                     {!isPickerMode && (
-                        <CardHeader className="pb-3">
+                        <CardHeader className="p-4 pb-3 sm:p-6 sm:pb-3">
                             <CardTitle className="flex items-center justify-between text-space-900">
                                 <div className="flex items-center gap-2">
                                     <Barcode className="h-5 w-5 text-violet-600" />
@@ -509,7 +527,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                             </CardTitle>
                         </CardHeader>
                     )}
-                    <CardContent className={isPickerMode ? "pt-6" : ""}>
+                    <CardContent className={isPickerMode ? "px-4 pb-4 pt-4 sm:p-6 sm:pt-6" : "p-4 pt-0 sm:p-6 sm:pt-0"}>
                         <div className="space-y-4">
                             {!isPickerMode && (
                                 <div className="flex items-center gap-2 mb-2 p-2 bg-space-50 rounded border border-space-200">
@@ -552,7 +570,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                                                 <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                                             </Button>
                                         </PopoverTrigger>
-                                        <PopoverContent className="w-[300px] p-0">
+                                        <PopoverContent className="w-[300px] max-w-[calc(100vw-2rem)] p-0">
                                             <Command shouldFilter={false}>
                                                 <CommandInput
                                                     placeholder="Search sub-location..."
@@ -638,6 +656,18 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                                         <Button variant="destructive" className="w-full h-14 text-[15px] font-bold" onClick={handleStopScanning}>
                                             <X className="mr-2 h-4 w-4" /> Stop Camera
                                         </Button>
+                                    ) : isPickerMode && preferredMode ? (
+                                        <div className="space-y-3">
+                                            {preferredMode === 'camera' ? (
+                                                <Button variant="default" className="w-full h-14 text-[15px] font-bold bg-gradient-primary hover:shadow-glow shadow-glow-sm transition-all" onClick={handleStartScanning}>
+                                                    <Scan className="mr-2 h-4 w-4" /> Start Camera
+                                                </Button>
+                                            ) : (
+                                                <Button variant="outline" className="w-full h-14 text-[15px] font-bold border-space-300 text-space-700" onClick={handleStartHardwareScanner}>
+                                                    <Keyboard className="mr-2 h-4 w-4" /> Start Hardware Scanner
+                                                </Button>
+                                            )}
+                                        </div>
                                     ) : (
                                         <div className="grid grid-cols-2 gap-3">
                                             <Button variant="default" className="w-full h-14 text-[15px] font-bold bg-gradient-primary hover:shadow-glow shadow-glow-sm transition-all" onClick={handleStartScanning} disabled={!isPickerMode && (!selectedLocation || !selectedSubLocation)}>
@@ -649,6 +679,12 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
                                         </div>
                                     )}
                                 </div>
+                            )}
+
+                            {isPickerMode && preferredMode && (
+                                <p className="mt-4 text-center text-xs font-medium text-space-500">
+                                    Using the {preferredMode === 'camera' ? 'camera' : 'hardware scanner'}. To switch to the {preferredMode === 'camera' ? 'hardware scanner' : 'camera'}, refresh the page.
+                                </p>
                             )}
 
                             {!isPickerMode && (
@@ -678,7 +714,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
             </div>
 
             {!isPickerMode && (
-                <div className="space-y-6 order-2 lg:order-2">
+                <div className="space-y-4 sm:space-y-6 order-2 lg:order-2">
                     {selectedLocation ? (
                         <>
                             <LocationAuditSummary locationId={selectedLocation} hideDropdown={true} />
@@ -697,7 +733,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
 
             {/* Workflow Dialogs */}
             <Dialog open={isNotFoundOpen} onOpenChange={setIsNotFoundOpen}>
-                <DialogContent className="sm:max-w-[425px]">
+                <DialogContent className="w-[calc(100%-1.5rem)] sm:max-w-[425px] rounded-xl">
                     <DialogHeader>
                         <div className="flex items-center gap-2 text-orange-600">
                             <AlertCircle className="h-5 w-5" />
@@ -720,7 +756,7 @@ export const BarcodeScanner = ({ onResult, className }: BarcodeScannerProps) => 
             </Dialog>
 
             <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-                <DialogContent className="sm:max-w-[425px] max-h-[85vh] overflow-y-auto">
+                <DialogContent className="w-[calc(100%-1.5rem)] sm:max-w-[425px] max-h-[85vh] overflow-y-auto rounded-xl">
                     <DialogHeader>
                         <DialogTitle>Add Surplus Item</DialogTitle>
                         <DialogDescription>
