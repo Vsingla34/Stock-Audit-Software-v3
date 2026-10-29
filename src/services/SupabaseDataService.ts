@@ -650,24 +650,31 @@ class SupabaseDataService {
         continue;
       }
 
-      // Existing item: same accumulate-on-top-of-existing behaviour as
-      // before — the sheet's quantity is a delta added to whatever
-      // physical_quantity already existed, not a hard overwrite.
+      // Existing item: OVERWRITE. The sheet's quantity becomes the item's
+      // physical quantity — it is no longer added on top of what was already
+      // counted. Existing auditor entries are kept (history), and ONE
+      // adjustment entry is appended so that the entries still add up to the
+      // new quantity. That keeps the per-auditor breakdown and "revert this
+      // upload" (which recalculates from the entries) correct.
       let entries = existing.auditor_entries;
       if (typeof entries === 'string') entries = JSON.parse(entries);
       if (!Array.isArray(entries)) entries = [];
 
-      const newEntry = {
-        auditorId: userId || 'unknown',
-        auditorName: userName || 'System',
-        quantityFound: upd.physicalQuantity,
-        auditedAt: new Date().toISOString(),
-        subLocation: `systemUpload:${upd.physicalQuantity}`,
-        batchKey,
-      };
-      entries.push(newEntry);
+      const newQty = upd.physicalQuantity;
+      const entriesTotal = entries.reduce((sum: number, e: any) => sum + (Number(e?.quantityFound) || 0), 0);
+      const adjustment = newQty - entriesTotal;
 
-      const newQty = (parseFloat(existing.physical_quantity) || 0) + upd.physicalQuantity;
+      if (adjustment !== 0) {
+        entries.push({
+          auditorId: userId || 'unknown',
+          auditorName: userName || 'System',
+          quantityFound: adjustment,
+          auditedAt: new Date().toISOString(),
+          subLocation: `systemUpload:${newQty}`,
+          batchKey,
+        });
+      }
+
       const sysQty = parseFloat(existing.system_quantity) || 0;
 
       payloadRows.push({

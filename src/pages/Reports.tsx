@@ -4,8 +4,8 @@ import { useCompany } from "@/context/CompanyContext";
 import { useUser } from "@/context/UserContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { 
-  Download, FileText, FileType, FileSpreadsheet, Filter, Table as TableIcon, 
+import {
+  Download, FileText, FileType, FileSpreadsheet, Filter, Table as TableIcon,
   ArrowUpDown, MessageSquare, CheckCheck, Loader2, Send, CalendarDays, MapPin
 } from "lucide-react";
 import { toast } from "sonner";
@@ -42,8 +42,8 @@ const Reports = () => {
     finalizeAudit,
     sendFinalizationOtp,
     submitAudit,
-    fetchSubLocations, 
-    activeSubLocations 
+    fetchSubLocations,
+    activeSubLocations
   } = useInventory();
 
   const { currentUser } = useUser();
@@ -68,7 +68,7 @@ const Reports = () => {
 
   const reportRef = useRef(null);
   const [visibleCount, setVisibleCount] = useState(100);
-  
+
   const [isOtpDialogOpen, setIsOtpDialogOpen] = useState(false);
   const [otpCode, setOtpCode] = useState("");
   const [isSendingOtp, setIsSendingOtp] = useState(false);
@@ -84,28 +84,28 @@ const Reports = () => {
 
   useEffect(() => {
     if (selectedLocation) {
-        fetchSubLocations(selectedLocation);
+      fetchSubLocations(selectedLocation);
     }
   }, [selectedLocation]);
 
   useEffect(() => {
     let isMounted = true;
     const fetchReportData = async () => {
-      setItems([]); 
-      
+      setItems([]);
+
       if (!selectedCompanyId || !selectedAssignmentId) return;
 
       try {
         setLoading(true);
         const assignmentIdInt = parseInt(String(selectedAssignmentId), 10);
-        
+
         const data = await SupabaseDataService.getItemMaster(
-            selectedCompanyId, 
-            assignmentIdInt
+          selectedCompanyId,
+          assignmentIdInt
         );
 
         if (isMounted) {
-            setItems(data);
+          setItems(data);
         }
       } catch (error) {
         console.error("Error loading report:", error);
@@ -118,7 +118,7 @@ const Reports = () => {
     fetchReportData();
 
     return () => { isMounted = false; };
-  }, [selectedCompanyId, selectedAssignmentId]); 
+  }, [selectedCompanyId, selectedAssignmentId]);
 
   useEffect(() => {
     const fetchCompanyName = async () => {
@@ -129,7 +129,7 @@ const Reports = () => {
           .select("name")
           .eq("id", selectedCompanyId)
           .single();
-        
+
         if (data && !error) {
           setCompanyName(data.name);
         }
@@ -149,22 +149,22 @@ const Reports = () => {
   const handleSubmitClick = async () => {
     if (!selectedAssignmentId) return;
     if (confirm("Are you sure you want to submit this audit report? You will not be able to edit scans after submission.")) {
-       setIsSubmitting(true);
-       try {
-         await submitAudit(selectedAssignmentId);
-         toast.success("Audit submitted to client for review.");
-       } catch (e: any) {
-         toast.error(e.message || "Failed to submit audit.");
-       } finally {
-         setIsSubmitting(false);
-       }
+      setIsSubmitting(true);
+      try {
+        await submitAudit(selectedAssignmentId);
+        toast.success("Audit submitted to client for review.");
+      } catch (e: any) {
+        toast.error(e.message || "Failed to submit audit.");
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
   const handleFinalizeClick = () => {
     setIsOtpDialogOpen(true);
   };
-  
+
   const handleSendOtp = async () => {
     if (!selectedAssignmentId) return;
     setIsSendingOtp(true);
@@ -177,14 +177,14 @@ const Reports = () => {
       setIsSendingOtp(false);
     }
   };
-  
+
   const handleVerifyAndFinalize = async () => {
     if (!selectedAssignmentId) return;
     if (!otpCode) {
       toast.error("Please enter the verification code");
       return;
     }
-    
+
     setIsVerifyingOtp(true);
     try {
       await finalizeAudit(selectedAssignmentId, otpCode);
@@ -200,14 +200,14 @@ const Reports = () => {
   };
 
   const calculateTotalFromEntries = (item: InventoryItem) => {
-      if (!item.auditorEntries || item.auditorEntries.length === 0) return 0;
-      return item.auditorEntries.reduce((sum, entry) => sum + (entry.quantityFound || 0), 0);
+    if (!item.auditorEntries || item.auditorEntries.length === 0) return 0;
+    return item.auditorEntries.reduce((sum, entry) => sum + (entry.quantityFound || 0), 0);
   };
 
   const summary = useMemo(() => {
     const totalItems = items.length;
     const auditedItems = items.filter(i => i.status !== 'pending').length;
-    
+
     const totalSystemQty = items.reduce((sum, item) => sum + (item.systemQuantity || 0), 0);
     const totalPhysicalQty = items.reduce((sum, item) => sum + calculateTotalFromEntries(item), 0);
 
@@ -215,21 +215,21 @@ const Reports = () => {
     let discrepancies = 0;
 
     items.forEach(item => {
-        const phy = calculateTotalFromEntries(item);
-        if (item.status === 'pending' && phy === 0) return; 
-        
-        if (phy === item.systemQuantity) matched++;
-        else discrepancies++;
+      const phy = calculateTotalFromEntries(item);
+      if (item.status === 'pending' && phy === 0) return;
+
+      if (phy === item.systemQuantity) matched++;
+      else discrepancies++;
     });
 
     return {
-        totalItems,
-        auditedItems,
-        matched,
-        discrepancies,
-        pendingItems: Math.max(0, totalItems - auditedItems),
-        totalSystemQty,
-        totalPhysicalQty
+      totalItems,
+      auditedItems,
+      matched,
+      discrepancies,
+      pendingItems: Math.max(0, totalItems - auditedItems),
+      totalSystemQty,
+      totalPhysicalQty
     };
   }, [items]);
 
@@ -237,69 +237,69 @@ const Reports = () => {
     let minTs = Infinity;
     let found = false;
     items.forEach(item => {
-        if (item.auditorEntries && item.auditorEntries.length > 0) {
-            item.auditorEntries.forEach(entry => {
-                if (entry.auditedAt) {
-                    const ts = new Date(entry.auditedAt).getTime();
-                    if (ts < minTs) {
-                        minTs = ts;
-                        found = true;
-                    }
-                }
-            });
+      if (item.auditorEntries && item.auditorEntries.length > 0) {
+        item.auditorEntries.forEach(entry => {
+          if (entry.auditedAt) {
+            const ts = new Date(entry.auditedAt).getTime();
+            if (ts < minTs) {
+              minTs = ts;
+              found = true;
+            }
+          }
+        });
+      }
+      else if (item.lastAudited) {
+        const ts = new Date(item.lastAudited).getTime();
+        if (ts < minTs) {
+          minTs = ts;
+          found = true;
         }
-        else if (item.lastAudited) {
-             const ts = new Date(item.lastAudited).getTime();
-             if (ts < minTs) {
-                 minTs = ts;
-                 found = true;
-             }
-        }
+      }
     });
-    
+
     if (!found) return null;
-    
+
     const d = new Date(minTs);
-    d.setHours(0,0,0,0);
+    d.setHours(0, 0, 0, 0);
     return d;
   }, [items]);
 
   const baseTableData = useMemo(() => {
     return items.map((item) => {
-        const sysQty = item.systemQuantity || 0;
-        const phyQty = calculateTotalFromEntries(item);
-        const variance = (item.status !== 'pending' || phyQty > 0) ? phyQty - sysQty : 0; 
-        
-        let status = item.status || "pending";
-        if (phyQty > 0 || item.status !== 'pending') {
-            status = (phyQty === sysQty) ? "matched" : "discrepancy";
-        }
+      const sysQty = item.systemQuantity || 0;
+      const phyQty = calculateTotalFromEntries(item);
+      const variance = (item.status !== 'pending' || phyQty > 0) ? phyQty - sysQty : 0;
 
-        let auditDay = "-";
-        if (auditStartDate && item.lastAudited) {
-            const itemDate = new Date(item.lastAudited);
-            itemDate.setHours(0,0,0,0);
-            
-            const diffTime = itemDate.getTime() - auditStartDate.getTime();
-            const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)); 
-            auditDay = (diffDays + 1).toString();
-        }
+      let status = item.status || "pending";
+      if (phyQty > 0 || item.status !== 'pending') {
+        status = (phyQty === sysQty) ? "matched" : "discrepancy";
+      }
+
+      let auditDay = "-";
+      if (auditStartDate && item.lastAudited) {
+        const itemDate = new Date(item.lastAudited);
+        itemDate.setHours(0, 0, 0, 0);
+
+        const diffTime = itemDate.getTime() - auditStartDate.getTime();
+        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+        auditDay = (diffDays + 1).toString();
+      }
 
       return {
         id: item.id,
         sku: item.sku,
         name: item.name,
         category: item.category,
-        location: item.location || locationName, 
+        location: item.location || locationName,
         systemQuantity: sysQty,
-        physicalQuantity: phyQty, 
-        variance: variance,       
-        status: status,           
+        physicalQuantity: phyQty,
+        variance: variance,
+        status: status,
         lastAudited: item.lastAudited || "",
         auditorEntries: item.auditorEntries || [],
         clientRemarks: item.clientRemarks,
         customAttributes: item.customAttributes || {},
-        auditDay: auditDay 
+        auditDay: auditDay
       };
     });
   }, [items, locationName, auditStartDate]);
@@ -310,14 +310,14 @@ const Reports = () => {
       if (!item.auditorEntries) return;
       item.auditorEntries.forEach((entry: any) => {
         if (!entry.auditorId) return;
-        
+
         const currentMappedName = map[entry.auditorId];
         const newName = entry.auditorName || "Unknown";
-        
+
         if (!currentMappedName) {
-           map[entry.auditorId] = newName;
+          map[entry.auditorId] = newName;
         } else if (newName.includes('@') && !currentMappedName.includes('@')) {
-           map[entry.auditorId] = newName;
+          map[entry.auditorId] = newName;
         }
       });
     });
@@ -332,37 +332,37 @@ const Reports = () => {
   }, []);
 
   const priceKey = useMemo(() => {
-     for (const item of baseTableData) {
-        if (!item.customAttributes) continue;
-        if (item.customAttributes['unit_price'] !== undefined) return 'unit_price';
-        const keys = Object.keys(item.customAttributes);
-        const found = keys.find(k => ['unit price', 'price', 'rate', 'cost', 'mrp', 'unit cost'].includes(k.toLowerCase()));
-        if (found) return found;
-     }
-     return null;
+    for (const item of baseTableData) {
+      if (!item.customAttributes) continue;
+      if (item.customAttributes['unit_price'] !== undefined) return 'unit_price';
+      const keys = Object.keys(item.customAttributes);
+      const found = keys.find(k => ['unit price', 'price', 'rate', 'cost', 'mrp', 'unit cost'].includes(k.toLowerCase()));
+      if (found) return found;
+    }
+    return null;
   }, [baseTableData]);
 
   const getItemValues = useCallback((item: typeof baseTableData[0]) => {
-     if (!priceKey) return { unitPrice: 0, sysValue: 0, phyValue: 0, valueVariance: 0 };
+    if (!priceKey) return { unitPrice: 0, sysValue: 0, phyValue: 0, valueVariance: 0 };
 
-     const attrs = item.customAttributes || {};
-     let unitPrice = parsePrice(attrs['unit_price']);
-     let sysValue = parsePrice(attrs['system_value']);
-     let phyValue = parsePrice(attrs['physical_value']);
+    const attrs = item.customAttributes || {};
+    let unitPrice = parsePrice(attrs['unit_price']);
+    let sysValue = parsePrice(attrs['system_value']);
+    let phyValue = parsePrice(attrs['physical_value']);
 
-     if (unitPrice === 0 && priceKey !== 'unit_price') {
-         unitPrice = parsePrice(attrs[priceKey]);
-     }
-     if (sysValue === 0 && unitPrice > 0) {
-         sysValue = unitPrice * item.systemQuantity;
-     }
-     if (unitPrice > 0) {
-         phyValue = unitPrice * (item.physicalQuantity || 0);
-     }
+    if (unitPrice === 0 && priceKey !== 'unit_price') {
+      unitPrice = parsePrice(attrs[priceKey]);
+    }
+    if (sysValue === 0 && unitPrice > 0) {
+      sysValue = unitPrice * item.systemQuantity;
+    }
+    if (unitPrice > 0) {
+      phyValue = unitPrice * (item.physicalQuantity || 0);
+    }
 
-     const valueVariance = phyValue - sysValue;
+    const valueVariance = phyValue - sysValue;
 
-     return { unitPrice, sysValue, phyValue, valueVariance };
+    return { unitPrice, sysValue, phyValue, valueVariance };
   }, [priceKey, parsePrice]);
 
   const hasPricing = !!priceKey;
@@ -391,7 +391,7 @@ const Reports = () => {
       data = [...data].sort((a, b) => a.variance - b.variance);
     } else if (sortOrder === "variance-desc") {
       data = [...data].sort((a, b) => b.variance - a.variance);
-    } 
+    }
     else if (sortOrder === "val-variance-asc") {
       data = [...data].sort((a, b) => getItemValues(a).valueVariance - getItemValues(b).valueVariance);
     } else if (sortOrder === "val-variance-desc") {
@@ -430,27 +430,27 @@ const Reports = () => {
   };
 
   const formatQuestionnaireAnswer = useCallback((answer: string | string[], question?: Question) => {
-      let val: any = answer;
-      if (typeof val === "string") { try { if (val.trim().startsWith("[") || val.trim().startsWith("{")) { val = JSON.parse(val); } } catch {} }
-      
-      if (!question) {
-          return Array.isArray(val) ? val.join(", ") : String(val);
-      }
+    let val: any = answer;
+    if (typeof val === "string") { try { if (val.trim().startsWith("[") || val.trim().startsWith("{")) { val = JSON.parse(val); } } catch { } }
 
-      if (question.type === 'file') {
-         if (typeof val === "object" && val !== null && !Array.isArray(val)) {
-             const url = val.url || "";
-             const ctx = val.context || "";
-             if (!url) return "No File";
-             return ctx ? `${url}\nNotes: ${ctx}` : url;
-         }
-         return val ? String(val) : "No File";
-      }
+    if (!question) {
+      return Array.isArray(val) ? val.join(", ") : String(val);
+    }
 
-      if (question.type === "yes_no") { const v = Array.isArray(val) ? val[0] : val; const s = String(v ?? "").toLowerCase(); if (["yes", "true", "1"].includes(s)) return "Yes"; if (["no", "false", "0"].includes(s)) return "No"; return String(v ?? ""); }
-      if ((question.type === "single_select" || question.type === "multi_select") && question.options) { const ids = Array.isArray(val) ? val : [val]; const labels = ids.map((id: string) => { const opt = question.options?.find((o) => o.id === id); return opt ? opt.text : id; }); return labels.join(", "); }
-      if (Array.isArray(val)) { return val.join(", "); }
-      return String(val);
+    if (question.type === 'file') {
+      if (typeof val === "object" && val !== null && !Array.isArray(val)) {
+        const url = val.url || "";
+        const ctx = val.context || "";
+        if (!url) return "No File";
+        return ctx ? `${url}\nNotes: ${ctx}` : url;
+      }
+      return val ? String(val) : "No File";
+    }
+
+    if (question.type === "yes_no") { const v = Array.isArray(val) ? val[0] : val; const s = String(v ?? "").toLowerCase(); if (["yes", "true", "1"].includes(s)) return "Yes"; if (["no", "false", "0"].includes(s)) return "No"; return String(v ?? ""); }
+    if ((question.type === "single_select" || question.type === "multi_select") && question.options) { const ids = Array.isArray(val) ? val : [val]; const labels = ids.map((id: string) => { const opt = question.options?.find((o) => o.id === id); return opt ? opt.text : id; }); return labels.join(", "); }
+    if (Array.isArray(val)) { return val.join(", "); }
+    return String(val);
   }, []);
 
   // 🔥 THE FIX: Prevent duplicate quantity appending on 'systemUpload:' tags
@@ -458,17 +458,17 @@ const Reports = () => {
     if (!entries || entries.length === 0) return "-";
     const summary: Record<string, number> = {};
     entries.forEach(entry => {
-        const subLoc = entry.subLocation || "General";
-        summary[subLoc] = (summary[subLoc] || 0) + entry.quantityFound;
+      const subLoc = entry.subLocation || "General";
+      summary[subLoc] = (summary[subLoc] || 0) + entry.quantityFound;
     });
     return Object.entries(summary)
-        .map(([loc, qty]) => {
-            if (loc.startsWith("systemUpload:")) {
-                return loc; // Just return the tag "systemUpload:8" without the extra ": 8"
-            }
-            return `${loc}: ${qty}`;
-        })
-        .join("; ");
+      .map(([loc, qty]) => {
+        if (loc.startsWith("systemUpload:")) {
+          return loc; // Just return the tag "systemUpload:8" without the extra ": 8"
+        }
+        return `${loc}: ${qty}`;
+      })
+      .join("; ");
   }, []);
 
   const fitToColumn = (data: any[]) => {
@@ -477,12 +477,12 @@ const Reports = () => {
 
     const keys = Object.keys(data[0]);
     keys.forEach((key) => {
-       let maxLength = key.length;
-       data.slice(0, 50).forEach(row => {
-          const val = row[key] ? String(row[key]) : "";
-          if (val.length > maxLength) maxLength = val.length;
-       });
-       columnWidths.push({ wch: Math.min(maxLength + 2, 50) }); 
+      let maxLength = key.length;
+      data.slice(0, 50).forEach(row => {
+        const val = row[key] ? String(row[key]) : "";
+        if (val.length > maxLength) maxLength = val.length;
+      });
+      columnWidths.push({ wch: Math.min(maxLength + 2, 50) });
     });
     return columnWidths;
   };
@@ -501,12 +501,12 @@ const Reports = () => {
     let csvContent = headers.join(",") + "\n";
     data.forEach((item) => {
       const row = headers.map((header) => {
-          const raw = item[header] !== undefined ? item[header] : "";
-          const value = csvSafe(raw);
-          return value.includes(",") || value.includes('"') || value.includes("\n")
-            ? '"' + value.replace(/"/g, '""') + '"'
-            : value;
-        }).join(",");
+        const raw = item[header] !== undefined ? item[header] : "";
+        const value = csvSafe(raw);
+        return value.includes(",") || value.includes('"') || value.includes("\n")
+          ? '"' + value.replace(/"/g, '""') + '"'
+          : value;
+      }).join(",");
       csvContent += row + "\n";
     });
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -538,13 +538,13 @@ const Reports = () => {
         physicalQuantity: item.physicalQuantity,
         variance: hideSystemQuantity ? "Hidden" : item.variance,
         status: hideSystemQuantity ? "Audited" : item.status,
-        auditDay: item.auditDay 
+        auditDay: item.auditDay
       };
       if (hasPricing && !hideSystemQuantity) {
-         baseObj["Unit Price"] = unitPrice;
-         baseObj["System Value"] = sysValue;
-         baseObj["Physical Value"] = phyValue;
-         baseObj["Value Variance"] = valueVariance;
+        baseObj["Unit Price"] = unitPrice;
+        baseObj["System Value"] = sysValue;
+        baseObj["Physical Value"] = phyValue;
+        baseObj["Value Variance"] = valueVariance;
       }
       baseObj.remarks = item.clientRemarks || "-";
       baseObj.lastAudited = item.lastAudited ? new Date(item.lastAudited).toLocaleString() : "-";
@@ -559,11 +559,11 @@ const Reports = () => {
 
   const downloadReconciliationReport = useCallback(() => {
     const allAuditors = new Set<string>();
-    
+
     baseTableData.forEach((item) => {
-      item.auditorEntries.forEach((entry: any) => { 
-          const mappedName = auditorMap[entry.auditorId] || entry.auditorName;
-          allAuditors.add(mappedName); 
+      item.auditorEntries.forEach((entry: any) => {
+        const mappedName = auditorMap[entry.auditorId] || entry.auditorName;
+        allAuditors.add(mappedName);
       });
     });
     const auditorList = Array.from(allAuditors).sort();
@@ -580,25 +580,25 @@ const Reports = () => {
         systemQuantity: hideSystemQuantity ? "Hidden" : item.systemQuantity,
       };
       if (hasPricing && !hideSystemQuantity) {
-         baseData["Unit Price"] = unitPrice;
-         baseData["System Value"] = sysValue;
+        baseData["Unit Price"] = unitPrice;
+        baseData["System Value"] = sysValue;
       }
-      
+
       auditorList.forEach(name => { baseData[name] = 0; });
-      
+
       (item.auditorEntries || []).forEach((entry: any) => {
-          const mappedName = auditorMap[entry.auditorId] || entry.auditorName;
-          baseData[mappedName] += (entry.quantityFound || 0);
+        const mappedName = auditorMap[entry.auditorId] || entry.auditorName;
+        baseData[mappedName] += (entry.quantityFound || 0);
       });
 
       baseData.Total = item.physicalQuantity;
       if (hasPricing && !hideSystemQuantity) {
-         baseData["Physical Value"] = phyValue;
-         baseData["Value Variance"] = valueVariance;
+        baseData["Physical Value"] = phyValue;
+        baseData["Value Variance"] = valueVariance;
       }
       baseData.variance = hideSystemQuantity ? "Hidden" : item.variance;
       baseData.status = hideSystemQuantity ? "Audited" : item.status;
-      baseData.auditDay = item.auditDay; 
+      baseData.auditDay = item.auditDay;
       baseData.remarks = item.clientRemarks || "-";
       baseData.lastAudited = item.lastAudited;
       return baseData;
@@ -617,30 +617,30 @@ const Reports = () => {
     const allAuditors = new Set<string>();
 
     baseTableData.forEach((item) => {
-       item.auditorEntries.forEach((entry: any) => {
-           if (entry.auditedAt && entry.auditorId) {
-               const dateKey = new Date(entry.auditedAt).toLocaleDateString();
-               const auditor = auditorMap[entry.auditorId] || entry.auditorName; 
-               allAuditors.add(auditor);
-               if (!dataMap[dateKey]) dataMap[dateKey] = {};
-               dataMap[dateKey][auditor] = (dataMap[dateKey][auditor] || 0) + (entry.quantityFound || 0);
-           }
-       });
+      item.auditorEntries.forEach((entry: any) => {
+        if (entry.auditedAt && entry.auditorId) {
+          const dateKey = new Date(entry.auditedAt).toLocaleDateString();
+          const auditor = auditorMap[entry.auditorId] || entry.auditorName;
+          allAuditors.add(auditor);
+          if (!dataMap[dateKey]) dataMap[dateKey] = {};
+          dataMap[dateKey][auditor] = (dataMap[dateKey][auditor] || 0) + (entry.quantityFound || 0);
+        }
+      });
     });
 
-    const dates = Object.keys(dataMap).sort((a,b) => new Date(a).getTime() - new Date(b).getTime());
+    const dates = Object.keys(dataMap).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
     const auditorList = Array.from(allAuditors).sort();
 
     const reportData = dates.map(date => {
-        const row: any = { Date: date };
-        let dailyTotal = 0;
-        auditorList.forEach(auditor => {
-            const qty = dataMap[date][auditor] || 0;
-            row[auditor] = qty;
-            dailyTotal += qty;
-        });
-        row["Total Items"] = dailyTotal;
-        return row;
+      const row: any = { Date: date };
+      let dailyTotal = 0;
+      auditorList.forEach(auditor => {
+        const qty = dataMap[date][auditor] || 0;
+        row[auditor] = qty;
+        dailyTotal += qty;
+      });
+      row["Total Items"] = dailyTotal;
+      return row;
     });
 
     const locationInfo = locationName ? `_${locationName}` : "";
@@ -648,88 +648,88 @@ const Reports = () => {
   }, [baseTableData, locationName, generateCSV, auditorMap]);
 
   const downloadSubLocationReport = useCallback(() => {
-     if (baseTableData.length === 0) {
-       toast.error("No data to generate report.");
-       return;
-     }
+    if (baseTableData.length === 0) {
+      toast.error("No data to generate report.");
+      return;
+    }
 
-     const reportData: any[] = [];
-     
-     baseTableData.forEach(item => {
-         const subLocMap: Record<string, { qty: number, auditors: Set<string> }> = {};
-         
-         if (item.auditorEntries.length === 0) {
-             reportData.push({
-                 SKU: item.sku,
-                 Name: item.name,
-                 Category: item.category,
-                 Location: item.location,
-                 "Sub Location": "-",
-                 "System Qty": hideSystemQuantity ? "Hidden" : item.systemQuantity,
-                 "Physical Qty": 0,
-                 "Auditors": "-",
-                 "Status": hideSystemQuantity ? "Pending" : item.status
-             });
-         } else {
-             item.auditorEntries.forEach((entry: any) => {
-                 const subLoc = entry.subLocation || "General";
-                 if (!subLocMap[subLoc]) {
-                     subLocMap[subLoc] = { qty: 0, auditors: new Set() };
-                 }
-                 subLocMap[subLoc].qty += entry.quantityFound;
-                 const auditorName = auditorMap[entry.auditorId] || entry.auditorName; 
-                 subLocMap[subLoc].auditors.add(auditorName);
-             });
+    const reportData: any[] = [];
 
-             Object.entries(subLocMap).forEach(([subLoc, data]) => {
-                 reportData.push({
-                     SKU: item.sku,
-                     Name: item.name,
-                     Category: item.category,
-                     Location: item.location,
-                     "Sub Location": subLoc,
-                     "System Qty": hideSystemQuantity ? "Hidden" : item.systemQuantity,
-                     "Physical Qty": data.qty,
-                     "Auditors": Array.from(data.auditors).join(", "),
-                     "Status": hideSystemQuantity ? "Audited" : item.status
-                 });
-             });
-         }
-     });
+    baseTableData.forEach(item => {
+      const subLocMap: Record<string, { qty: number, auditors: Set<string> }> = {};
 
-     const locationInfo = locationName ? `_${locationName}` : "";
-     generateCSV(reportData, `sub_location_report${locationInfo}.csv`);
+      if (item.auditorEntries.length === 0) {
+        reportData.push({
+          SKU: item.sku,
+          Name: item.name,
+          Category: item.category,
+          Location: item.location,
+          "Sub Location": "-",
+          "System Qty": hideSystemQuantity ? "Hidden" : item.systemQuantity,
+          "Physical Qty": 0,
+          "Auditors": "-",
+          "Status": hideSystemQuantity ? "Pending" : item.status
+        });
+      } else {
+        item.auditorEntries.forEach((entry: any) => {
+          const subLoc = entry.subLocation || "General";
+          if (!subLocMap[subLoc]) {
+            subLocMap[subLoc] = { qty: 0, auditors: new Set() };
+          }
+          subLocMap[subLoc].qty += entry.quantityFound;
+          const auditorName = auditorMap[entry.auditorId] || entry.auditorName;
+          subLocMap[subLoc].auditors.add(auditorName);
+        });
+
+        Object.entries(subLocMap).forEach(([subLoc, data]) => {
+          reportData.push({
+            SKU: item.sku,
+            Name: item.name,
+            Category: item.category,
+            Location: item.location,
+            "Sub Location": subLoc,
+            "System Qty": hideSystemQuantity ? "Hidden" : item.systemQuantity,
+            "Physical Qty": data.qty,
+            "Auditors": Array.from(data.auditors).join(", "),
+            "Status": hideSystemQuantity ? "Audited" : item.status
+          });
+        });
+      }
+    });
+
+    const locationInfo = locationName ? `_${locationName}` : "";
+    generateCSV(reportData, `sub_location_report${locationInfo}.csv`);
   }, [baseTableData, locationName, generateCSV, auditorMap, hideSystemQuantity]);
 
   const downloadDiscrepancyReport = useCallback(() => {
     if (hideSystemQuantity) {
-        toast.error("Discrepancy reports are disabled during Blind Audits.");
-        return;
+      toast.error("Discrepancy reports are disabled during Blind Audits.");
+      return;
     }
 
     const discrepancies = baseTableData.filter((item) => item.variance !== 0);
     const reportData = discrepancies.map((item) => {
-        const { unitPrice, sysValue, phyValue, valueVariance } = getItemValues(item);
-        const baseObj: any = {
-            id: item.id,
-            sku: item.sku,
-            name: item.name,
-            location: item.location,
-            "Sub Location": getSubLocationSummary(item.auditorEntries),
-            systemQuantity: item.systemQuantity,
-            physicalQuantity: item.physicalQuantity,
-            variance: item.variance,
-        };
-        if (hasPricing) {
-            baseObj["Unit Price"] = unitPrice;
-            baseObj["System Value"] = sysValue;
-            baseObj["Physical Value"] = phyValue;
-            baseObj["Value Variance"] = valueVariance;
-        }
-        baseObj.auditDay = item.auditDay; 
-        baseObj.remarks = item.clientRemarks || "-";
-        baseObj.lastAudited = item.lastAudited;
-        return baseObj;
+      const { unitPrice, sysValue, phyValue, valueVariance } = getItemValues(item);
+      const baseObj: any = {
+        id: item.id,
+        sku: item.sku,
+        name: item.name,
+        location: item.location,
+        "Sub Location": getSubLocationSummary(item.auditorEntries),
+        systemQuantity: item.systemQuantity,
+        physicalQuantity: item.physicalQuantity,
+        variance: item.variance,
+      };
+      if (hasPricing) {
+        baseObj["Unit Price"] = unitPrice;
+        baseObj["System Value"] = sysValue;
+        baseObj["Physical Value"] = phyValue;
+        baseObj["Value Variance"] = valueVariance;
+      }
+      baseObj.auditDay = item.auditDay;
+      baseObj.remarks = item.clientRemarks || "-";
+      baseObj.lastAudited = item.lastAudited;
+      return baseObj;
     });
     const locationInfo = locationName ? `_${locationName}` : "";
     generateCSV(reportData, `discrepancy_report${locationInfo}.csv`);
@@ -754,16 +754,16 @@ const Reports = () => {
 
   const downloadCombinedExcelReport = useCallback(() => {
     if (hideSystemQuantity) {
-        toast.error("Detailed Excel exports are disabled during Blind Audits.");
-        return;
+      toast.error("Detailed Excel exports are disabled during Blind Audits.");
+      return;
     }
 
     const allAuditors = new Set<string>();
-    baseTableData.forEach((item) => { 
-        item.auditorEntries.forEach((entry: any) => { 
-            const mappedName = auditorMap[entry.auditorId] || entry.auditorName;
-            allAuditors.add(mappedName); 
-        }); 
+    baseTableData.forEach((item) => {
+      item.auditorEntries.forEach((entry: any) => {
+        const mappedName = auditorMap[entry.auditorId] || entry.auditorName;
+        allAuditors.add(mappedName);
+      });
     });
     const auditorList = Array.from(allAuditors).sort();
 
@@ -774,20 +774,20 @@ const Reports = () => {
         Name: item.name,
         Category: item.category,
         Location: item.location,
-        "Sub Location": getSubLocationSummary(item.auditorEntries), 
+        "Sub Location": getSubLocationSummary(item.auditorEntries),
         "System Qty": item.systemQuantity,
       };
       if (hasPricing) {
         row["Unit Price"] = unitPrice;
         row["System Value"] = sysValue;
       }
-      
+
       auditorList.forEach(name => { row[name] = 0; });
       (item.auditorEntries || []).forEach((entry: any) => {
-          const mappedName = auditorMap[entry.auditorId] || entry.auditorName;
-          row[mappedName] += (entry.quantityFound || 0);
+        const mappedName = auditorMap[entry.auditorId] || entry.auditorName;
+        row[mappedName] += (entry.quantityFound || 0);
       });
-      
+
       row["Physical Qty"] = item.physicalQuantity;
       if (hasPricing) {
         row["Physical Value"] = phyValue;
@@ -795,7 +795,7 @@ const Reports = () => {
       }
       row.Variance = item.variance;
       row.Status = item.status;
-      row["Audit Day"] = item.auditDay; 
+      row["Audit Day"] = item.auditDay;
       row.Remarks = item.clientRemarks || "-";
       row["Last Audited"] = item.lastAudited ? new Date(item.lastAudited).toLocaleString() : "-";
       return row;
@@ -806,22 +806,22 @@ const Reports = () => {
       .map((item) => {
         const { unitPrice, sysValue, phyValue, valueVariance } = getItemValues(item);
         const row: any = {
-            SKU: item.sku,
-            Name: item.name,
-            Location: item.location,
-            "Sub Location": getSubLocationSummary(item.auditorEntries),
-            Category: item.category,
-            "System Qty": item.systemQuantity,
-            "Physical Qty": item.physicalQuantity,
-            Variance: item.variance,
+          SKU: item.sku,
+          Name: item.name,
+          Location: item.location,
+          "Sub Location": getSubLocationSummary(item.auditorEntries),
+          Category: item.category,
+          "System Qty": item.systemQuantity,
+          "Physical Qty": item.physicalQuantity,
+          Variance: item.variance,
         };
         if (hasPricing) {
-            row["Unit Price"] = unitPrice;
-            row["System Value"] = sysValue;
-            row["Physical Value"] = phyValue;
-            row["Value Variance"] = valueVariance;
+          row["Unit Price"] = unitPrice;
+          row["System Value"] = sysValue;
+          row["Physical Value"] = phyValue;
+          row["Value Variance"] = valueVariance;
         }
-        row["Audit Day"] = item.auditDay; 
+        row["Audit Day"] = item.auditDay;
         row.Remarks = item.clientRemarks || "-";
         row["Last Audited"] = item.lastAudited ? new Date(item.lastAudited).toLocaleString() : "-";
         return row;
@@ -842,101 +842,101 @@ const Reports = () => {
     }];
 
     const questionnaireData = questionnaireAnswers.map(ans => {
-        const q = questions.find(q => q.id === ans.questionId);
-        const loc = locations.find(l => l.id === ans.locationId);
-        if (locationName && loc?.name !== locationName) return null;
-        return {
-            "Location": loc?.name || "Unknown",
-            "Question": q?.text || "Unknown Question",
-            "Response": q ? formatQuestionnaireAnswer(ans.answer, q) : String(ans.answer), 
-            "Answered By": ans.answeredBy,
-            "Date": new Date(ans.answeredOn).toLocaleDateString()
-        };
+      const q = questions.find(q => q.id === ans.questionId);
+      const loc = locations.find(l => l.id === ans.locationId);
+      if (locationName && loc?.name !== locationName) return null;
+      return {
+        "Location": loc?.name || "Unknown",
+        "Question": q?.text || "Unknown Question",
+        "Response": q ? formatQuestionnaireAnswer(ans.answer, q) : String(ans.answer),
+        "Answered By": ans.answeredBy,
+        "Date": new Date(ans.answeredOn).toLocaleDateString()
+      };
     }).filter(Boolean);
 
     const dayDataMap: Record<string, Record<string, number>> = {};
     const dayWiseAuditors = new Set<string>();
     baseTableData.forEach((item) => {
-       item.auditorEntries.forEach((entry: any) => {
-           if (entry.auditedAt && entry.auditorId) {
-               const dateKey = new Date(entry.auditedAt).toLocaleDateString();
-               const auditor = auditorMap[entry.auditorId] || entry.auditorName; 
-               dayWiseAuditors.add(auditor);
-               if (!dayDataMap[dateKey]) dayDataMap[dateKey] = {};
-               dayDataMap[dateKey][auditor] = (dayDataMap[dateKey][auditor] || 0) + (entry.quantityFound || 0);
-           }
-       });
+      item.auditorEntries.forEach((entry: any) => {
+        if (entry.auditedAt && entry.auditorId) {
+          const dateKey = new Date(entry.auditedAt).toLocaleDateString();
+          const auditor = auditorMap[entry.auditorId] || entry.auditorName;
+          dayWiseAuditors.add(auditor);
+          if (!dayDataMap[dateKey]) dayDataMap[dateKey] = {};
+          dayDataMap[dateKey][auditor] = (dayDataMap[dateKey][auditor] || 0) + (entry.quantityFound || 0);
+        }
+      });
     });
-    const dates = Object.keys(dayDataMap).sort((a,b) => new Date(a).getTime() - new Date(b).getTime());
+    const dates = Object.keys(dayDataMap).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
     const dayWiseAuditorList = Array.from(dayWiseAuditors).sort();
     const dayWiseData = dates.map(date => {
-        const row: any = { Date: date };
-        let dailyTotal = 0;
-        dayWiseAuditorList.forEach(auditor => {
-            const qty = dayDataMap[date][auditor] || 0;
-            row[auditor] = qty;
-            dailyTotal += qty;
-        });
-        row["Total Items"] = dailyTotal;
-        return row;
+      const row: any = { Date: date };
+      let dailyTotal = 0;
+      dayWiseAuditorList.forEach(auditor => {
+        const qty = dayDataMap[date][auditor] || 0;
+        row[auditor] = qty;
+        dailyTotal += qty;
+      });
+      row["Total Items"] = dailyTotal;
+      return row;
     });
 
     const subLocDetailsData: any[] = [];
-    const subLocScannedMap: Record<string, number> = {}; 
-    
+    const subLocScannedMap: Record<string, number> = {};
+
     baseTableData.forEach(item => {
-         const subLocMap: Record<string, { qty: number, auditors: Set<string> }> = {};
-         if (item.auditorEntries.length === 0) {
-             subLocDetailsData.push({
-                 SKU: item.sku,
-                 Name: item.name,
-                 Category: item.category,
-                 Location: item.location,
-                 "Sub Location": "-",
-                 "System Qty": item.systemQuantity,
-                 "Physical Qty": 0,
-                 "Auditors": "-",
-                 "Status": item.status
-             });
-         } else {
-             item.auditorEntries.forEach((entry: any) => {
-                 const subLoc = entry.subLocation || "General";
-                 if (!subLocMap[subLoc]) {
-                     subLocMap[subLoc] = { qty: 0, auditors: new Set() };
-                 }
-                 subLocMap[subLoc].qty += entry.quantityFound;
-                 const auditorName = auditorMap[entry.auditorId] || entry.auditorName; 
-                 subLocMap[subLoc].auditors.add(auditorName);
-                 
-                 subLocScannedMap[subLoc] = (subLocScannedMap[subLoc] || 0) + entry.quantityFound;
-             });
-             
-             Object.entries(subLocMap).forEach(([subLoc, data]) => {
-                 subLocDetailsData.push({
-                     SKU: item.sku,
-                     Name: item.name,
-                     Category: item.category,
-                     Location: item.location,
-                     "Sub Location": subLoc,
-                     "System Qty": item.systemQuantity,
-                     "Physical Qty": data.qty,
-                     "Auditors": Array.from(data.auditors).join(", "),
-                     "Status": item.status
-                 });
-             });
-         }
+      const subLocMap: Record<string, { qty: number, auditors: Set<string> }> = {};
+      if (item.auditorEntries.length === 0) {
+        subLocDetailsData.push({
+          SKU: item.sku,
+          Name: item.name,
+          Category: item.category,
+          Location: item.location,
+          "Sub Location": "-",
+          "System Qty": item.systemQuantity,
+          "Physical Qty": 0,
+          "Auditors": "-",
+          "Status": item.status
+        });
+      } else {
+        item.auditorEntries.forEach((entry: any) => {
+          const subLoc = entry.subLocation || "General";
+          if (!subLocMap[subLoc]) {
+            subLocMap[subLoc] = { qty: 0, auditors: new Set() };
+          }
+          subLocMap[subLoc].qty += entry.quantityFound;
+          const auditorName = auditorMap[entry.auditorId] || entry.auditorName;
+          subLocMap[subLoc].auditors.add(auditorName);
+
+          subLocScannedMap[subLoc] = (subLocScannedMap[subLoc] || 0) + entry.quantityFound;
+        });
+
+        Object.entries(subLocMap).forEach(([subLoc, data]) => {
+          subLocDetailsData.push({
+            SKU: item.sku,
+            Name: item.name,
+            Category: item.category,
+            Location: item.location,
+            "Sub Location": subLoc,
+            "System Qty": item.systemQuantity,
+            "Physical Qty": data.qty,
+            "Auditors": Array.from(data.auditors).join(", "),
+            "Status": item.status
+          });
+        });
+      }
     });
 
     const allKnownSubLocs = new Set([...Object.keys(subLocScannedMap), ...activeSubLocations]);
-    
+
     const subLocSummaryData = Array.from(allKnownSubLocs).map(subLoc => {
-        const qty = subLocScannedMap[subLoc] || 0;
-        return {
-            "Sub Location": subLoc,
-            "Total Quantity Found": qty,
-            "Percentage": summary.totalPhysicalQty > 0 ? ((qty / summary.totalPhysicalQty) * 100).toFixed(2) + "%" : "0%"
-        };
-    }).sort((a,b) => b["Total Quantity Found"] - a["Total Quantity Found"]);
+      const qty = subLocScannedMap[subLoc] || 0;
+      return {
+        "Sub Location": subLoc,
+        "Total Quantity Found": qty,
+        "Percentage": summary.totalPhysicalQty > 0 ? ((qty / summary.totalPhysicalQty) * 100).toFixed(2) + "%" : "0%"
+      };
+    }).sort((a, b) => b["Total Quantity Found"] - a["Total Quantity Found"]);
 
     const wb = XLSX.utils.book_new();
     const wsReconciliation = XLSX.utils.json_to_sheet(reconciliationData);
@@ -960,7 +960,7 @@ const Reports = () => {
     XLSX.utils.book_append_sheet(wb, wsDiscrepancy, "Discrepancies");
     XLSX.utils.book_append_sheet(wb, wsDayWise, "Day Wise Report");
     XLSX.utils.book_append_sheet(wb, wsSubLocDetails, "Sub-Location Details");
-    XLSX.utils.book_append_sheet(wb, wsSubLocSummary, "Sub-Location Summary"); 
+    XLSX.utils.book_append_sheet(wb, wsSubLocSummary, "Sub-Location Summary");
     XLSX.utils.book_append_sheet(wb, wsQuestionnaire, "Questionnaire");
 
     const locationInfo = locationName ? `_${locationName}` : "";
@@ -970,8 +970,8 @@ const Reports = () => {
 
   const generatePDFReport = useCallback(() => {
     if (hideSystemQuantity) {
-        toast.error("Detailed PDF exports are disabled during Blind Audits.");
-        return;
+      toast.error("Detailed PDF exports are disabled during Blind Audits.");
+      return;
     }
 
     const doc = new jsPDF();
@@ -987,27 +987,27 @@ const Reports = () => {
     doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, currentY);
 
     if (selectedLocation && selectedLocation !== "all") {
-        const questionsForLoc = getQuestionsForLocation(selectedLocation);
-        const getAnswerText = (questionText: string) => {
-            const q = questionsForLoc.find(xq => xq.text.trim().toLowerCase() === questionText.toLowerCase());
-            if (!q) return "N/A";
-            const ans = questionnaireAnswers.find(a => a.questionId === q.id && a.locationId === selectedLocation);
-            return ans ? formatQuestionnaireAnswer(ans.answer, q) : "N/A";
-        };
-        const locManager = getAnswerText("Location Manager");
-        const audName = getAnswerText("Auditor Name");
-        const phone = getAnswerText("Phone No.");
-        currentY += 7;
-        doc.text(`Location Manager: ${locManager}`, 14, currentY);
-        currentY += 7;
-        doc.text(`Auditor: ${audName}`, 14, currentY);
-        currentY += 7;
-        doc.text(`Phone: ${phone}`, 14, currentY);
+      const questionsForLoc = getQuestionsForLocation(selectedLocation);
+      const getAnswerText = (questionText: string) => {
+        const q = questionsForLoc.find(xq => xq.text.trim().toLowerCase() === questionText.toLowerCase());
+        if (!q) return "N/A";
+        const ans = questionnaireAnswers.find(a => a.questionId === q.id && a.locationId === selectedLocation);
+        return ans ? formatQuestionnaireAnswer(ans.answer, q) : "N/A";
+      };
+      const locManager = getAnswerText("Location Manager");
+      const audName = getAnswerText("Auditor Name");
+      const phone = getAnswerText("Phone No.");
+      currentY += 7;
+      doc.text(`Location Manager: ${locManager}`, 14, currentY);
+      currentY += 7;
+      doc.text(`Auditor: ${audName}`, 14, currentY);
+      currentY += 7;
+      doc.text(`Phone: ${phone}`, 14, currentY);
     }
 
     currentY += 14;
     doc.setFontSize(14); doc.setTextColor(0); doc.text("Audit Summary", 14, currentY);
-    
+
     const summaryTableBody = [
       ["Total SKUs (Unique Items)", summary.totalItems.toString()],
       ["Total System Qty", summary.totalSystemQty.toString()],
@@ -1027,17 +1027,17 @@ const Reports = () => {
     observations.forEach((obs) => { doc.setFontSize(11); doc.text(`• ${obs}`, 16, currentY); currentY += 7; });
 
     const discrepancies = baseTableData.filter((item) => item.status === "discrepancy").map((item) => {
-        const { unitPrice, sysValue, phyValue, valueVariance } = getItemValues(item);
-        const row = [item.sku, item.name, item.location, item.systemQuantity.toString(), item.physicalQuantity.toString(), item.variance.toString()];
-        if (hasPricing) {
-            row.push(formatCurrency(valueVariance));
-        }
-        row.push(item.clientRemarks || "-");
-        return row;
+      const { unitPrice, sysValue, phyValue, valueVariance } = getItemValues(item);
+      const row = [item.sku, item.name, item.location, item.systemQuantity.toString(), item.physicalQuantity.toString(), item.variance.toString()];
+      if (hasPricing) {
+        row.push(formatCurrency(valueVariance));
+      }
+      row.push(item.clientRemarks || "-");
+      return row;
     });
 
     if (discrepancies.length > 0) {
-      currentY += 5; 
+      currentY += 5;
       doc.setFontSize(14); doc.text("Discrepancy Details", 14, currentY);
       const headRow = ["SKU", "Name", "Location", "Sys", "Phy", "Var"];
       if (hasPricing) headRow.push("Val Var");
@@ -1047,35 +1047,38 @@ const Reports = () => {
     } else { currentY += 10; }
 
     if (selectedLocation && selectedLocation !== "all") {
-        const validQuestions = getQuestionsForLocation(selectedLocation);
-        const hiddenQuestions = ["company", "location", "location manager", "auditor name", "phone no."];
-        const displayQuestions = validQuestions.filter(q => !hiddenQuestions.includes(q.text.trim().toLowerCase()));
-        if (displayQuestions.length > 0) {
-            if (currentY > doc.internal.pageSize.height - 40) { doc.addPage(); currentY = 20; }
-            doc.setFontSize(14); doc.text("Audit Questionnaire Responses", 14, currentY);
-            const answerData = displayQuestions.map((question) => {
-                const answer = questionnaireAnswers.find((a) => a.questionId === question.id && a.locationId === selectedLocation);
-                return [question.text, answer ? formatQuestionnaireAnswer(answer.answer, question) : "-", answer?.answeredBy || "-", answer ? new Date(answer.answeredOn).toLocaleDateString() : "-"];
-            });
-            autoTable(doc, { startY: currentY + 5, head: [["Question", "Response", "Answered By", "Date"]], body: answerData, theme: "grid", headStyles: { fillColor: [67, 56, 202] }, styles: { fontSize: 9 }, columnStyles: { 0: { cellWidth: 80 }, 1: { cellWidth: 60, overflow: 'linebreak' } }, });
-            currentY = (doc as any)["lastAutoTable"].finalY + 10;
-        }
-        const pageHeight = doc.internal.pageSize.height;
-        if (currentY + 50 > pageHeight) { doc.addPage(); currentY = 20; } else { currentY += 10; }
-        const auditorName = questionnaireAnswers.find(a => a.locationId === selectedLocation)?.answeredBy || "N/A";
-        let storeManagerName = "N/A";
-        const questionsForSignOff = getQuestionsForLocation(selectedLocation);
-        const managerQuestion = questionsForSignOff.find(q => q.text.trim().toLowerCase() === 'location manager');
-        if (managerQuestion) { const managerAnswer = questionnaireAnswers.find((a) => a.questionId === managerQuestion.id && a.locationId === selectedLocation); if (managerAnswer) { storeManagerName = formatQuestionnaireAnswer(managerAnswer.answer, managerQuestion); } }
-        const currentDate = new Date().toLocaleDateString();
-        doc.setFontSize(12); doc.text("Auditor Sign-off", 14, currentY); doc.setFontSize(10);
-        doc.text(`Name: ${auditorName}`, 14, currentY + 10); doc.text("Signature: _____________________", 14, currentY + 20); doc.text(`Date: ${currentDate}`, 14, currentY + 30);
-        doc.text("Store Manager Sign-off", 120, currentY); doc.text(`Name: ${storeManagerName}`, 120, currentY + 10); doc.text("Signature: _____________________", 120, currentY + 20); doc.text(`Date: ${currentDate}`, 120, currentY + 30);
+      const validQuestions = getQuestionsForLocation(selectedLocation);
+      const hiddenQuestions = ["company", "location", "location manager", "auditor name", "phone no."];
+      const displayQuestions = validQuestions.filter(q => !hiddenQuestions.includes(q.text.trim().toLowerCase()));
+      if (displayQuestions.length > 0) {
+        if (currentY > doc.internal.pageSize.height - 40) { doc.addPage(); currentY = 20; }
+        doc.setFontSize(14); doc.text("Audit Questionnaire Responses", 14, currentY);
+        const answerData = displayQuestions.map((question) => {
+          const answer = questionnaireAnswers.find((a) => a.questionId === question.id && a.locationId === selectedLocation);
+          return [question.text, answer ? formatQuestionnaireAnswer(answer.answer, question) : "-", answer?.answeredBy || "-", answer ? new Date(answer.answeredOn).toLocaleDateString() : "-"];
+        });
+        autoTable(doc, { startY: currentY + 5, head: [["Question", "Response", "Answered By", "Date"]], body: answerData, theme: "grid", headStyles: { fillColor: [67, 56, 202] }, styles: { fontSize: 9 }, columnStyles: { 0: { cellWidth: 80 }, 1: { cellWidth: 60, overflow: 'linebreak' } }, });
+        currentY = (doc as any)["lastAutoTable"].finalY + 10;
+      }
+      const pageHeight = doc.internal.pageSize.height;
+      if (currentY + 50 > pageHeight) { doc.addPage(); currentY = 20; } else { currentY += 10; }
+      const auditorName = questionnaireAnswers.find(a => a.locationId === selectedLocation)?.answeredBy || "N/A";
+      let storeManagerName = "N/A";
+      const questionsForSignOff = getQuestionsForLocation(selectedLocation);
+      const managerQuestion = questionsForSignOff.find(q => q.text.trim().toLowerCase() === 'location manager');
+      if (managerQuestion) { const managerAnswer = questionnaireAnswers.find((a) => a.questionId === managerQuestion.id && a.locationId === selectedLocation); if (managerAnswer) { storeManagerName = formatQuestionnaireAnswer(managerAnswer.answer, managerQuestion); } }
+      const currentDate = new Date().toLocaleDateString();
+      doc.setFontSize(12); doc.text("Auditor Sign-off", 14, currentY); doc.setFontSize(10);
+      doc.text(`Name: ${auditorName}`, 14, currentY + 10); doc.text("Signature: _____________________", 14, currentY + 20); doc.text(`Date: ${currentDate}`, 14, currentY + 30);
+      doc.text("Store Manager Sign-off", 120, currentY); doc.text(`Name: ${storeManagerName}`, 120, currentY + 10); doc.text("Signature: _____________________", 120, currentY + 20); doc.text(`Date: ${currentDate}`, 120, currentY + 30);
     }
     const locationInfo = locationName ? `_${locationName}` : "";
     doc.save(`inventory_audit_report${locationInfo}.pdf`);
     toast.success("PDF Report downloaded");
   }, [selectedLocation, locationName, summary, baseTableData, questionnaireAnswers, getQuestionsForLocation, formatQuestionnaireAnswer, companyName, hasPricing, getItemValues, hideSystemQuantity]);
+
+  // A new filter/sort starts again from the first page of results.
+  useEffect(() => { setVisibleCount(100); }, [statusFilter, categoryFilter, sortOrder]);
 
   const handleShowMore = () => { setVisibleCount((prev) => prev + 100); };
   const handleShowAll = () => { setVisibleCount(filteredTableData.length); };
@@ -1091,17 +1094,17 @@ const Reports = () => {
               <p className="text-muted-foreground">Generate and download inventory audit reports with auditor tracking</p>
             </div>
             <div className="flex gap-3 items-center">
-                {canSubmit && (
-                  <Button onClick={handleSubmitClick} disabled={isSubmitting} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-                    {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                    Submit to Client
-                  </Button>
-                )}
-                {canFinalize && (
-                  <Button onClick={handleFinalizeClick} className="bg-green-600 hover:bg-green-700 text-white">
-                    <CheckCheck className="mr-2 h-4 w-4" /> Finalize Audit
-                  </Button>
-                )}
+              {canSubmit && (
+                <Button onClick={handleSubmitClick} disabled={isSubmitting} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                  {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                  Submit to Client
+                </Button>
+              )}
+              {canFinalize && (
+                <Button onClick={handleFinalizeClick} className="bg-green-600 hover:bg-green-700 text-white">
+                  <CheckCheck className="mr-2 h-4 w-4" /> Finalize Audit
+                </Button>
+              )}
             </div>
           </div>
 
@@ -1114,11 +1117,11 @@ const Reports = () => {
             assignmentDate={
               currentAssignment?.scheduledDate
                 ? new Date(currentAssignment.scheduledDate).toLocaleDateString("en-GB", {
-                    day: "2-digit", month: "short", year: "numeric",
-                  })
+                  day: "2-digit", month: "short", year: "numeric",
+                })
                 : new Date().toLocaleDateString("en-GB", {
-                    day: "2-digit", month: "short", year: "numeric",
-                  })
+                  day: "2-digit", month: "short", year: "numeric",
+                })
             }
             uniqueCategories={uniqueCategories}
           />
@@ -1128,7 +1131,7 @@ const Reports = () => {
               <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><FileSpreadsheet className="h-5 w-5 text-indigo-600" />Reconciliation</CardTitle></CardHeader>
               <CardContent className="space-y-2"><p className="text-sm text-gray-500">Complete report with auditor breakdown.</p><Button variant="outline" className="w-full bg-white hover:bg-indigo-50 border-indigo-200 text-indigo-700 hover:text-indigo-800" onClick={downloadReconciliationReport}><Download className="mr-2 h-4 w-4" />Download CSV</Button></CardContent>
             </Card>
-            
+
             <Card className="bg-gradient-to-br from-blue-50 to-white shadow-sm border-blue-100">
               <CardHeader><CardTitle className="flex items-center gap-2 text-gray-900"><CalendarDays className="h-5 w-5 text-blue-600" />Day Wise Report</CardTitle></CardHeader>
               <CardContent className="space-y-2"><p className="text-sm text-gray-500">Auditor performance by date.</p><Button variant="outline" className="w-full bg-white hover:bg-blue-50 border-blue-200 text-blue-700 hover:text-blue-800" onClick={downloadDayWiseReport}><Download className="mr-2 h-4 w-4" />Download CSV</Button></CardContent>
@@ -1243,21 +1246,21 @@ const Reports = () => {
 
                       {hasPricing && !hideSystemQuantity && (
                         <>
-                           <TableHead className="text-right w-[100px] bg-indigo-50/50 hidden md:table-cell">Price</TableHead>
-                           <TableHead className="text-right w-[100px] bg-indigo-50/50 hidden md:table-cell">Sys Val</TableHead>
-                           <TableHead className="text-right w-[100px] bg-indigo-50/50 hidden md:table-cell">Phy Val</TableHead>
-                           <TableHead className="text-right w-[100px] bg-indigo-50/50 hidden md:table-cell">Val Var</TableHead>
+                          <TableHead className="text-right w-[100px] bg-indigo-50/50 hidden md:table-cell">Price</TableHead>
+                          <TableHead className="text-right w-[100px] bg-indigo-50/50 hidden md:table-cell">Sys Val</TableHead>
+                          <TableHead className="text-right w-[100px] bg-indigo-50/50 hidden md:table-cell">Phy Val</TableHead>
+                          <TableHead className="text-right w-[100px] bg-indigo-50/50 hidden md:table-cell">Val Var</TableHead>
                         </>
                       )}
 
                       {!hideSystemQuantity && (
-                          <TableHead className="text-center w-[80px] hidden md:table-cell">Sys</TableHead>
+                        <TableHead className="text-center w-[80px] hidden md:table-cell">Sys</TableHead>
                       )}
 
                       <TableHead className="text-center w-[64px] md:w-[80px] p-2 md:p-4 text-xs md:text-sm">Phy</TableHead>
 
                       {!hideSystemQuantity && (
-                          <TableHead className="text-center w-[80px] hidden md:table-cell">Var</TableHead>
+                        <TableHead className="text-center w-[80px] hidden md:table-cell">Var</TableHead>
                       )}
 
                       <TableHead className="text-center w-[90px] md:w-[100px] p-2 md:p-4 text-xs md:text-sm">Status</TableHead>
@@ -1267,28 +1270,28 @@ const Reports = () => {
                   </TableHeader>
                   <TableBody>
                     {loading ? (
-                        <TableRow>
-                            <TableCell colSpan={hasPricing ? 14 : 10} className="h-24 text-center">
-                                <Loader2 className="w-6 h-6 animate-spin mx-auto text-indigo-600" />
-                                <span className="text-xs text-muted-foreground mt-2 block">Loading report data...</span>
-                            </TableCell>
-                        </TableRow>
+                      <TableRow>
+                        <TableCell colSpan={hasPricing ? 14 : 10} className="h-24 text-center">
+                          <Loader2 className="w-6 h-6 animate-spin mx-auto text-indigo-600" />
+                          <span className="text-xs text-muted-foreground mt-2 block">Loading report data...</span>
+                        </TableCell>
+                      </TableRow>
                     ) : visibleTableData.length > 0 ? (
                       visibleTableData.map((item) => {
                         const isDiscrepancy = item.status === "discrepancy";
                         const canEdit = canEditRemarkForItem(item.location);
                         const { unitPrice, sysValue, phyValue, valueVariance } = getItemValues(item);
-                        
+
                         const auditorEntries = item.auditorEntries || [];
                         const consolidatedMap = new Map();
                         auditorEntries.forEach(entry => {
-                            const mappedName = auditorMap[entry.auditorId] || entry.auditorName || 'Unknown';
-                            const key = `${mappedName}-${entry.subLocation || 'General'}`;
-                            if (!consolidatedMap.has(key)) {
-                                consolidatedMap.set(key, { name: mappedName, subLocation: entry.subLocation, quantityFound: Number(entry.quantityFound) || 0 });
-                            } else {
-                                consolidatedMap.get(key).quantityFound += (Number(entry.quantityFound) || 0);
-                            }
+                          const mappedName = auditorMap[entry.auditorId] || entry.auditorName || 'Unknown';
+                          const key = `${mappedName}-${entry.subLocation || 'General'}`;
+                          if (!consolidatedMap.has(key)) {
+                            consolidatedMap.set(key, { name: mappedName, subLocation: entry.subLocation, quantityFound: Number(entry.quantityFound) || 0 });
+                          } else {
+                            consolidatedMap.get(key).quantityFound += (Number(entry.quantityFound) || 0);
+                          }
                         });
                         const consolidatedEntries = Array.from(consolidatedMap.values());
 
@@ -1296,76 +1299,76 @@ const Reports = () => {
                           <TableRow key={`${item.id}-${item.location}`}>
                             <TableCell className="font-medium text-gray-900 text-xs p-2 md:p-4 sticky left-0 z-10 bg-white md:static">{item.sku}</TableCell>
                             <TableCell className="p-2 md:p-4">
-                                <div className="truncate max-w-[130px] md:max-w-[200px] text-xs md:text-sm font-medium text-gray-900" title={item.name}>
-                                    {item.name}
-                                </div>
-                                {consolidatedEntries.length > 0 && (
-                                    <div className="mt-2 text-[10px] text-gray-500 space-y-1 bg-gray-50 p-1.5 rounded border border-gray-100">
-                                        <div className="font-semibold text-gray-600 mb-0.5 uppercase tracking-wider text-[9px]">Auditor Breakdown:</div>
-                                        {consolidatedEntries.map((e, i) => (
-                                            <div key={i} className="flex justify-between items-center gap-2">
-                                                <span className="truncate max-w-[130px] pr-2">{e.name} {e.subLocation && `(${e.subLocation})`}</span>
-                                                <span className={`font-mono font-medium ${e.quantityFound < 0 ? "text-red-600" : "text-indigo-600"}`}>
-                                                    {e.quantityFound > 0 ? `+${e.quantityFound}` : e.quantityFound}
-                                                </span>
-                                            </div>
-                                        ))}
+                              <div className="truncate max-w-[130px] md:max-w-[200px] text-xs md:text-sm font-medium text-gray-900" title={item.name}>
+                                {item.name}
+                              </div>
+                              {consolidatedEntries.length > 0 && (
+                                <div className="mt-2 text-[10px] text-gray-500 space-y-1 bg-gray-50 p-1.5 rounded border border-gray-100">
+                                  <div className="font-semibold text-gray-600 mb-0.5 uppercase tracking-wider text-[9px]">Auditor Breakdown:</div>
+                                  {consolidatedEntries.map((e, i) => (
+                                    <div key={i} className="flex justify-between items-center gap-2">
+                                      <span className="truncate max-w-[130px] pr-2">{e.name} {e.subLocation && `(${e.subLocation})`}</span>
+                                      <span className={`font-mono font-medium ${e.quantityFound < 0 ? "text-red-600" : "text-indigo-600"}`}>
+                                        {e.quantityFound > 0 ? `+${e.quantityFound}` : e.quantityFound}
+                                      </span>
                                     </div>
-                                )}
+                                  ))}
+                                </div>
+                              )}
                             </TableCell>
 
                             <TableCell className="text-xs hidden md:table-cell">{item.location}</TableCell>
                             <TableCell className="text-xs hidden md:table-cell">{item.category}</TableCell>
 
                             {hasPricing && !hideSystemQuantity && (
-                                <>
-                                  <TableCell className="text-right text-xs font-mono bg-indigo-50/30 hidden md:table-cell">
-                                      {formatCurrency(unitPrice)}
-                                  </TableCell>
-                                  <TableCell className="text-right text-xs font-mono bg-indigo-50/30 hidden md:table-cell">
-                                      {formatCurrency(sysValue)}
-                                  </TableCell>
-                                  <TableCell className={`text-right text-xs font-mono bg-indigo-50/30 hidden md:table-cell ${item.status === 'discrepancy' ? 'text-red-600 font-bold' : ''}`}>
-                                      {formatCurrency(phyValue)}
-                                  </TableCell>
-                                  <TableCell className={`text-right text-xs font-mono bg-indigo-50/30 font-bold hidden md:table-cell ${valueVariance < 0 ? 'text-red-600' : valueVariance > 0 ? 'text-green-600' : 'text-gray-500'}`}>
-                                      {formatCurrency(valueVariance)}
-                                  </TableCell>
-                                </>
+                              <>
+                                <TableCell className="text-right text-xs font-mono bg-indigo-50/30 hidden md:table-cell">
+                                  {formatCurrency(unitPrice)}
+                                </TableCell>
+                                <TableCell className="text-right text-xs font-mono bg-indigo-50/30 hidden md:table-cell">
+                                  {formatCurrency(sysValue)}
+                                </TableCell>
+                                <TableCell className={`text-right text-xs font-mono bg-indigo-50/30 hidden md:table-cell ${item.status === 'discrepancy' ? 'text-red-600 font-bold' : ''}`}>
+                                  {formatCurrency(phyValue)}
+                                </TableCell>
+                                <TableCell className={`text-right text-xs font-mono bg-indigo-50/30 font-bold hidden md:table-cell ${valueVariance < 0 ? 'text-red-600' : valueVariance > 0 ? 'text-green-600' : 'text-gray-500'}`}>
+                                  {formatCurrency(valueVariance)}
+                                </TableCell>
+                              </>
                             )}
 
                             {!hideSystemQuantity && (
-                                <TableCell className="text-center font-medium hidden md:table-cell">
-                                    {item.systemQuantity}
-                                </TableCell>
+                              <TableCell className="text-center font-medium hidden md:table-cell">
+                                {item.systemQuantity}
+                              </TableCell>
                             )}
 
                             <TableCell className="text-center font-medium text-xs md:text-sm p-2 md:p-4">{item.physicalQuantity}</TableCell>
 
                             {!hideSystemQuantity && (
-                                <TableCell className={`text-center font-bold hidden md:table-cell ${item.variance !== 0 ? "text-red-600" : ""}`}>
-                                    {item.variance}
-                                </TableCell>
+                              <TableCell className={`text-center font-bold hidden md:table-cell ${item.variance !== 0 ? "text-red-600" : ""}`}>
+                                {item.variance}
+                              </TableCell>
                             )}
 
                             <TableCell className="text-center p-2 md:p-4">
                               {hideSystemQuantity ? (
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800">
-                                      {item.physicalQuantity > 0 || item.status !== 'pending' ? 'Audited' : 'Pending'}
-                                  </span>
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800">
+                                  {item.physicalQuantity > 0 || item.status !== 'pending' ? 'Audited' : 'Pending'}
+                                </span>
                               ) : (
-                                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${item.status === "matched" ? "bg-green-100 text-green-800" : item.status === "discrepancy" ? "bg-red-100 text-red-800" : "bg-gray-100 text-gray-800"}`}>
-                                    {item.status === "matched" ? "Matched" : item.status === "discrepancy" ? "Discrepancy" : "Pending"}
-                                  </span>
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${item.status === "matched" ? "bg-green-100 text-green-800" : item.status === "discrepancy" ? "bg-red-100 text-red-800" : "bg-gray-100 text-gray-800"}`}>
+                                  {item.status === "matched" ? "Matched" : item.status === "discrepancy" ? "Discrepancy" : "Pending"}
+                                </span>
                               )}
                             </TableCell>
                             <TableCell className="text-center text-xs font-mono text-gray-600 hidden md:table-cell">
-                                {item.auditDay}
+                              {item.auditDay}
                             </TableCell>
                             <TableCell className="hidden md:table-cell">
                               {editingRemark === item.id ? (
-                                <Input 
-                                  value={tempRemark} 
+                                <Input
+                                  value={tempRemark}
                                   onChange={(e) => setTempRemark(e.target.value)}
                                   className="h-7 text-xs"
                                   placeholder="Add remark..."
@@ -1374,7 +1377,7 @@ const Reports = () => {
                                   onKeyDown={(e) => e.key === 'Enter' && handleRemarkSave(item.id)}
                                 />
                               ) : (
-                                <div 
+                                <div
                                   className={`text-xs flex items-center gap-1 min-h-[24px] ${canEdit && isDiscrepancy ? "cursor-pointer hover:bg-gray-50 rounded px-1 -ml-1 border border-transparent hover:border-gray-200" : ""}`}
                                   onClick={() => canEdit && isDiscrepancy ? handleRemarkStart(item.id, item.clientRemarks || "") : undefined}
                                 >
@@ -1395,12 +1398,12 @@ const Reports = () => {
                       })
                     ) : (
                       <TableRow>
-                          <TableCell 
-                             colSpan={hideSystemQuantity ? 8 : (10 + (hasPricing ? 4 : 0))} 
-                             className="text-center py-4 text-gray-500"
-                          >
-                             No data available matching filters
-                          </TableCell>
+                        <TableCell
+                          colSpan={hideSystemQuantity ? 8 : (10 + (hasPricing ? 4 : 0))}
+                          className="text-center py-4 text-gray-500"
+                        >
+                          No data available matching filters
+                        </TableCell>
                       </TableRow>
                     )}
                   </TableBody>
@@ -1424,14 +1427,14 @@ const Reports = () => {
             <div className="space-y-2">
               <Label>Verification Code</Label>
               <div className="flex gap-2">
-                <Input 
-                  placeholder="Enter 6-digit code" 
+                <Input
+                  placeholder="Enter 6-digit code"
                   value={otpCode}
                   onChange={(e) => setOtpCode(e.target.value)}
                   maxLength={6}
                 />
-                <Button 
-                  onClick={handleSendOtp} 
+                <Button
+                  onClick={handleSendOtp}
                   disabled={isSendingOtp}
                   variant="secondary"
                 >

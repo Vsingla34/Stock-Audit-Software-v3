@@ -68,7 +68,6 @@ const Search = () => {
               </Card>
             )}
           </div>
-
         </div>
       </div>
     </AppLayout>
@@ -76,3 +75,12 @@ const Search = () => {
 };
 
 export default Search;
+
+
+
+
+
+
+
+
+
