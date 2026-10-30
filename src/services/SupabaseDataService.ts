@@ -585,6 +585,24 @@ class SupabaseDataService {
     }
   }
 
+  /** Reads EVERY row of an assignment, page by page (a single request is capped at 1000 rows). */
+  private async fetchAllAssignmentRows(assignmentId: number, columns: string): Promise<any[]> {
+    const PAGE = 1000;
+    const all: any[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from('inventory_items')
+        .select(columns)
+        .eq('assignment_id', assignmentId)
+        .order('id', { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) throw error;
+      all.push(...(data || []));
+      if (!data || data.length < PAGE) break;
+    }
+    return all;
+  }
+
   public async uploadPhysicalQuantityStock(params: {
     items: { sku: string; physicalQuantity: number; name?: string; category?: string; location?: string }[];
     companyId: string;
@@ -600,14 +618,35 @@ class SupabaseDataService {
   }) {
     const { items, companyId, assignmentId, batchKey, userId, userName, approvedNewSkus } = params;
 
-    const { data: existingItems, error: fetchErr } = await supabase
-      .from('inventory_items')
-      .select('id, sku, name, category, location, physical_quantity, system_quantity, auditor_entries, company_id, assignment_id')
-      .eq('assignment_id', assignmentId);
+    // IMPORTANT: a plain `.select()` returns at most 1000 rows (the API's row limit), so on a
+    // large assignment every SKU beyond the first 1000 looked "not found". Look the SKUs up in
+    // targeted batches instead, and only fall back to reading the whole assignment page by page
+    // if some SKUs could not be matched exactly (e.g. stray spaces in the stored SKU).
+    const ITEM_COLUMNS = 'id, sku, name, category, location, physical_quantity, system_quantity, auditor_entries, company_id, assignment_id';
+    const existingMap = new Map<string, any>();
+    const remember = (rows: any[] | null | undefined) => {
+      (rows || []).forEach((r) => {
+        const key = String(r.sku ?? '').trim();
+        if (key && !existingMap.has(key)) existingMap.set(key, r);
+      });
+    };
 
-    if (fetchErr) throw fetchErr;
+    const wantedSkus = Array.from(new Set(items.map((i) => String(i.sku ?? '').trim()).filter(Boolean)));
+    const LOOKUP_CHUNK = 150;
+    for (let i = 0; i < wantedSkus.length; i += LOOKUP_CHUNK) {
+      const { data, error: fetchErr } = await supabase
+        .from('inventory_items')
+        .select(ITEM_COLUMNS)
+        .eq('assignment_id', assignmentId)
+        .in('sku', wantedSkus.slice(i, i + LOOKUP_CHUNK));
+      if (fetchErr) throw fetchErr;
+      remember(data);
+    }
 
-    const existingMap = new Map(existingItems?.map(i => [i.sku, i]) || []);
+    if (wantedSkus.some((s) => !existingMap.has(s))) {
+      remember(await this.fetchAllAssignmentRows(assignmentId, ITEM_COLUMNS));
+    }
+
     const missingSkus: string[] = [];
 
     // Rows going to the bulk_upsert_inventory_items RPC — same payload
@@ -616,7 +655,7 @@ class SupabaseDataService {
     const payloadRows: any[] = [];
 
     for (const upd of items) {
-      const existing = existingMap.get(upd.sku);
+      const existing = existingMap.get(String(upd.sku ?? '').trim());
 
       if (!existing) {
         if (!approvedNewSkus?.has(upd.sku)) {
@@ -990,11 +1029,11 @@ class SupabaseDataService {
     if (!history) return;
 
     if (history.upload_type === 'physical_quantity') {
-      const { data: items } = await supabase
-        .from("inventory_items")
-
-        .select("id, physical_quantity, system_quantity, auditor_entries, company_id, assignment_id, sku, name, category, location")
-        .eq("assignment_id", history.assignment_id);
+      // All rows of the assignment (not just the first 1000) so the whole upload is reverted.
+      const items = await this.fetchAllAssignmentRows(
+        history.assignment_id,
+        "id, physical_quantity, system_quantity, auditor_entries, company_id, assignment_id, sku, name, category, location"
+      );
 
       const updates = (items || []).map(item => {
         let entries = item.auditor_entries;
