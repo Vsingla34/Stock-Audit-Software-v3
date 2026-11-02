@@ -34,14 +34,16 @@ const SearchItemRow = React.memo(({
   const consolidatedMap = new Map();
   auditorEntries.forEach((entry: any) => {
     const mappedName = entry.auditorName || 'Unknown';
-    const key = `${mappedName}-${entry.subLocation || 'General'}`;
+    // older Physical Qty uploads stored an internal "systemUpload:N" tag here; show it as General
+    const subLoc = String(entry.subLocation || '').startsWith('systemUpload:') ? 'General' : entry.subLocation;
+    const key = `${mappedName}-${subLoc || 'General'}`;
     if (!consolidatedMap.has(key)) {
-      consolidatedMap.set(key, { name: mappedName, subLocation: entry.subLocation, quantityFound: Number(entry.quantityFound) || 0 });
+      consolidatedMap.set(key, { name: mappedName, subLocation: subLoc, quantityFound: Number(entry.quantityFound) || 0 });
     } else {
       consolidatedMap.get(key).quantityFound += (Number(entry.quantityFound) || 0);
     }
   });
-  const consolidatedEntries = Array.from(consolidatedMap.values());
+  const consolidatedEntries = Array.from(consolidatedMap.values()).filter((e: any) => e.quantityFound !== 0);
 
   const itemUploadedUnit = item.customAttributes?.['Unit'];
   const currentSelectedUnit = selectedUnit !== undefined ? selectedUnit : (itemUploadedUnit || "none");

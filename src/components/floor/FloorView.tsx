@@ -6,7 +6,8 @@
 // This shows WHERE scanning is happening right now and WHO is there —
 // which is still genuinely useful for an admin watching a live count.
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useInventory } from "@/context/InventoryContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useFloorPresence, FloorPresenceEntry } from "@/hooks/useFloorPresence";
 import { Card, CardContent } from "@/components/ui/card";
@@ -118,6 +119,50 @@ export const FloorView = ({ assignmentId }: FloorViewProps) => {
   const [loading, setLoading] = useState(true);
 
   const { activeAuditors } = useFloorPresence(assignmentId);
+  const { itemMaster } = useInventory();
+
+  // Live tiles computed from the loaded items: an item counts in a sub-location only while
+  // its NET quantity there is not 0. (The server activity list counted every sub-location an
+  // item had EVER been scanned in, so after a Physical Qty upload moved items to other
+  // sub-locations the old ones stayed on the board.) Falls back to the server list when the
+  // items for this assignment are not loaded.
+  const liveRows = useMemo<ActivityRow[] | null>(() => {
+    if (!assignmentId || itemMaster.length === 0) return null;
+    if (String(itemMaster[0].assignmentId ?? "") !== String(assignmentId)) return null;
+
+    const tiles = new Map<string, { counted: number; disc: number; last: number }>();
+    for (const item of itemMaster) {
+      const entries: any[] = Array.isArray(item.auditorEntries) ? item.auditorEntries : [];
+      if (entries.length === 0) continue;
+      const per = new Map<string, { qty: number; last: number }>();
+      for (const e of entries) {
+        const name = String(e?.subLocation ?? "").trim();
+        if (!name || name.startsWith("systemUpload:")) continue;
+        const t = e?.auditedAt ? new Date(e.auditedAt).getTime() : 0;
+        const cur = per.get(name);
+        if (cur) { cur.qty += Number(e.quantityFound) || 0; if (t > cur.last) cur.last = t; }
+        else per.set(name, { qty: Number(e.quantityFound) || 0, last: t });
+      }
+      per.forEach((v, name) => {
+        if (v.qty === 0) return;
+        const tile = tiles.get(name) || { counted: 0, disc: 0, last: 0 };
+        tile.counted += 1;
+        if (item.status === "discrepancy") tile.disc += 1;
+        if (v.last > tile.last) tile.last = v.last;
+        tiles.set(name, tile);
+      });
+    }
+    return Array.from(tiles.entries())
+      .map(([sub_location, t]) => ({
+        sub_location,
+        counted_items: t.counted,
+        discrepancies: t.disc,
+        last_activity: t.last ? new Date(t.last).toISOString() : null,
+      }))
+      .sort((a, b) => (b.last_activity || "").localeCompare(a.last_activity || ""));
+  }, [itemMaster, assignmentId]);
+
+  const shownRows = liveRows ?? rows;
 
   const fetchActivity = useCallback(async () => {
     if (!assignmentId) return;
@@ -181,14 +226,14 @@ export const FloorView = ({ assignmentId }: FloorViewProps) => {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           {[1, 2, 3, 4, 5, 6].map((i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
         </div>
-      ) : rows.length === 0 ? (
+      ) : shownRows.length === 0 ? (
         <div className="text-center py-12">
           <Users className="h-8 w-8 text-slate-300 mx-auto mb-2" />
           <p className="text-[13px] text-slate-500">No scanning activity yet for this assignment.</p>
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          {rows.map((row) => {
+          {shownRows.map((row) => {
             const activeHere = activeAuditors.filter(
               (a) => a.subLocation === row.sub_location
             );

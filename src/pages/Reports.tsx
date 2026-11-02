@@ -296,7 +296,11 @@ const Reports = () => {
         variance: variance,
         status: status,
         lastAudited: item.lastAudited || "",
-        auditorEntries: item.auditorEntries || [],
+        // Quantities from older Physical Qty uploads carry an internal "systemUpload:N" tag instead
+        // of a sub-location; show them as plain "General" so reports only ever list real sub-locations.
+        auditorEntries: (item.auditorEntries || []).map((e: any) =>
+          typeof e?.subLocation === 'string' && e.subLocation.startsWith('systemUpload:') ? { ...e, subLocation: 'General' } : e
+        ),
         clientRemarks: item.clientRemarks,
         customAttributes: item.customAttributes || {},
         auditDay: auditDay
@@ -461,14 +465,11 @@ const Reports = () => {
       const subLoc = entry.subLocation || "General";
       summary[subLoc] = (summary[subLoc] || 0) + entry.quantityFound;
     });
-    return Object.entries(summary)
-      .map(([loc, qty]) => {
-        if (loc.startsWith("systemUpload:")) {
-          return loc; // Just return the tag "systemUpload:8" without the extra ": 8"
-        }
-        return `${loc}: ${qty}`;
-      })
-      .join("; ");
+    // Only real sub-locations that still hold a quantity (net 0 = emptied / overwritten).
+    const parts = Object.entries(summary)
+      .filter(([loc, qty]) => !loc.startsWith("systemUpload:") && qty !== 0)
+      .map(([loc, qty]) => `${loc}: ${qty}`);
+    return parts.length > 0 ? parts.join("; ") : "-";
   }, []);
 
   const fitToColumn = (data: any[]) => {
@@ -681,7 +682,7 @@ const Reports = () => {
           subLocMap[subLoc].auditors.add(auditorName);
         });
 
-        Object.entries(subLocMap).forEach(([subLoc, data]) => {
+        (Object.entries(subLocMap).some(([, d]) => d.qty !== 0) ? Object.entries(subLocMap).filter(([, d]) => d.qty !== 0) : Object.entries(subLocMap)).forEach(([subLoc, data]) => {
           reportData.push({
             SKU: item.sku,
             Name: item.name,
@@ -911,7 +912,7 @@ const Reports = () => {
           subLocScannedMap[subLoc] = (subLocScannedMap[subLoc] || 0) + entry.quantityFound;
         });
 
-        Object.entries(subLocMap).forEach(([subLoc, data]) => {
+        (Object.entries(subLocMap).some(([, d]) => d.qty !== 0) ? Object.entries(subLocMap).filter(([, d]) => d.qty !== 0) : Object.entries(subLocMap)).forEach(([subLoc, data]) => {
           subLocDetailsData.push({
             SKU: item.sku,
             Name: item.name,

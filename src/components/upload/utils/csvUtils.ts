@@ -32,15 +32,15 @@ export const processCSV = (csvText: string): CSVRow[] => {
 
 const parsePrice = (val: any): number => {
   if (!val) return 0;
-  
+
   const cleanStr = String(val).replace(/[^0-9.-]+/g, "");
   return parseFloat(cleanStr) || 0;
 };
 
 export const processItemMasterData = (rows: CSVRow[]): Omit<InventoryItem, 'id'>[] => {
-  const seenSkus = new Map<string, number>(); 
+  const seenSkus = new Map<string, number>();
   const duplicates: string[] = [];
-  
+
   const processedItems = rows.map((row, index) => {
     const sku = (row['sku'] || row['item code'] || '').trim();
     if (!sku) {
@@ -62,47 +62,47 @@ export const processItemMasterData = (rows: CSVRow[]): Omit<InventoryItem, 'id'>
     if (!category) {
       throw new Error(`Row ${index + 2} in Item Master is missing 'category' column.`);
     }
-    
+
     const quantityStr = row['systemquantity'] || row['system quantity'] || row['quantity'] || row['qty'] || '0';
     const systemQuantity = parseFloat(quantityStr) || 0;
 
     const reservedKeys = [
-      'sku', 'item code', 
-      'name', 'item name', 'description', 
-      'category', 'type', 
-      'systemquantity', 'system quantity', 'quantity', 'qty', 
+      'sku', 'item code',
+      'name', 'item name', 'description',
+      'category', 'type',
+      'systemquantity', 'system quantity', 'quantity', 'qty',
       'location', 'warehouse', 'store'
     ];
-    
+
     const customAttributes: Record<string, any> = {};
-    
+
     let unitPrice = 0;
     const priceKeywords = ['unit price', 'unit_price', 'price', 'rate', 'cost', 'mrp', 'unit cost'];
 
     Object.keys(row).forEach(key => {
-        if (!reservedKeys.includes(key)) {
-            const value = row[key];
-            if (value !== null && value !== undefined && value !== '') {
-              customAttributes[key] = value;
-            }
-
-            if (priceKeywords.includes(key) && unitPrice === 0) {
-                unitPrice = parsePrice(row[key]);
-            }
+      if (!reservedKeys.includes(key)) {
+        const value = row[key];
+        if (value !== null && value !== undefined && value !== '') {
+          customAttributes[key] = value;
         }
+
+        if (priceKeywords.includes(key) && unitPrice === 0) {
+          unitPrice = parsePrice(row[key]);
+        }
+      }
     });
 
     if (unitPrice > 0) {
-        customAttributes['unit_price'] = unitPrice; 
-        customAttributes['system_value'] = unitPrice * systemQuantity;
-        customAttributes['physical_value'] = 0; 
+      customAttributes['unit_price'] = unitPrice;
+      customAttributes['system_value'] = unitPrice * systemQuantity;
+      customAttributes['physical_value'] = 0;
     }
 
     return {
       sku,
       name,
       category,
-      location: '', 
+      location: '',
       systemQuantity,
       physicalQuantity: null,
       status: 'pending' as const,
@@ -155,29 +155,29 @@ export const processClosingStockData = (
       const quantityStr = row['systemquantity'] || row['system quantity'] || row['quantity'] || row['qty'] || '0';
       const systemQuantity = parseFloat(quantityStr);
       if (isNaN(systemQuantity)) throw new Error(`Row ${index + 2} has invalid quantity.`);
-      
+
       const reservedKeys = ['sku', 'item code', 'name', 'item name', 'description', 'category', 'type', 'systemquantity', 'system quantity', 'quantity', 'qty'];
-      
+
       const customAttributes: Record<string, any> = {};
       let unitPrice = 0;
       const priceKeywords = ['unit price', 'unit_price', 'price', 'rate', 'cost', 'mrp'];
-      
+
       Object.keys(row).forEach(key => {
-         if (!reservedKeys.includes(key)) {
-             const value = row[key];
-             if (value !== null && value !== undefined && value !== '') {
-               customAttributes[key] = value;
-             }
-             
-             if (priceKeywords.includes(key) && unitPrice === 0) {
-                 unitPrice = parsePrice(row[key]);
-             }
-         }
+        if (!reservedKeys.includes(key)) {
+          const value = row[key];
+          if (value !== null && value !== undefined && value !== '') {
+            customAttributes[key] = value;
+          }
+
+          if (priceKeywords.includes(key) && unitPrice === 0) {
+            unitPrice = parsePrice(row[key]);
+          }
+        }
       });
 
       if (unitPrice > 0) {
-         customAttributes['unit_price'] = unitPrice;
-         customAttributes['system_value'] = unitPrice * systemQuantity;
+        customAttributes['unit_price'] = unitPrice;
+        customAttributes['system_value'] = unitPrice * systemQuantity;
       }
 
       if (duplicates.length > 0) {
@@ -214,27 +214,27 @@ export const processClosingStockData = (
       if (!rowLocation) throw new Error(`Admin upload requires 'location' column in row ${index + 2}.`);
 
       const reservedKeys = ['sku', 'item code', 'name', 'item name', 'description', 'category', 'type', 'systemquantity', 'system quantity', 'quantity', 'qty', 'location', 'warehouse', 'store'];
-      
+
       const customAttributes: Record<string, any> = {};
       let unitPrice = 0;
       const priceKeywords = ['unit price', 'unit_price', 'price', 'rate', 'cost', 'mrp'];
-      
+
       Object.keys(row).forEach(key => {
-         if (!reservedKeys.includes(key)) {
-             const value = row[key];
-             if (value !== null && value !== undefined && value !== '') {
-               customAttributes[key] = value;
-             }
-             
-             if (priceKeywords.includes(key) && unitPrice === 0) {
-                 unitPrice = parsePrice(row[key]);
-             }
-         }
+        if (!reservedKeys.includes(key)) {
+          const value = row[key];
+          if (value !== null && value !== undefined && value !== '') {
+            customAttributes[key] = value;
+          }
+
+          if (priceKeywords.includes(key) && unitPrice === 0) {
+            unitPrice = parsePrice(row[key]);
+          }
+        }
       });
-      
+
       if (unitPrice > 0) {
-         customAttributes['unit_price'] = unitPrice;
-         customAttributes['system_value'] = unitPrice * systemQuantity;
+        customAttributes['unit_price'] = unitPrice;
+        customAttributes['system_value'] = unitPrice * systemQuantity;
       }
 
       if (duplicates.length > 0) {
@@ -266,6 +266,8 @@ export interface PhysicalQtyRow {
   name?: string;
   category?: string;
   location?: string;
+  /** Optional: the sub-location (box / row / rack) this quantity was counted in. */
+  subLocation?: string;
 }
 
 export const processPhysicalQtyData = (rows: CSVRow[]): PhysicalQtyRow[] => {
@@ -276,10 +278,17 @@ export const processPhysicalQtyData = (rows: CSVRow[]): PhysicalQtyRow[] => {
     const sku = (row['sku'] || row['item code'] || '').trim();
     if (!sku) throw new Error(`Row ${index + 2}: missing 'sku'`);
 
-    if (seenSkus.has(sku)) {
-      duplicates.push(`SKU "${sku}" appears in row ${seenSkus.get(sku)} and row ${index + 2}`);
+    const subLocation = (
+      row['sub-location'] || row['sub location'] || row['sublocation'] || row['sub_location'] || row['subloc'] || ''
+    ).trim();
+
+    // The same SKU may appear on several rows as long as each row has a
+    // different sub-location; only an identical SKU + sub-location is a duplicate.
+    const dupKey = `${sku}\u0000${subLocation.toLowerCase()}`;
+    if (seenSkus.has(dupKey)) {
+      duplicates.push(`SKU "${sku}"${subLocation ? ` in sub-location "${subLocation}"` : ''} appears in row ${seenSkus.get(dupKey)} and row ${index + 2}`);
     } else {
-      seenSkus.set(sku, index + 2);
+      seenSkus.set(dupKey, index + 2);
     }
 
     const qtyStr = row['physicalquantity'] || row['physical quantity'] || row['qty'] || row['quantity'] || '0';
@@ -292,6 +301,7 @@ export const processPhysicalQtyData = (rows: CSVRow[]): PhysicalQtyRow[] => {
       name: (row['name'] || '').trim() || undefined,
       category: (row['category'] || '').trim() || undefined,
       location: (row['location'] || '').trim() || undefined,
+      subLocation: subLocation || undefined,
     };
   });
 
@@ -299,7 +309,7 @@ export const processPhysicalQtyData = (rows: CSVRow[]): PhysicalQtyRow[] => {
     throw new Error(
       `Duplicate SKUs found in Physical Qty CSV:\n${duplicates.slice(0, 5).join('\n')}` +
       (duplicates.length > 5 ? `\n...and ${duplicates.length - 5} more duplicates` : '') +
-      `\n\nPlease consolidate duplicates into single rows before uploading.`
+      `\n\nPlease consolidate duplicates into single rows before uploading (the same SKU may repeat only with different sub-locations).`
     );
   }
 

@@ -604,9 +604,11 @@ class SupabaseDataService {
   }
 
   public async uploadPhysicalQuantityStock(params: {
-    items: { sku: string; physicalQuantity: number; name?: string; category?: string; location?: string }[];
+    items: { sku: string; physicalQuantity: number; name?: string; category?: string; location?: string; subLocation?: string }[];
     companyId: string;
     assignmentId: number;
+    /** Location of the assignment; new sub-locations named in the sheet are created under it. */
+    locationId?: string | null;
     batchKey: string;
     userId: string;
     userName: string;
@@ -616,7 +618,7 @@ class SupabaseDataService {
     // the original hard validation error — nothing gets silently created.
     approvedNewSkus?: Set<string>;
   }) {
-    const { items, companyId, assignmentId, batchKey, userId, userName, approvedNewSkus } = params;
+    const { items, companyId, assignmentId, locationId, batchKey, userId, userName, approvedNewSkus } = params;
 
     // IMPORTANT: a plain `.select()` returns at most 1000 rows (the API's row limit), so on a
     // large assignment every SKU beyond the first 1000 looked "not found". Look the SKUs up in
@@ -648,69 +650,157 @@ class SupabaseDataService {
     }
 
     const missingSkus: string[] = [];
-
-    // Rows going to the bulk_upsert_inventory_items RPC — same payload
-    // shape whether the row is a merge-into-existing update or a brand
-    // new insert, since the RPC's ON CONFLICT handles both uniformly.
     const payloadRows: any[] = [];
 
+    // ── Sub-locations ───────────────────────────────────────────────────────
+    // The sheet may carry a sub-location per row. Names are matched to the
+    // location's existing sub-locations ignoring case/extra spaces; names that
+    // do not exist yet are collected and created once, below.
+    const subCanon = new Map<string, string>(); // lower-case -> canonical name
+    const newSubNames = new Set<string>();
+    const sheetHasSubLocations = items.some((r) => String(r.subLocation ?? '').trim() !== '');
+    if (sheetHasSubLocations && locationId) {
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase
+          .from('sub_locations')
+          .select('name')
+          .eq('location_id', locationId)
+          .order('name')
+          .range(from, from + 999);
+        if (error) throw error;
+        (data || []).forEach((r: any) => { if (r.name) subCanon.set(String(r.name).trim().toLowerCase(), String(r.name).trim()); });
+        if (!data || data.length < 1000) break;
+      }
+    }
+    const canonSub = (raw: string): string => {
+      const name = raw.trim();
+      const key = name.toLowerCase();
+      const known = subCanon.get(key);
+      if (known) return known;
+      subCanon.set(key, name);
+      newSubNames.add(name);
+      return name;
+    };
+
+    // One sheet SKU can now appear on several rows (one per sub-location).
+    const groups = new Map<string, typeof items>();
     for (const upd of items) {
-      const existing = existingMap.get(String(upd.sku ?? '').trim());
+      const k = String(upd.sku ?? '').trim();
+      const list = groups.get(k);
+      if (list) list.push(upd); else groups.set(k, [upd]);
+    }
+
+    const nowIso = () => new Date().toISOString();
+
+    for (const [skuKey, rows] of groups) {
+      const first = rows[0];
+      const existing = existingMap.get(skuKey);
+
+      // Target quantity per sub-location for this SKU (only when the sheet names any).
+      const withSub = rows.some((r) => String(r.subLocation ?? '').trim() !== '');
+      const targets = new Map<string, { name: string; qty: number }>();
+      if (withSub) {
+        for (const r of rows) {
+          const raw = String(r.subLocation ?? '').trim() || 'General';
+          const name = canonSub(raw);
+          const t = targets.get(name.toLowerCase());
+          if (t) t.qty += r.physicalQuantity; else targets.set(name.toLowerCase(), { name, qty: r.physicalQuantity });
+        }
+      }
+      const totalQty = withSub
+        ? Array.from(targets.values()).reduce((sum, t) => sum + t.qty, 0)
+        : first.physicalQuantity;
 
       if (!existing) {
-        if (!approvedNewSkus?.has(upd.sku)) {
-          missingSkus.push(upd.sku);
+        if (!approvedNewSkus?.has(first.sku)) {
+          missingSkus.push(first.sku);
           continue;
         }
 
-        // Approved new item: nothing to merge into, no prior system
-        // quantity was ever set for it in this assignment.
-        const newEntry = {
-          auditorId: userId || 'unknown',
-          auditorName: userName || 'System',
-          quantityFound: upd.physicalQuantity,
-          auditedAt: new Date().toISOString(),
-          subLocation: `systemUpload:${upd.physicalQuantity}`,
-          batchKey,
-        };
+        // Approved new item: nothing to overwrite, system quantity is 0.
+        const newEntries = withSub
+          ? Array.from(targets.values()).map((t) => ({
+            auditorId: userId || 'unknown',
+            auditorName: userName || 'System',
+            quantityFound: t.qty,
+            auditedAt: nowIso(),
+            subLocation: t.name,
+            batchKey,
+          }))
+          : [{
+            auditorId: userId || 'unknown',
+            auditorName: userName || 'System',
+            quantityFound: first.physicalQuantity,
+            auditedAt: nowIso(),
+            subLocation: `systemUpload:${first.physicalQuantity}`,
+            batchKey,
+          }];
 
         payloadRows.push({
-          sku: upd.sku,
-          name: upd.name || upd.sku,
-          category: upd.category || 'Uncategorised',
-          location: upd.location || 'Unassigned',
+          sku: first.sku,
+          name: first.name || first.sku,
+          category: first.category || 'Uncategorised',
+          location: first.location || 'Unassigned',
           assignment_id: assignmentId,
           system_quantity: 0,
-          physical_quantity: upd.physicalQuantity,
-          status: upd.physicalQuantity === 0 ? 'matched' : 'discrepancy',
-          auditor_entries: [newEntry],
+          physical_quantity: totalQty,
+          status: totalQty === 0 ? 'matched' : 'discrepancy',
+          auditor_entries: newEntries,
           upload_batch_key: batchKey,
         });
         continue;
       }
 
       // Existing item: OVERWRITE. The sheet's quantity becomes the item's
-      // physical quantity — it is no longer added on top of what was already
-      // counted. Existing auditor entries are kept (history), and ONE
-      // adjustment entry is appended so that the entries still add up to the
-      // new quantity. That keeps the per-auditor breakdown and "revert this
-      // upload" (which recalculates from the entries) correct.
+      // physical quantity (it is not added on top of what was counted).
+      // Existing auditor entries are kept as history; adjustment entries are
+      // appended so the entries still add up to the new quantity. That keeps
+      // the per-auditor / per-sub-location breakdown and "revert this upload"
+      // (which recalculates from the entries) correct.
       let entries = existing.auditor_entries;
       if (typeof entries === 'string') entries = JSON.parse(entries);
       if (!Array.isArray(entries)) entries = [];
 
-      const newQty = upd.physicalQuantity;
-      const entriesTotal = entries.reduce((sum: number, e: any) => sum + (Number(e?.quantityFound) || 0), 0);
-      const adjustment = newQty - entriesTotal;
-
-      if (adjustment !== 0) {
-        entries.push({
-          auditorId: userId || 'unknown',
-          auditorName: userName || 'System',
-          quantityFound: adjustment,
-          auditedAt: new Date().toISOString(),
-          subLocation: `systemUpload:${newQty}`,
-          batchKey,
+      if (!withSub) {
+        // No sub-location in the sheet for this SKU: item-level overwrite only.
+        const entriesTotal = entries.reduce((sum: number, e: any) => sum + (Number(e?.quantityFound) || 0), 0);
+        const adjustment = totalQty - entriesTotal;
+        if (adjustment !== 0) {
+          entries.push({
+            auditorId: userId || 'unknown',
+            auditorName: userName || 'System',
+            quantityFound: adjustment,
+            auditedAt: nowIso(),
+            subLocation: `systemUpload:${totalQty}`,
+            batchKey,
+          });
+        }
+      } else {
+        // Sub-location level overwrite: each sub-location named in the sheet gets
+        // exactly the sheet's quantity; sub-locations of this item that the sheet
+        // does not mention are set to 0, so the item total equals the sheet.
+        const current = new Map<string, { name: string; sum: number }>();
+        for (const e of entries) {
+          const rawName = String(e?.subLocation ?? '').trim();
+          const key = rawName.toLowerCase();
+          const c = current.get(key);
+          const q = Number(e?.quantityFound) || 0;
+          if (c) c.sum += q; else current.set(key, { name: rawName, sum: q });
+        }
+        const keys = new Set<string>([...targets.keys(), ...current.keys()]);
+        keys.forEach((key) => {
+          const target = targets.get(key);
+          const cur = current.get(key);
+          const adjustment = (target ? target.qty : 0) - (cur ? cur.sum : 0);
+          if (adjustment === 0) return;
+          entries.push({
+            auditorId: userId || 'unknown',
+            auditorName: userName || 'System',
+            quantityFound: adjustment,
+            auditedAt: nowIso(),
+            subLocation: target ? target.name : (cur?.name ?? ''),
+            batchKey,
+          });
         });
       }
 
@@ -723,8 +813,8 @@ class SupabaseDataService {
         location: existing.location,
         assignment_id: assignmentId,
         system_quantity: existing.system_quantity,
-        physical_quantity: newQty,
-        status: newQty === sysQty ? 'matched' : 'discrepancy',
+        physical_quantity: totalQty,
+        status: totalQty === sysQty ? 'matched' : 'discrepancy',
         auditor_entries: entries,
         upload_batch_key: batchKey,
       });
@@ -732,6 +822,14 @@ class SupabaseDataService {
 
     if (missingSkus.length > 0) {
       throw new Error(`Validation Failed: ${missingSkus.length} SKUs from your sheet were not found in this Assignment's Closing Stock.\nExample SKUs: ${missingSkus.slice(0, 3).join(', ')}.\nEnsure the SKUs perfectly match, or confirm them as new items when prompted.`);
+    }
+
+    // Create sub-locations that did not exist yet (before any item is written, so a
+    // failure here leaves the items untouched).
+    if (newSubNames.size > 0 && locationId && companyId) {
+      for (const name of newSubNames) {
+        await this.createSubLocation({ name, locationId, companyId });
+      }
     }
 
     if (payloadRows.length === 0) return;

@@ -99,6 +99,7 @@ export const ExportPhysicalCountSheet = ({
       "Category",
       ...(hasPricing ? ["Unit Price", "System Value"] : []),
       "Location",
+      "Sub-Location",        // ← optional: fill in to put the quantity under a sub-location
       ...(hideSystemQuantity ? [] : ["System Quantity"]),
       "Physical Quantity",   // ← the editable column
       ...(hideSystemQuantity ? [] : ["Variance"]),
@@ -127,6 +128,7 @@ export const ExportPhysicalCountSheet = ({
         item.category || "",
         ...(hasPricing ? [unitPrice || "", sysValue || ""] : []),
         item.location,
+        "",                                   // Sub-Location (optional, blank = unchanged)
         ...(hideSystemQuantity ? [] : [item.systemQuantity ?? 0]),
         physicalQty,                          // pre-filled if already counted,
         // blank if still pending — either

@@ -6,7 +6,7 @@
 import React, { useState, useEffect, createContext, useContext, useCallback } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { Menu, ScanBarcode, FileSpreadsheet, Upload, Home } from "lucide-react";
+import { Menu, ScanBarcode, FileSpreadsheet, Upload, Home, Search } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useUserAccess } from "@/hooks/useUserAccess";
 import logo from "../../../public/logo.png";
@@ -18,7 +18,7 @@ interface AppLayoutControl {
 
 const AppLayoutContext = createContext<AppLayoutControl>({
   isMounted: false,
-  setSidebarVisible: () => {},
+  setSidebarVisible: () => { },
 });
 
 export const useAppLayoutControl = () => useContext(AppLayoutContext);
@@ -32,8 +32,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   children,
   showSidebar = true,
 }) => {
-  const parentCtx  = useContext(AppLayoutContext);
-  const isMobile   = useIsMobile();
+  const parentCtx = useContext(AppLayoutContext);
+  const isMobile = useIsMobile();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   // ── Auto-hide mobile header after the first scroll ─────────────────
@@ -70,15 +70,16 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  const location   = useLocation();
+  const location = useLocation();
   const { userRole } = useUserAccess();
 
   const [controlledSidebar, setControlledSidebar] = useState(showSidebar);
   const setSidebarVisible = useCallback((v: boolean) => setControlledSidebar(v), []);
 
-  const isActive   = (path: string) => location.pathname === path;
-  const canScan    = ["super_admin", "admin", "auditor"].includes(userRole);
-  const canUpload  = ["super_admin", "admin", "auditor"].includes(userRole);
+  const isActive = (path: string) => location.pathname === path;
+  const canScan = ["super_admin", "admin", "auditor"].includes(userRole);
+  const canUpload = ["super_admin", "admin", "auditor"].includes(userRole);
+  const canSearch = userRole !== "client"; // same rule as the sidebar
 
   useEffect(() => {
     if (parentCtx.isMounted) {
@@ -119,9 +120,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
              only separation from the page content below. Slides off-screen
              when scrolling past the top, slides back in near the top. ── */}
         <div
-          className={`md:hidden sticky top-0 z-30 w-full flex items-center justify-between px-4 min-h-[60px] bg-white border-b border-black/10 transition-transform duration-300 ease-out ${
-            headerVisible ? "translate-y-0" : "-translate-y-full"
-          }`}
+          className={`md:hidden sticky top-0 z-30 w-full flex items-center justify-between px-4 min-h-[60px] bg-white border-b border-black/10 transition-transform duration-300 ease-out ${headerVisible ? "translate-y-0" : "-translate-y-full"
+            }`}
         >
           <div className="flex items-center">
             <img src={logo} alt="StockCheck360" className="h-7 w-auto object-contain" />
@@ -143,9 +143,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
 
             <>
               <div
-                className={`fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden transition-opacity duration-300 ${
-                  mobileOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
-                }`}
+                className={`fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden transition-opacity duration-300 ${mobileOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+                  }`}
                 onClick={() => setMobileOpen(false)}
               />
               <div
@@ -214,6 +213,17 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
               Home
             </Link>
 
+            {canSearch && (
+              <Link
+                to="/search"
+                className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors h-full
+                            ${isActive("/search") ? "text-violet-600" : "text-space-400 hover:text-space-700"}`}
+              >
+                <Search className={`h-5 w-5 ${isActive("/search") ? "text-violet-600" : "text-space-400"}`} />
+                Search
+              </Link>
+            )}
+
             {canScan && (
               <div className="flex-1 flex justify-center relative">
                 <Link
@@ -261,4 +271,4 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
       </div>
     </AppLayoutContext.Provider>
   );
-};   
+};
