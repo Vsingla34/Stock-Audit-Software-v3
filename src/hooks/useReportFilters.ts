@@ -35,6 +35,7 @@ export function useReportFilters() {
   const sortOrder = (searchParams.get("sort") as SortOrder) ?? "default";
   const searchQuery = searchParams.get("q") ?? "";
   const subLocFilter = searchParams.get("subloc") ?? "all";
+  const versionId = searchParams.get("version") ?? "";
 
   /** Internal setter — removes the key when value is the default, to keep URLs clean */
   const setParam = useCallback(
@@ -61,6 +62,7 @@ export function useReportFilters() {
     sortOrder,
     searchQuery,
     subLocFilter,
+    versionId,        // "" = live data, otherwise the id of a saved report version
 
     // Setters
     setStatusFilter: (v: string) => setParam("status", v),
@@ -68,6 +70,7 @@ export function useReportFilters() {
     setSortOrder: (v: string) => setParam("sort", v, "default"),
     setSearchQuery: (v: string) => setParam("q", v, ""),
     setSubLocFilter: (v: string) => setParam("subloc", v),
+    setVersionId: (v: string) => setParam("version", v, ""),
 
     /** Reset all filters back to defaults (clears the URL params) */
     resetFilters: () => {

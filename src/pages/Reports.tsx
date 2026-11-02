@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   Download, FileText, FileType, FileSpreadsheet, Filter, Table as TableIcon,
-  ArrowUpDown, MessageSquare, CheckCheck, Loader2, Send, CalendarDays, MapPin
+  ArrowUpDown, MessageSquare, CheckCheck, Loader2, Send, CalendarDays, MapPin, History
 } from "lucide-react";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
@@ -20,7 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useNavigate } from "react-router-dom";
 import { Label } from "@/components/ui/label";
-import SupabaseDataService from "@/services/SupabaseDataService";
+import SupabaseDataService, { ReportVersionMeta } from "@/services/SupabaseDataService";
 import { useReportFilters } from "@/hooks/useReportFilters";
 import { AIReportSection } from "@/components/reports/AIReportSection";
 
@@ -50,7 +50,7 @@ const Reports = () => {
   const { selectedCompanyId, selectedAssignmentId } = useCompany();
   const [companyName, setCompanyName] = useState<string>("");
 
-  const [items, setItems] = useState<InventoryItem[]>([]);
+  const [liveItems, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(false);
 
   const {
@@ -61,7 +61,19 @@ const Reports = () => {
     setCategoryFilter,
     setSortOrder,
     resetFilters,
+    versionId,
+    setVersionId,
   } = useReportFilters();
+
+  // ── Report versions (admins / super admins) ─────────────────────────────
+  // Every file upload of the assignment is a "version". The report always shows the LIVE data
+  // (scans and searches included). Picking an older file shows the live data as it is with
+  // that file's upload as the last one applied: uploads made after it are taken out.
+  const canViewVersions = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+  const [versions, setVersions] = useState<ReportVersionMeta[]>([]);          // newest first
+  const selectedIdx = canViewVersions && versionId ? versions.findIndex(v => v.id === versionId) : -1;
+  const activeVersion = selectedIdx > 0 ? versions[selectedIdx] : undefined;    // index 0 = latest = plain live data
+  const viewingVersion = !!activeVersion;
 
   const [editingRemark, setEditingRemark] = useState<string | null>(null);
   const [tempRemark, setTempRemark] = useState("");
@@ -87,6 +99,30 @@ const Reports = () => {
       fetchSubLocations(selectedLocation);
     }
   }, [selectedLocation]);
+
+  // Load the uploads of this assignment. If the selected file was deleted from Upload History,
+  // move to the upload before it; if there is none, show the live data as it is.
+  useEffect(() => {
+    let cancelled = false;
+    if (!canViewVersions || !selectedAssignmentId) { setVersions([]); return; }
+    (async () => {
+      const list = await SupabaseDataService.listReportVersions(parseInt(String(selectedAssignmentId), 10));
+      if (cancelled) return;
+      const KEY = "reportVersionTimes";
+      let times: Record<string, string> = {};
+      try { times = JSON.parse(sessionStorage.getItem(KEY) || "{}"); } catch { /* ignore */ }
+      list.forEach(v => { times[v.id] = v.created_at; });
+      try { sessionStorage.setItem(KEY, JSON.stringify(times)); } catch { /* ignore */ }
+      setVersions(list);
+      if (versionId && !list.some(v => v.id === versionId)) {
+        const gone = times[versionId];
+        const older = gone ? list.find(v => new Date(v.created_at) < new Date(gone)) : undefined;
+        setVersionId(older && older.id !== list[0]?.id ? older.id : "");
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canViewVersions, selectedAssignmentId, versionId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -143,8 +179,9 @@ const Reports = () => {
   const isClient = currentUser?.role === 'client';
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
 
-  const canSubmit = currentAssignment?.status === 'active' && (isAuditor || isAdmin);
-  const canFinalize = currentAssignment?.status === 'submitted' && (isClient || isAdmin);
+  // A saved version is a read-only snapshot: no submitting, finalizing or remark edits on it.
+  const canSubmit = !viewingVersion && currentAssignment?.status === 'active' && (isAuditor || isAdmin);
+  const canFinalize = !viewingVersion && currentAssignment?.status === 'submitted' && (isClient || isAdmin);
 
   const handleSubmitClick = async () => {
     if (!selectedAssignmentId) return;
@@ -198,6 +235,29 @@ const Reports = () => {
       setIsVerifyingOtp(false);
     }
   };
+
+  // Live data as of the selected file: take out everything that came from uploads made AFTER it
+  // (their adjustment entries, and the items they created). Scans and searches are kept.
+  const items = useMemo(() => {
+    if (!activeVersion) return liveItems;
+    const newer = new Set(versions.slice(0, selectedIdx).map(v => v.batch_key));
+    const out: InventoryItem[] = [];
+    for (const item of liveItems) {
+      if (item.uploadBatchKey && newer.has(item.uploadBatchKey)) continue;
+      const entries = item.auditorEntries || [];
+      if (!entries.some(e => e.batchKey && newer.has(e.batchKey))) { out.push(item); continue; }
+      const kept = entries.filter(e => !(e.batchKey && newer.has(e.batchKey)));
+      if (kept.length === 0 && !(item.systemQuantity > 0)) continue;
+      const qty = kept.reduce((sum, e) => sum + (Number(e.quantityFound) || 0), 0);
+      out.push({
+        ...item,
+        auditorEntries: kept,
+        physicalQuantity: qty,
+        status: kept.length === 0 ? "pending" : (qty === (item.systemQuantity || 0) ? "matched" : "discrepancy"),
+      });
+    }
+    return out;
+  }, [liveItems, activeVersion, versions, selectedIdx]);
 
   const calculateTotalFromEntries = (item: InventoryItem) => {
     if (!item.auditorEntries || item.auditorEntries.length === 0) return 0;
@@ -416,6 +476,7 @@ const Reports = () => {
   );
 
   const canEditRemarkForItem = (itemLocationName: string) => {
+    if (viewingVersion) return false;
     if (isAdmin) return true;
     if (isClient && currentAssignment?.status === 'submitted') return true;
     return false;
@@ -1095,6 +1156,29 @@ const Reports = () => {
               <p className="text-muted-foreground">Generate and download inventory audit reports with auditor tracking</p>
             </div>
             <div className="flex gap-3 items-center">
+              {canViewVersions && selectedAssignmentId && (
+                <div className="w-[300px] max-w-[60vw]">
+                  <Select
+                    value={selectedIdx > 0 ? versions[selectedIdx].id : (versions[0]?.id ?? "live")}
+                    onValueChange={(v) => setVersionId(v === "live" || v === versions[0]?.id ? "" : v)}
+                  >
+                    <SelectTrigger className="border-gray-200 focus:ring-indigo-600" title="Report version (uploaded file)">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <History className="h-4 w-4 shrink-0" />
+                        <span className="truncate"><SelectValue placeholder="Report version" /></span>
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {versions.length === 0 && <SelectItem value="live">Current report (no file uploads yet)</SelectItem>}
+                      {versions.map((v, i) => (
+                        <SelectItem key={v.id} value={v.id}>
+                          {(v.file_name || `${(v.upload_type || "upload").replace(/_/g, " ")}${v.location_name ? " – " + v.location_name : ""}`)} · {new Date(v.created_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}{i === 0 ? " (latest)" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               {canSubmit && (
                 <Button onClick={handleSubmitClick} disabled={isSubmitting} className="bg-indigo-600 hover:bg-indigo-700 text-white">
                   {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
@@ -1108,6 +1192,16 @@ const Reports = () => {
               )}
             </div>
           </div>
+
+          {viewingVersion && activeVersion && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+              <span>
+                Showing the live data as of <strong>{activeVersion.file_name || (activeVersion.upload_type || "upload").replace(/_/g, " ")}</strong>
+                {" "}({new Date(activeVersion.created_at).toLocaleString("en-IN")}). Uploads made after this file are not included; scans and searches are. Read-only view.
+              </span>
+              <Button size="sm" variant="outline" className="bg-white" onClick={() => setVersionId("")}>Back to latest</Button>
+            </div>
+          )}
 
           {/* ── AI Generated Report ──────────────────────────────────────── */}
           <AIReportSection

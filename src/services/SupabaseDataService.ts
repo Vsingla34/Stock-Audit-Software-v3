@@ -6,6 +6,16 @@ import {
   Assignment,
 } from "@/context/InventoryContext";
 
+export interface ReportVersionMeta {
+  id: string;
+  batch_key: string;
+  upload_type: string | null;
+  file_name: string | null;
+  location_name?: string | null;
+  total_items: number;
+  created_at: string;
+}
+
 class SupabaseDataService {
 
   public currentUser: any = null;
@@ -1104,7 +1114,7 @@ class SupabaseDataService {
 
   public async logUploadBatch(params: any): Promise<void> {
     const { data: { user } } = await supabase.auth.getUser();
-    await supabase.from("inventory_upload_history").insert({
+    const row: any = {
       batch_key: params.batchKey,
       company_id: params.companyId,
       location_id: params.locationId || null,
@@ -1113,7 +1123,39 @@ class SupabaseDataService {
       total_items: params.totalItems,
       uploaded_by: user?.id || null,
       assignment_id: params.assignmentId || null,
-    });
+    };
+    // Remember the uploaded file's name (used by the Reports version dropdown).
+    // If the optional file_name column has not been added yet, log the upload without it.
+    if (params.fileName) {
+      const { error } = await supabase.from("inventory_upload_history").insert({ ...row, file_name: params.fileName } as any);
+      if (!error) return;
+      console.warn("inventory_upload_history.file_name unavailable, logging without it:", error.message);
+    }
+    await supabase.from("inventory_upload_history").insert(row);
+  }
+
+  // ── Report versions ─────────────────────────────────────────────────────
+  // A "version" is simply an upload of the assignment (newest first). The Reports page shows the
+  // LIVE data as of a chosen upload: later uploads are taken out, scans/searches stay.
+  public async listReportVersions(assignmentId: number): Promise<ReportVersionMeta[]> {
+    const { data, error } = await (supabase as any)
+      .from("inventory_upload_history")
+      .select("*")
+      .eq("assignment_id", assignmentId)
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.warn("Report versions unavailable:", error.message);
+      return [];
+    }
+    return (data || []).map((r: any) => ({
+      id: String(r.batch_key),
+      batch_key: String(r.batch_key),
+      upload_type: r.upload_type ?? null,
+      file_name: r.file_name ?? null,
+      location_name: r.location_name ?? null,
+      total_items: Number(r.total_items) || 0,
+      created_at: r.created_at,
+    })) as ReportVersionMeta[];
   }
 
   public async deleteUploadBatch(id: string): Promise<void> {

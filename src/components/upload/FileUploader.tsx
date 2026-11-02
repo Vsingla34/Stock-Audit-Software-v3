@@ -201,6 +201,7 @@ export const FileUploader = ({
         locationId: targetLocationId,
         locationName: locations.find(l => l.id === targetLocationId)?.name || "Unknown",
         uploadType: "physical_quantity",
+        fileName: physicalQtyFile?.name || null,
         totalItems: totalApplied,
         assignmentId: parseInt(selectedAssignmentId),
       });
@@ -328,6 +329,7 @@ export const FileUploader = ({
           ? (locations.find(l => l.id === primaryLocationId)?.name || "Unknown")
           : `Multiple (${tallyParseResult.godowns.length} godowns)`,
         uploadType: "tally_import",
+        fileName: tallyFile?.name || null,
         totalItems: stockItems.length,
         assignmentId: parseInt(selectedAssignmentId),
       });
@@ -459,6 +461,7 @@ export const FileUploader = ({
             locationId: targetLocationId,
             locationName: locations.find(l => l.id === targetLocationId)?.name || "Unknown",
             uploadType: "bulk_surplus",
+            fileName: surplusFile?.name || null,
             totalItems: processedSurplus.length,
             assignmentId: parseInt(selectedAssignmentId)
           });
@@ -502,6 +505,7 @@ export const FileUploader = ({
             locationId: targetLocationId,
             locationName: locations.find(l => l.id === targetLocationId)?.name || "Unknown",
             uploadType: "physical_quantity",
+            fileName: physicalQtyFile?.name || null,
             totalItems: processedPhysical.length,
             assignmentId: parseInt(selectedAssignmentId)
           });
@@ -571,6 +575,7 @@ export const FileUploader = ({
             locationId: targetLocationId,
             locationName: locations.find(l => l.id === targetLocationId)?.name || "Unknown",
             uploadType: "closing_stock",
+            fileName: closingStockFile?.name || null,
             totalItems: enrichedStock.length,
             assignmentId: parseInt(selectedAssignmentId)
           });
